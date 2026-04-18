@@ -1,0 +1,22 @@
+# skill-creator evaluation workspaces — heavy, per-machine, not versioned
+*-workspace/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# OS crud
+.DS_Store
+Thumbs.db
+
+# Editor leftovers
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Test outputs that accidentally landed here
+*.log
+/tmp/
