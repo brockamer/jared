@@ -227,7 +227,7 @@ GitHub issue dependencies are GA. Prefer them over body conventions.
 # Mark issue B blocked by issue A (via the GraphQL API)
 gh api graphql -f query='
   mutation($issueId: ID!, $blockingIssueId: ID!) {
-    addIssueDependency(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
+    addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
       issue { number }
     }
   }' -F issueId=<issue-b-node-id> -F blockingIssueId=<issue-a-node-id>

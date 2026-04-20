@@ -2,9 +2,10 @@
 """
 dependency-graph.py — build and analyze the issue dependency graph.
 
-Reads dependencies from two sources:
-  1. Native GitHub issue dependencies (via GraphQL)
-  2. Body conventions: ## Depends on / ## Blocks sections with #N references
+Reads dependencies with native GitHub `blockedBy` as the primary source;
+falls back to `## Depends on` body-section parsing only when native returns
+nothing for an issue (so narrative prose in that section doesn't override
+canonical edges).
 
 Outputs analysis:
   - Topological order (right sequence if parallelism were infinite)
@@ -59,13 +60,19 @@ def fetch_issue_state(repo: str, number: int) -> str:
         return "UNKNOWN"
 
 
-def fetch_native_dependencies(repo: str, number: int) -> list[int]:
-    """Fetch native issueDependencies (what this issue is blocked by)."""
+def fetch_native_dependencies(repo: str, number: int) -> list[int] | None:
+    """Fetch native blockedBy edges (what this issue is blocked by).
+
+    Returns a list of OPEN dependency numbers on success, or None if the
+    GraphQL call fails (e.g. the repo doesn't have native dependencies
+    enabled). Callers should treat None as "no native data — fall back to
+    body conventions" and an empty list as "native says no dependencies."
+    """
     query = """
     query($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
         issue(number: $number) {
-          issueDependencies(first: 50) {
+          blockedBy(first: 50) {
             nodes { number state }
           }
         }
@@ -82,14 +89,15 @@ def fetch_native_dependencies(repo: str, number: int) -> list[int]:
             "-F", f"number={number}",
         ])
     except RuntimeError:
-        return []
-    deps = (
+        return None
+    issue = (
         result.get("data", {})
         .get("repository", {})
-        .get("issue", {})
-        .get("issueDependencies", {})
-        .get("nodes", [])
+        .get("issue")
     )
+    if issue is None:
+        return None
+    deps = (issue.get("blockedBy") or {}).get("nodes", [])
     return [d["number"] for d in deps if d.get("state") == "OPEN"]
 
 
@@ -123,34 +131,39 @@ def issue_priority(issue: dict) -> str | None:
 
 
 def topological_sort(graph: dict[int, set[int]]) -> tuple[list[int], list[list[int]]]:
-    """Return (topo_order, cycles). Kahn's algorithm."""
-    in_degree = defaultdict(int)
+    """Return (topo_order, cycles). Kahn's algorithm.
+
+    `graph[u] = {v1, v2, ...}` means u depends on v1, v2, ... so each vi must
+    ship before u. Topological order emits a node only after all of its
+    dependencies. For Kahn, we count each node's outstanding dependencies
+    (len(graph[u])) and start with nodes that have zero. Processing a node n
+    decrements the count of anything that depends on n.
+    """
     nodes = set(graph.keys())
     for deps in graph.values():
         nodes.update(deps)
-    for deps in graph.values():
-        for d in deps:
-            in_degree[d] += 1
 
-    # Handle nodes not in graph keys but referenced
+    # Ensure every referenced node is a key so iteration below sees it.
     for n in nodes:
-        if n not in in_degree:
-            in_degree[n] = 0
-        if n not in graph:
-            graph[n] = set()
+        graph.setdefault(n, set())
 
-    queue = deque(n for n in nodes if in_degree[n] == 0)
+    in_degree = {n: len(graph[n]) for n in nodes}
+
+    # Reverse index: blocker -> set of things that depend on it.
+    dependents: dict[int, set[int]] = defaultdict(set)
+    for u, deps in graph.items():
+        for v in deps:
+            dependents[v].add(u)
+
+    queue = deque(sorted(n for n in nodes if in_degree[n] == 0))
     order = []
     while queue:
         n = queue.popleft()
         order.append(n)
-        # Reverse edge: if N depends on D, D must come first. So when D is processed,
-        # subtract from every N that depends on D.
-        for parent, deps in graph.items():
-            if n in deps:
-                in_degree[parent] -= 1
-                if in_degree[parent] == 0:
-                    queue.append(parent)
+        for m in dependents.get(n, ()):
+            in_degree[m] -= 1
+            if in_degree[m] == 0:
+                queue.append(m)
 
     cycles = []
     if len(order) != len(nodes):
@@ -299,16 +312,27 @@ def main() -> int:
 
     for issue in issues:
         n = issue["number"]
-        # Body-convention deps
-        for dep in body_dependencies(issue):
-            graph[n].add(dep)
-        # Native deps
+        # Native edges are canonical when present. Body `## Depends on` sections
+        # may contain narrative prose ("#10 — shipped, #12 — critical path"),
+        # so treat them as a fallback only when native has nothing for this
+        # issue — either the API call failed (None) or returned no edges ([]).
+        native = None
         if not args.no_native:
             try:
-                for dep in fetch_native_dependencies(args.repo, n):
-                    graph[n].add(dep)
+                native = fetch_native_dependencies(args.repo, n)
             except Exception:
-                pass
+                native = None
+
+        if native:
+            for dep in native:
+                graph[n].add(dep)
+        elif native is None or args.no_native:
+            # No native data available — fall back to body-text parsing.
+            for dep in body_dependencies(issue):
+                graph[n].add(dep)
+        # native == [] means "native says this issue has no deps" — don't
+        # second-guess it with stale body text.
+
         # Priority from label
         p = issue_priority(issue)
         if p:

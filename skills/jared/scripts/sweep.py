@@ -164,7 +164,9 @@ def check_metadata(items: list[dict]) -> list[str]:
     missing = []
     for i in items:
         content = i.get("content") or {}
-        if content.get("state") == "CLOSED":
+        # gh project item-list sometimes returns content.state == None for closed
+        # items, so also skip anything the board has already moved to Done.
+        if content.get("state") == "CLOSED" or i.get("status") == "Done":
             continue
         n = content.get("number")
         prio = field(i, "priority")
