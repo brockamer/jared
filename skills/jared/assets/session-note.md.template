@@ -1,0 +1,11 @@
+## Session YYYY-MM-DD
+
+**Progress:** What got done this session, in one to three sentences.
+
+**Decisions:** Material choices made and why. Empty if none. If a significant decision was also added to the issue body's `## Decisions` section, reference it rather than duplicating (e.g., "Added Decision re: Redis vs. Memcached").
+
+**Next action:** The specific concrete next step. Not "continue work" — name the function, the test, the commit, or the question to answer.
+
+**Gotchas:** Anything future-me needs to know that isn't in the code. Empty if none.
+
+**State:** Branch, uncommitted changes, test status, anything operationally fiddly.

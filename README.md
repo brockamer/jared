@@ -1,49 +1,68 @@
 # claude-skills
 
-User-level Claude Code skills, version-controlled.
+A Claude Code plugin that bundles a skill and its matching slash commands.
 
-Each subdirectory is one skill, installed automatically by Claude Code when this
-directory is mapped to `~/.claude/skills/`. Skills activate based on their
-`description` field in SKILL.md's frontmatter — Claude sees the description in
-every session's available-skills list and invokes the skill when its triggers
-match the conversation.
+Currently ships one skill — **jared** — a GitHub Projects v2 steward that
+treats the board as the single source of truth for what's being worked on,
+with a disciplined set of slash commands for filing, grooming, starting,
+wrapping, and structurally reviewing work.
 
 ## Layout
 
 ```
-~/.claude/skills/
-├── README.md                    ← this file
-├── .gitignore                   ← ignores eval workspaces + pycache
-└── <skill-name>/
-    ├── SKILL.md                 ← required: frontmatter (name, description) + body
-    ├── references/              ← optional: detailed how-tos, loaded on demand
-    └── scripts/                 ← optional: executables the skill can invoke
+claude-skills/
+├── .claude-plugin/
+│   └── plugin.json            ← plugin metadata
+├── commands/                  ← slash command stubs
+│   ├── jared.md               ← /jared        — fast read-only status
+│   ├── jared-file.md          ← /jared-file   — file a new issue with full metadata
+│   ├── jared-groom.md         ← /jared-groom  — routine board sweep
+│   ├── jared-init.md          ← /jared-init   — bootstrap Jared on a project
+│   ├── jared-reshape.md       ← /jared-reshape — structural review
+│   ├── jared-start.md         ← /jared-start  — begin work on an issue
+│   └── jared-wrap.md          ← /jared-wrap   — end-of-session handoff
+├── skills/
+│   └── jared/
+│       ├── SKILL.md           ← skill contract + frontmatter
+│       ├── references/        ← detailed references loaded on demand
+│       ├── scripts/           ← executable helpers (sweep.py, bootstrap, etc.)
+│       └── assets/            ← templates (issue body, plan conventions, etc.)
+├── .gitignore
+└── README.md
 ```
 
-## Skills
+## Installing
 
-- **manage-project-board** — steward GitHub Projects v2 boards with PM discipline. Fires on session start, starting/completing work, scope changes, and any `where are we / what's next` moment.
+### Machine-local (via symlinks)
+
+The simplest setup — links the plugin's `skills/` and `commands/` into
+Claude Code's user-level directories:
+
+```bash
+git clone git@github.com:brockamer/claude-skills.git ~/Code/claude-skills
+mkdir -p ~/.claude/skills ~/.claude/commands
+ln -s ~/Code/claude-skills/skills/jared ~/.claude/skills/jared
+for f in ~/Code/claude-skills/commands/*.md; do
+  ln -s "$f" ~/.claude/commands/"$(basename "$f")"
+done
+```
+
+### As a Claude Code plugin
+
+If/when this repo is published to a plugin marketplace, `/plugin install
+jared` will be the preferred path. Until then, the symlink install above
+is equivalent.
 
 ## Authoring new skills
 
-Use the `skill-creator` skill (from the claude-code-setup plugin) to scaffold
-and iterate. Core loop: draft → test cases → user review → iterate.
+Use the `skill-creator` skill (from the claude-code-setup plugin) to
+scaffold and iterate. Core loop: draft → test cases → user review →
+iterate. When a skill has matching slash commands, colocate them in
+`commands/` — the plugin layout pairs them.
 
-## Machine-level vs cross-device use
+## Modifying an existing skill
 
-This repo is cloned into `~/.claude/skills/` on each machine. Claude Code
-auto-discovers whatever's there. Multi-device setup:
-
-```bash
-git clone git@github.com:brockamer/claude-skills.git ~/.claude/skills
-```
-
-Skill-level evaluation workspaces (`*-workspace/`) are gitignored — they hold
-large binary eval artifacts and are per-machine.
-
-## Modifying a skill
-
-Edit in place and commit. Skills load fresh per session, so the next session
-picks up the new version automatically. For non-trivial changes, run eval
-iterations via skill-creator to verify the change didn't regress triggering or
-output quality.
+Edit in place and commit. Claude Code loads skills fresh per session,
+so the next session picks up the new version automatically. For
+non-trivial changes, run eval iterations via skill-creator to verify
+the change didn't regress triggering or output quality.
