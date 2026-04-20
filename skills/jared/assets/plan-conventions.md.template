@@ -1,0 +1,106 @@
+# Plan Conventions
+
+Implementation plans live in `docs/superpowers/plans/`. They are the bridge between a brainstormed spec and the actual commits. This doc describes what every plan must contain so the work is reviewable, doc updates aren't forgotten, post-merge verification has a clear acceptance gate, and the board — not the plan — remains the permanent record.
+
+## Required sections
+
+Every plan must include the sections below. Skipping one is a smell — push back rather than write a plan that hides scope.
+
+### 1. Issue
+
+Every plan cites the issue(s) it implements, by number:
+
+```markdown
+## Issue
+#14 — Add excluded_employers config + prefilter enforcement
+```
+
+Or, when a plan covers multiple issues:
+
+```markdown
+## Issue
+- #14 — primary implementation
+- #23 — discovered scope, filed during design
+```
+
+A plan without an `## Issue` section is orphaned. File the issue first. The issue is the permanent record; the plan is the working artifact that executes against it.
+
+### 2. Goal + scope
+
+One paragraph: what's being built and why. One paragraph: what's intentionally NOT in scope (and links to the issues that cover the deferred work).
+
+### 3. Tasks
+
+Numbered, bite-sized tasks. Each task spells out:
+
+- **Files** to create / modify
+- **Steps** as a checklist
+- **Verification** commands and their expected outputs
+- **Commit message** body
+
+Prescriptive enough that a fresh session can execute the task without re-reading the spec.
+
+### 4. Documentation Impact
+
+**This is a mandatory section, even if the answer is "none."**
+
+For each documentation surface that the work touches, name the file and the change:
+
+- `README.md` — does the install path, tech stack, or quick-start need updating?
+- `docs/setup/*.md` — install / configure / state-migration guides
+- `CLAUDE.md` and `CLAUDE.local.md` — operating context for future sessions
+- `CHANGELOG.md` — user-facing release note entry
+- Spec doc in `docs/superpowers/specs/` — does this plan amend the original spec? Capture material decisions on the issue's `## Decisions` section, not in the spec.
+- In-code docstrings — modules, public functions, role prompt files
+
+If an item belongs to a follow-up issue rather than this plan, name the issue. If no docs are touched, write "None — no user-visible or developer-facing surface changes." Don't leave the section empty.
+
+### 5. Verification gate
+
+The smoke checks, integration tests, or manual validations that must pass before the PR opens. Distinct from per-task verification — this is the whole-feature acceptance gate.
+
+### 6. Self-review checklist
+
+Spec coverage map (every spec section → tasks that implement it), placeholder scan (no `TBD`/`TODO` left), type/contract consistency across files.
+
+## Why "Documentation Impact" is required
+
+Doc drift is silent. Code reviews catch behavioral bugs but rarely catch a stale README, a CLAUDE.md table that lists the wrong scheduler, or a setup guide that points at a removed file. The Documentation Impact section forces the plan author to enumerate every surface before implementing — turning "doc updates" from an afterthought into part of the plan's task list.
+
+Plans that ship code without their corresponding doc updates create rework: the user (or a future session) finds the divergence months later and has to reconstruct what was supposed to change.
+
+## Plan storage and naming
+
+`docs/superpowers/plans/YYYY-MM-DD-short-feature-slug.md` — one plan per feature, dated for ordering. If a plan needs a mid-implementation handoff, use the `-CHECKPOINT.md` suffix and delete it once the next session resumes.
+
+## Relationship to specs
+
+Specs (`docs/superpowers/specs/`) describe **what** and **why** — they are the design + decision-log artifact from brainstorming. Plans describe **how** — concrete tasks with verifications. A spec without a plan can't be executed; a plan without a spec usually means the design wasn't really thought through.
+
+Both specs and plans are working artifacts. The issue is the permanent record. When a plan reveals a flaw in the spec, fix the spec in the same PR (often via a "Decisions made during implementation" subsection appended to the spec doc) — but also capture the decision on the issue's `## Decisions` section, because that's where a future session will look.
+
+## After the plan ships
+
+When the issue(s) referenced in the `## Issue` section close:
+
+1. **The plan archives.** Move the file to `docs/superpowers/plans/archived/YYYY-MM/` (YYYY-MM is the month the issue closed). Prepend a header:
+
+   ```markdown
+   ---
+   **Shipped in #14 on 2026-04-19. Final decisions captured in issue body.**
+   ---
+   ```
+
+2. **The issue's `## Planning` section updates** to point at the archived path.
+
+3. **No further edits to the plan.** It's historical. If implementation decisions need to be recorded, they go on the issue (which is always live), not the plan (which is frozen).
+
+Run `scripts/archive-plan.py --scan --repo <owner>/<repo>` to find and archive all shippable plans. This is a routine step during grooming — Jared proposes the archival and you confirm.
+
+The same rules apply to specs. `docs/superpowers/specs/archived/YYYY-MM/`.
+
+## Why archival matters
+
+A stale plan doc in the active directory looks authoritative. Future sessions find it via search, read it, and build on assumptions that the issue has long since moved past. Archival draws a hard line: anything in `archived/` is historical; anything not is active.
+
+The issue body's `## Decisions` section collects the substance. Archival disposes of the container. Both are necessary.

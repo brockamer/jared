@@ -1,0 +1,98 @@
+# Project Board — How It Works
+
+The GitHub Projects v2 board at [<PROJECT_TITLE>](<PROJECT_URL>) is the **single source of truth for what is being worked on and why**. No markdown tracking files, no separate backlog lists, no TODO.md. If it isn't on the board, it isn't on the roadmap.
+
+This document describes the conventions so anyone (human or Claude session) can triage, prioritize, and move work consistently.
+
+> This template is filled in automatically by `scripts/bootstrap-project.py`. If you're reading this as `<PROJECT_URL>` placeholders, run the script.
+
+## Columns (Status field)
+
+| Column | Meaning |
+|---|---|
+| **Backlog** | Captured but not yet scheduled. |
+| **Up Next** | Scheduled to be picked up next. The on-deck queue. |
+| **In Progress** | Actively being worked on right now. |
+| **Done** | Closed issues. Auto-populated when an issue closes. |
+
+**Rules:**
+
+- In Progress stays small. More than ~3 items means focus is scattered.
+- Up Next is ordered — top item is what gets worked next. Priority field breaks ties.
+- Nothing in In Progress without Priority and Work Stream set.
+- When an issue closes, it moves to Done automatically.
+
+## Priority field
+
+| Value | Meaning |
+|---|---|
+| **High** | Directly advances the current strategic goal. Addressed before Medium. |
+| **Medium** | Quality, efficiency, or reliability improvement. Important but not urgent. |
+| **Low** | Nice-to-have, future-facing, or optional. Safe to defer indefinitely. |
+
+**Rules:**
+
+- Every open issue must have a Priority set.
+- High is scarce by design — if everything is High, nothing is.
+
+## Work Stream field
+
+(Define work streams specific to this project.)
+
+**Rules:**
+
+- Work streams describe the kind of work, not its priority or status.
+- Every open issue belongs to exactly one work stream.
+
+## Labels
+
+Labels describe **what kind of issue it is**, not where it lives on the board. Status and priority come from board fields, not labels.
+
+Defaults:
+
+| Label | Meaning |
+|---|---|
+| `bug` | Something isn't working |
+| `enhancement` | New capability |
+| `refactor` | Restructuring without behavior change |
+| `documentation` | Docs-only change |
+| `blocked` | Waiting on a dependency (must pair with `## Blocked by` in body) |
+
+## Triage — new issue
+
+1. **Auto-add to board.** `gh issue create` does not auto-add; use `gh project item-add <N> --owner <OWNER> --url <URL>`.
+2. **Set Priority.**
+3. **Set Work Stream.**
+4. **Leave Status as Backlog** unless explicitly scheduling.
+5. **Apply labels** for issue type and scope.
+
+An issue without Priority and Work Stream sorts to the bottom and disappears.
+
+## Fields reference (bootstrap output)
+
+```
+Project ID:           <PROJECT_ID>
+Status field ID:      <STATUS_FIELD_ID>
+Priority field ID:    <PRIORITY_FIELD_ID>
+Work Stream field ID: <WORK_STREAM_FIELD_ID>
+
+Status options:
+  Backlog:     <BACKLOG_OPTION_ID>
+  Up Next:     <UP_NEXT_OPTION_ID>
+  In Progress: <IN_PROGRESS_OPTION_ID>
+  Done:        <DONE_OPTION_ID>
+
+Priority options:
+  High:        <HIGH_OPTION_ID>
+  Medium:      <MEDIUM_OPTION_ID>
+  Low:         <LOW_OPTION_ID>
+```
+
+## Further conventions
+
+This file covers the board itself. See the Jared skill's references for:
+
+- `references/human-readable-board.md` — title/body templates
+- `references/board-sweep.md` — grooming checklist
+- `references/plan-spec-integration.md` — if this project uses plan/spec artifacts
+- `references/session-continuity.md` — Session note format
