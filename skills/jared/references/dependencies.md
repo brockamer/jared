@@ -16,7 +16,7 @@ DEPENDENT_ID=$(gh issue view <B> --repo <owner>/<repo> --json id --jq '.id')
 # Mark B blocked by A
 gh api graphql -f query='
   mutation($issueId: ID!, $blockingIssueId: ID!) {
-    addIssueDependency(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
+    addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
       issue { number }
     }
   }' -F issueId="$DEPENDENT_ID" -F blockingIssueId="$BLOCKER_ID"
@@ -31,10 +31,10 @@ gh api graphql -f query='
       issue(number: $number) {
         number
         title
-        dependencies: issueDependencies(first: 20) {
+        blockedBy(first: 20) {
           nodes { number title state }
         }
-        dependents: issueDependents(first: 20) {
+        blocking(first: 20) {
           nodes { number title state }
         }
       }
@@ -47,7 +47,7 @@ gh api graphql -f query='
 ```bash
 gh api graphql -f query='
   mutation($issueId: ID!, $blockingIssueId: ID!) {
-    removeIssueDependency(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
+    removeBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
       issue { number }
     }
   }' -F issueId=<dependent-id> -F blockingIssueId=<blocker-id>
