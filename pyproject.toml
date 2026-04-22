@@ -28,7 +28,6 @@ target-version = "py311"
 # cleanup happens, so Phase 2 lint passes don't surface pre-existing findings.
 extend-exclude = [
     "skills/jared/scripts/archive-plan.py",
-    "skills/jared/scripts/capture-context.py",
 ]
 
 [tool.ruff.lint]
