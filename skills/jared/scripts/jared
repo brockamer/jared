@@ -4,23 +4,29 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
-# Make sibling lib/ importable regardless of cwd
+# Make sibling lib/ importable regardless of cwd. mypy can't follow the
+# sys.path manipulation, so the import itself gets a type-ignore; the real
+# types are still enforced inside lib.board.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from lib.board import Board, ItemNotFound  # type: ignore[import-not-found]  # noqa: E402
 
-SUBCOMMANDS = [
+
+STUB_SUBCOMMANDS = [
     "file",
     "move",
     "set",
     "close",
     "comment",
     "blocked-by",
-    "get-item",
     "summary",
 ]
+ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,12 +42,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(
         dest="cmd",
         required=True,
-        metavar="{" + ",".join(SUBCOMMANDS) + "}",
+        metavar="{" + ",".join(ALL_SUBCOMMANDS) + "}",
     )
 
-    for name in SUBCOMMANDS:
+    for name in STUB_SUBCOMMANDS:
         p = sub.add_parser(name, help=f"(stub) {name}")
         p.set_defaults(func=_stub_factory(name))
+
+    get_item = sub.add_parser(
+        "get-item",
+        help="Return JSON: issue number, item-id, and project field values.",
+    )
+    get_item.add_argument("issue_number", type=int)
+    get_item.set_defaults(func=_cmd_get_item)
 
     return parser
 
@@ -52,6 +65,41 @@ def _stub_factory(name: str):  # type: ignore[no-untyped-def]
         return 2
 
     return run
+
+
+def _cmd_get_item(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    try:
+        item_id = board.find_item_id(args.issue_number)
+    except ItemNotFound as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    data = board.run_gh([
+        "project", "item-list",
+        str(board.project_number),
+        "--owner", board.owner,
+        "--limit", "500",
+        "--format", "json",
+    ])
+    empty: dict[str, Any] = {}
+    match: dict[str, Any] = next(
+        (
+            item for item in data.get("items", [])
+            if (item.get("content") or {}).get("number") == args.issue_number
+        ),
+        empty,
+    )
+    excluded = {"id", "content"}
+    output = {
+        "issue_number": args.issue_number,
+        "item_id": item_id,
+        "status": match.get("status"),
+        "priority": match.get("priority"),
+        "fields": {k: v for k, v in match.items() if k not in excluded},
+    }
+    print(json.dumps(output, indent=2))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
