@@ -1,0 +1,531 @@
+#!/usr/bin/env python3
+"""jared — unified CLI for common Jared (GitHub Projects v2) operations."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+# Make sibling lib/ importable regardless of cwd. mypy can't follow the
+# sys.path manipulation, so the import itself gets a type-ignore; the real
+# types are still enforced inside lib.board.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    Board,
+    FieldNotFound,
+    GhInvocationError,
+    ItemNotFound,
+    OptionNotFound,
+)
+
+ALL_SUBCOMMANDS = [
+    "get-item",
+    "summary",
+    "set",
+    "move",
+    "close",
+    "comment",
+    "file",
+    "blocked-by",
+]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="jared",
+        description="jared — GitHub Projects v2 board operations.",
+    )
+    parser.add_argument(
+        "--board",
+        default="docs/project-board.md",
+        help="Path to project-board.md (default: docs/project-board.md)",
+    )
+    sub = parser.add_subparsers(
+        dest="cmd",
+        required=True,
+        metavar="{" + ",".join(ALL_SUBCOMMANDS) + "}",
+    )
+
+    get_item = sub.add_parser(
+        "get-item",
+        help="Return JSON: issue number, item-id, and project field values.",
+    )
+    get_item.add_argument("issue_number", type=int)
+    get_item.set_defaults(func=_cmd_get_item)
+
+    summary = sub.add_parser("summary", help="One-screen board status summary.")
+    summary.set_defaults(func=_cmd_summary)
+
+    set_p = sub.add_parser("set", help="Set a single-select field on an issue.")
+    set_p.add_argument("issue_number", type=int)
+    set_p.add_argument("field_name", help='e.g. "Priority" or "Status"')
+    set_p.add_argument("value", help='e.g. "High" or "In Progress"')
+    set_p.set_defaults(func=_cmd_set)
+
+    move = sub.add_parser(
+        "move",
+        help="Move an issue to a new Status (Backlog/Up Next/In Progress/Blocked/Done).",
+    )
+    move.add_argument("issue_number", type=int)
+    move.add_argument("status", help='e.g. "In Progress"')
+    move.set_defaults(func=_cmd_move)
+
+    close_p = sub.add_parser(
+        "close",
+        help="Close issue + verify/force auto-move to Done.",
+    )
+    close_p.add_argument("issue_number", type=int)
+    close_p.set_defaults(func=_cmd_close)
+
+    comment = sub.add_parser("comment", help="Add a comment to an issue.")
+    comment.add_argument("issue_number", type=int)
+    comment.add_argument(
+        "--body-file",
+        required=True,
+        help='Path to markdown file, or "-" for stdin.',
+    )
+    comment.set_defaults(func=_cmd_comment)
+
+    file_p = sub.add_parser(
+        "file",
+        help="File a new issue + add to board + set fields atomically.",
+    )
+    file_p.add_argument("--title", required=True)
+    file_p.add_argument("--body-file", required=True)
+    file_p.add_argument("--priority", required=True, choices=["High", "Medium", "Low"])
+    file_p.add_argument("--status", help="Status column (default: Backlog)")
+    file_p.add_argument("--label", action="append", help="Issue label (repeatable)")
+    file_p.add_argument(
+        "--field",
+        action="append",
+        help="NAME=VALUE for additional single-select fields "
+        '(e.g. "Work Stream=Planning"). Repeatable.',
+    )
+    file_p.set_defaults(func=_cmd_file)
+
+    dep = sub.add_parser(
+        "blocked-by",
+        help="Mark (or --remove) a blocked-by dependency edge between issues.",
+    )
+    dep.add_argument("dependent", type=int, help="Issue number that is blocked")
+    dep.add_argument("blocker", type=int, help="Issue number doing the blocking")
+    dep.add_argument(
+        "--remove",
+        action="store_true",
+        help="Remove the edge instead of adding it.",
+    )
+    dep.set_defaults(func=_cmd_blocked_by)
+
+    return parser
+
+
+def _cmd_get_item(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    try:
+        item_id = board.find_item_id(args.issue_number)
+    except ItemNotFound as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    data = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
+    empty: dict[str, Any] = {}
+    match: dict[str, Any] = next(
+        (
+            item
+            for item in data.get("items", [])
+            if (item.get("content") or {}).get("number") == args.issue_number
+        ),
+        empty,
+    )
+    excluded = {"id", "content"}
+    output = {
+        "issue_number": args.issue_number,
+        "item_id": item_id,
+        "status": match.get("status"),
+        "priority": match.get("priority"),
+        "fields": {k: v for k, v in match.items() if k not in excluded},
+    }
+    print(json.dumps(output, indent=2))
+    return 0
+
+
+def _cmd_move(args: argparse.Namespace) -> int:
+    # Shortcut: set Status=<status>. Synthesize the attrs _cmd_set reads.
+    args.field_name = "Status"
+    args.value = args.status
+    return _cmd_set(args)
+
+
+_CLOSE_VERIFY_ATTEMPTS = 3
+_CLOSE_VERIFY_SLEEP_SECS = 1.0
+
+
+def _cmd_close(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+
+    board.run_gh(
+        [
+            "issue",
+            "close",
+            str(args.issue_number),
+            "--repo",
+            board.repo,
+        ]
+    )
+
+    # GitHub auto-moves closed issues to Done via its board workflow, but
+    # the propagation is eventually-consistent. Poll a few times before
+    # falling back to an explicit Status=Done via _cmd_set.
+    for _ in range(_CLOSE_VERIFY_ATTEMPTS):
+        data = board.run_gh(
+            [
+                "project",
+                "item-list",
+                str(board.project_number),
+                "--owner",
+                board.owner,
+                "--limit",
+                "500",
+                "--format",
+                "json",
+            ]
+        )
+        match: dict[str, Any] | None = next(
+            (
+                i
+                for i in data.get("items", [])
+                if (i.get("content") or {}).get("number") == args.issue_number
+            ),
+            None,
+        )
+        if match and match.get("status") == "Done":
+            print(f"OK: closed #{args.issue_number}, board auto-moved to Done")
+            return 0
+        time.sleep(_CLOSE_VERIFY_SLEEP_SECS)
+
+    args.field_name = "Status"
+    args.value = "Done"
+    rc = _cmd_set(args)
+    if rc == 0:
+        print(f"OK: closed #{args.issue_number} (manual move to Done)")
+    return rc
+
+
+def _cmd_file(args: argparse.Namespace) -> int:
+    """Atomic: create issue, add to project, set Priority + Status + extras, verify.
+
+    Implements the 'new issue must land on board with Status set' invariant
+    (see memory: jared file must guarantee project membership + status).
+    Any failure halts before the user's workflow moves on.
+    """
+    board = Board.from_path(Path(args.board))
+    status = args.status or "Backlog"
+
+    # Pre-resolve all field/option IDs before we touch GitHub. Fails fast on
+    # misconfigured board without creating an orphan issue.
+    try:
+        prio_field = board.field_id("Priority")
+        prio_option = board.option_id("Priority", args.priority)
+        status_field = board.field_id("Status")
+        status_option = board.option_id("Status", status)
+        extra_edits: list[tuple[str, str, str]] = []
+        for spec in args.field or []:
+            if "=" not in spec:
+                print(
+                    f"error: --field expects NAME=VALUE, got {spec!r}",
+                    file=sys.stderr,
+                )
+                return 1
+            name, value = spec.split("=", 1)
+            extra_edits.append((name, board.field_id(name), board.option_id(name, value)))
+    except (FieldNotFound, OptionNotFound) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    # 1. Create the issue. gh prints the URL on stdout.
+    create_args = [
+        "issue",
+        "create",
+        "--repo",
+        board.repo,
+        "--title",
+        args.title,
+        "--body-file",
+        args.body_file,
+    ]
+    for label in args.label or []:
+        create_args.extend(["--label", label])
+    try:
+        issue_url = board.run_gh_raw(create_args)
+    except GhInvocationError as e:
+        print(f"error: gh issue create failed: {e}", file=sys.stderr)
+        return 2
+    if not issue_url.startswith("http"):
+        print(f"error: unexpected gh issue create output: {issue_url[:200]}", file=sys.stderr)
+        return 2
+    issue_number = int(issue_url.rsplit("/", 1)[-1])
+
+    # 2. Add to the project board.
+    try:
+        add_data = board.run_gh(
+            [
+                "project",
+                "item-add",
+                str(board.project_number),
+                "--owner",
+                board.owner,
+                "--url",
+                issue_url,
+                "--format",
+                "json",
+            ]
+        )
+    except GhInvocationError as e:
+        print(
+            f"error: filed issue #{issue_number} but failed to add to project: {e}",
+            file=sys.stderr,
+        )
+        return 2
+    item_id = add_data["id"]
+
+    # 3. Set Priority + Status + extras in order.
+    for field_id, option_id in [
+        (prio_field, prio_option),
+        (status_field, status_option),
+        *[(f, o) for _, f, o in extra_edits],
+    ]:
+        board.run_gh(
+            [
+                "project",
+                "item-edit",
+                "--project-id",
+                board.project_id,
+                "--id",
+                item_id,
+                "--field-id",
+                field_id,
+                "--single-select-option-id",
+                option_id,
+            ]
+        )
+
+    # 4. Verification: re-read the item and assert it's on the project with Status set.
+    # This is the post-create invariant from the level-up feedback.
+    verify = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
+    seen = next(
+        (
+            i
+            for i in verify.get("items", [])
+            if (i.get("content") or {}).get("number") == issue_number
+        ),
+        None,
+    )
+    if seen is None:
+        print(
+            f"error: filed issue #{issue_number} but post-create verification "
+            f"could not find it on project {board.project_number}",
+            file=sys.stderr,
+        )
+        return 2
+    if not seen.get("status"):
+        print(
+            f"error: filed issue #{issue_number} is on the project but Status "
+            f"is null. This is the regression the level-up guards against.",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"OK: filed #{issue_number} → {status}, Priority={args.priority}")
+    print(f"URL: {issue_url}")
+    return 0
+
+
+def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
+    data = board.run_gh(
+        [
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            board.repo,
+            "--json",
+            "id",
+        ]
+    )
+    node_id: str = data["id"]
+    return node_id
+
+
+def _cmd_blocked_by(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    try:
+        dep_id = _resolve_issue_node_id(board, args.dependent)
+        blocker_id = _resolve_issue_node_id(board, args.blocker)
+    except GhInvocationError as e:
+        print(f"error: could not resolve issue node IDs: {e}", file=sys.stderr)
+        return 2
+
+    mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
+    query = (
+        "mutation($issueId: ID!, $blockingIssueId: ID!) { "
+        f"  {mutation_name}("
+        "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
+        "  ) { issue { number } }"
+        "}"
+    )
+    try:
+        board.run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
+    except GhInvocationError as e:
+        print(f"error: {mutation_name} failed: {e}", file=sys.stderr)
+        return 2
+
+    action = "removed" if args.remove else "added"
+    print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}")
+    return 0
+
+
+def _cmd_comment(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
+
+    # gh issue comment requires a file path, even when we got the body
+    # from stdin — write a temp file, invoke, clean up.
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
+        tf.write(body)
+        tmp_path = tf.name
+    try:
+        board.run_gh(
+            [
+                "issue",
+                "comment",
+                str(args.issue_number),
+                "--repo",
+                board.repo,
+                "--body-file",
+                tmp_path,
+            ]
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    print(f"OK: commented on #{args.issue_number}")
+    return 0
+
+
+def _cmd_set(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    try:
+        item_id = board.find_item_id(args.issue_number)
+        field_id = board.field_id(args.field_name)
+        option_id = board.option_id(args.field_name, args.value)
+    except (ItemNotFound, FieldNotFound, OptionNotFound) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    board.run_gh(
+        [
+            "project",
+            "item-edit",
+            "--project-id",
+            board.project_id,
+            "--id",
+            item_id,
+            "--field-id",
+            field_id,
+            "--single-select-option-id",
+            option_id,
+        ]
+    )
+    print(f"OK: set {args.field_name}={args.value} on issue #{args.issue_number}")
+    return 0
+
+
+def _cmd_summary(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    data = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
+    items: list[dict[str, Any]] = data.get("items", [])
+
+    def by_status(status: str) -> list[dict[str, Any]]:
+        return [i for i in items if i.get("status") == status]
+
+    def render_item(item: dict[str, Any], *, with_priority: bool = True) -> str:
+        content = item.get("content") or {}
+        num = content.get("number")
+        title = content.get("title", "")
+        if with_priority:
+            prio = item.get("priority") or "-"
+            return f"  #{num} [{prio}] {title}"
+        return f"  #{num} {title}"
+
+    in_progress = by_status("In Progress")
+    up_next_all = by_status("Up Next")
+    up_next = up_next_all[:3]
+    blocked = by_status("Blocked")
+
+    print(f"Board: {board.project_url}")
+    print()
+    print(f"In Progress ({len(in_progress)}):")
+    for it in in_progress:
+        print(render_item(it))
+    print()
+    print(f"Up Next (top 3 of {len(up_next_all)}):")
+    for it in up_next:
+        print(render_item(it))
+    if blocked:
+        print()
+        print(f"Blocked ({len(blocked)}):")
+        for it in blocked:
+            print(render_item(it, with_priority=False))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    result: int = args.func(args)
+    return result
+
+
+if __name__ == "__main__":
+    sys.exit(main())

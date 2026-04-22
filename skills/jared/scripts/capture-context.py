@@ -22,16 +22,26 @@ Usage:
 
 Each invocation prepares a diff and confirms before applying unless --yes.
 """
+
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import difflib
-import json
 import re
-import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
+# Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    run_gh as board_run_gh,
+)
+from lib.board import (
+    run_gh_raw as board_run_gh_raw,
+)
 
 SECTION_ORDER = [
     "Current state",
@@ -44,26 +54,21 @@ SECTION_ORDER = [
 
 
 def fetch_body(repo: str, number: int) -> str:
-    result = subprocess.run(
-        ["gh", "issue", "view", str(number), "--repo", repo, "--json", "body"],
-        capture_output=True, text=True, check=True,
-    )
-    return json.loads(result.stdout)["body"] or ""
+    data = board_run_gh(["issue", "view", str(number), "--repo", repo, "--json", "body"])
+    return data.get("body") or ""
 
 
 def write_body(repo: str, number: int, body: str) -> None:
-    # Use --body-file with stdin via a temp file for safety
-    import tempfile, os
+    # gh issue edit --body-file requires a path, so stage the new body in a
+    # temp file and clean up after. No atomic-write trickery needed — the
+    # temp file isn't the issue body; gh reads it and POSTs the contents.
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(body)
         path = f.name
     try:
-        subprocess.run(
-            ["gh", "issue", "edit", str(number), "--repo", repo, "--body-file", path],
-            check=True,
-        )
+        board_run_gh_raw(["issue", "edit", str(number), "--repo", repo, "--body-file", path])
     finally:
-        os.unlink(path)
+        Path(path).unlink(missing_ok=True)
 
 
 # ---------- Body parsing ----------
@@ -110,9 +115,7 @@ def split_sections(body: str) -> tuple[str, dict[str, str], list[str]]:
     return preamble, sections, order
 
 
-def replace_section_body(
-    section_text: str, new_body_lines: str
-) -> str:
+def replace_section_body(section_text: str, new_body_lines: str) -> str:
     """Replace everything after the ## heading line with new_body_lines."""
     lines = section_text.splitlines(keepends=True)
     if not lines:
@@ -189,8 +192,17 @@ def main() -> int:
     parser.add_argument("--issue", type=int, required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--current-state", help="Replace ## Current state section body")
-    parser.add_argument("--decision", action="append", default=[], help="Append a Decision (can pass multiple)")
-    parser.add_argument("--show", action="store_true", help="Print current Current state / Decisions and exit")
+    parser.add_argument(
+        "--decision",
+        action="append",
+        default=[],
+        help="Append a Decision (can pass multiple)",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Print current Current state / Decisions and exit",
+    )
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--dry-run", action="store_true", help="Show diff without writing")
     args = parser.parse_args()
@@ -208,7 +220,10 @@ def main() -> int:
         return 0
 
     if not args.current_state and not args.decision:
-        print("capture-context: nothing to do. Pass --current-state and/or --decision.", file=sys.stderr)
+        print(
+            "capture-context: nothing to do. Pass --current-state and/or --decision.",
+            file=sys.stderr,
+        )
         return 1
 
     if args.current_state:
@@ -223,12 +238,14 @@ def main() -> int:
         return 0
 
     # Show diff
-    diff = "".join(difflib.unified_diff(
-        body.splitlines(keepends=True),
-        new_body.splitlines(keepends=True),
-        fromfile=f"#{args.issue} (current)",
-        tofile=f"#{args.issue} (new)",
-    ))
+    diff = "".join(
+        difflib.unified_diff(
+            body.splitlines(keepends=True),
+            new_body.splitlines(keepends=True),
+            fromfile=f"#{args.issue} (current)",
+            tofile=f"#{args.issue} (new)",
+        )
+    )
     print(diff)
 
     if args.dry_run:

@@ -18,18 +18,28 @@ By default, prompts before applying. Pass --yes to skip prompts.
 
 Also updates the issue's ## Planning section to point at the archived path.
 """
+
 from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
 import re
-import subprocess
 import sys
 import tempfile
-import os
 from pathlib import Path
 
+# Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    GhInvocationError,
+)
+from lib.board import (
+    run_gh as board_run_gh,
+)
+from lib.board import (
+    run_gh_raw as board_run_gh_raw,
+)
 
 DEFAULT_PLAN_DIRS = [
     Path("docs/superpowers/plans"),
@@ -43,22 +53,17 @@ DEFAULT_PLAN_DIRS = [
 def issue_state(repo: str, number: int) -> tuple[str, str | None]:
     """Return (state, closed_at) for an issue."""
     try:
-        result = subprocess.run(
-            ["gh", "issue", "view", str(number), "--repo", repo, "--json", "state,closedAt"],
-            capture_output=True, text=True, check=True,
+        data = board_run_gh(
+            ["issue", "view", str(number), "--repo", repo, "--json", "state,closedAt"]
         )
-        data = json.loads(result.stdout)
         return data.get("state", "UNKNOWN"), data.get("closedAt")
-    except Exception:
+    except GhInvocationError:
         return "UNKNOWN", None
 
 
 def fetch_issue_body(repo: str, number: int) -> str:
-    result = subprocess.run(
-        ["gh", "issue", "view", str(number), "--repo", repo, "--json", "body"],
-        capture_output=True, text=True, check=True,
-    )
-    return json.loads(result.stdout).get("body") or ""
+    data = board_run_gh(["issue", "view", str(number), "--repo", repo, "--json", "body"])
+    return data.get("body") or ""
 
 
 def write_issue_body(repo: str, number: int, body: str) -> None:
@@ -66,12 +71,9 @@ def write_issue_body(repo: str, number: int, body: str) -> None:
         f.write(body)
         path = f.name
     try:
-        subprocess.run(
-            ["gh", "issue", "edit", str(number), "--repo", repo, "--body-file", path],
-            check=True,
-        )
+        board_run_gh_raw(["issue", "edit", str(number), "--repo", repo, "--body-file", path])
     finally:
-        os.unlink(path)
+        Path(path).unlink(missing_ok=True)
 
 
 # ---------- Plan parsing ----------
@@ -181,9 +183,7 @@ def archive_one(
     return str(dest)
 
 
-def update_planning_section(
-    repo: str, number: int, old_path: Path, new_path: Path
-) -> None:
+def update_planning_section(repo: str, number: int, old_path: Path, new_path: Path) -> None:
     """Update the issue's ## Planning section to point at the archived path."""
     body = fetch_issue_body(repo, number)
     # Replace old path references with new path
@@ -225,10 +225,17 @@ def scan_and_archive(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--plan", help="Single plan file to archive")
-    parser.add_argument("--scan", action="store_true", help="Scan plan/spec dirs and archive shippable ones")
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Scan plan/spec dirs and archive shippable ones",
+    )
     parser.add_argument("--repo", required=True, help="Repo slug (owner/repo)")
-    parser.add_argument("--plan-dir", action="append",
-                        help="Plan dir to scan (can pass multiple). Default: docs/superpowers/plans + specs")
+    parser.add_argument(
+        "--plan-dir",
+        action="append",
+        help="Plan dir to scan (can pass multiple). Default: docs/superpowers/plans + specs",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
     args = parser.parse_args()

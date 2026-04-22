@@ -15,6 +15,7 @@ Usage:
 The output file will not be overwritten if it already exists unless --force is
 passed; instead, the script writes to <output>.new and shows a diff.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,10 +23,18 @@ import datetime as dt
 import difflib
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
+# Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    GhInvocationError,
+)
+from lib.board import (
+    run_gh as board_run_gh,
+)
 
 STANDARD_FIELDS = {
     "Status": ["Backlog", "Up Next", "In Progress", "Done"],
@@ -37,21 +46,13 @@ STANDARD_FIELDS = {
 # ---------- gh helpers ----------
 
 
-def run_gh(args: list[str]) -> dict | list:
-    """Run a gh command and return parsed JSON."""
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"{' '.join(args)} failed: {result.stderr.strip()}")
-    return json.loads(result.stdout) if result.stdout.strip() else {}
-
-
 def parse_url(url: str) -> tuple[str, str, str]:
     """Return (owner_type, owner, project_number) from a projects v2 URL."""
-    m = re.match(
-        r"https://github\.com/(users|orgs)/([A-Za-z0-9_-]+)/projects/(\d+)/?", url
-    )
+    m = re.match(r"https://github\.com/(users|orgs)/([A-Za-z0-9_-]+)/projects/(\d+)/?", url)
     if not m:
-        raise RuntimeError(f"URL must be like https://github.com/(users|orgs)/<n>/projects/<N>: got {url}")
+        raise RuntimeError(
+            f"URL must be like https://github.com/(users|orgs)/<n>/projects/<N>: got {url}"
+        )
     return m.group(1), m.group(2), m.group(3)
 
 
@@ -59,11 +60,11 @@ def parse_url(url: str) -> tuple[str, str, str]:
 
 
 def fetch_project(owner: str, number: str) -> dict:
-    return run_gh(["gh", "project", "view", number, "--owner", owner, "--format", "json"])
+    return board_run_gh(["project", "view", number, "--owner", owner, "--format", "json"])
 
 
 def fetch_fields(owner: str, number: str) -> list[dict]:
-    data = run_gh(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"])
+    data = board_run_gh(["project", "field-list", number, "--owner", owner, "--format", "json"])
     return data.get("fields", [])
 
 
@@ -103,9 +104,7 @@ def prompt_work_streams() -> list[str]:
     return streams
 
 
-def create_single_select_field(
-    project_id: str, name: str, options: list[str]
-) -> dict:
+def create_single_select_field(project_id: str, name: str, options: list[str]) -> dict:
     """
     Create a single-select field with the given options via GraphQL.
     Returns the created field's details.
@@ -133,18 +132,26 @@ def create_single_select_field(
       }
     }
     """
-    result = run_gh([
-        "gh", "api", "graphql",
-        "-f", f"query={query}",
-        "-F", f"projectId={project_id}",
-        "-F", f"name={name}",
-        "-F", f"options={options_arg}",
-    ])
-    field = (
-        result.get("data", {})
-        .get("createProjectV2Field", {})
-        .get("projectV2Field", {})
+    # Use board_run_gh directly (not board_run_graphql) because the options
+    # variable is a JSON-typed list — it must go through `-F` so gh parses it
+    # as a structured value. board_run_graphql's simple kwargs flag-picker
+    # sends non-primitive strings through `-f`, which would pass it as a raw
+    # string literal and fail the GraphQL type check.
+    result = board_run_gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-F",
+            f"projectId={project_id}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"options={options_arg}",
+        ]
     )
+    field = result.get("data", {}).get("createProjectV2Field", {}).get("projectV2Field", {})
     if not field:
         raise RuntimeError(f"Field creation for {name!r} returned no data: {result}")
     return field
@@ -156,11 +163,41 @@ def create_single_select_field(
 TEMPLATE = """\
 # Project Board — How It Works
 
-The GitHub Projects v2 board at [{project_title}]({project_url}) is the **single source of truth for what is being worked on and why**. No markdown tracking files, no separate backlog lists, no TODO.md. If it isn't on the board, it isn't on the roadmap.
+<!-- Machine-readable metadata — jared scripts parse this. Do not reorder or
+     rename the fields below. The narrative docs after the field blocks are
+     for humans; jared ignores them. Re-run bootstrap-project.py after any
+     schema change to keep this file in sync. -->
 
-This document describes the conventions so anyone (human or Claude session) can triage, prioritize, and move work consistently.
+- Project URL: {project_url}
+- Project number: {project_number}
+- Project ID: {project_id}
+- Owner: {owner}
+- Repo: {repo}
 
-**Bootstrapped by Jared on {bootstrap_date}.** If you rename fields or add options, re-run `scripts/bootstrap-project.py --url {project_url} --repo {repo}` or edit this file directly.
+### Status
+- Field ID: {status_field_id}
+{status_options_kv}
+
+### Priority
+- Field ID: {priority_field_id}
+{priority_options_kv}
+
+### Work Stream
+- Field ID: {work_stream_field_id}
+{work_stream_options_kv}
+
+<!-- End machine-readable block — narrative docs follow. -->
+
+The GitHub Projects v2 board at [{project_title}]({project_url}) is the **single source of
+truth for what is being worked on and why**. No markdown tracking files, no separate
+backlog lists, no TODO.md. If it isn't on the board, it isn't on the roadmap.
+
+This document describes the conventions so anyone (human or Claude session) can triage,
+prioritize, and move work consistently.
+
+**Bootstrapped by Jared on {bootstrap_date}.** If you rename fields or add options,
+re-run `scripts/bootstrap-project.py --url {project_url} --repo {repo}` or edit this
+file directly.
 
 ## Columns (Status field)
 
@@ -194,7 +231,8 @@ This document describes the conventions so anyone (human or Claude session) can 
 
 ## Labels
 
-Labels describe **what kind of issue it is**, not where it lives on the board. Status and priority come from board fields, not labels.
+Labels describe **what kind of issue it is**, not where it lives on the board. Status
+and priority come from board fields, not labels.
 
 Suggested defaults (create via `gh label create` as needed):
 
@@ -206,13 +244,15 @@ Suggested defaults (create via `gh label create` as needed):
 | `documentation` | Docs-only change |
 | `blocked` | Waiting on a dependency (must pair with `## Blocked by` in body) |
 
-Project-specific scope labels (e.g., `infra`, `frontend`, `customer-facing`) belong here too — add them as needed.
+Project-specific scope labels (e.g., `infra`, `frontend`, `customer-facing`) belong here
+too — add them as needed.
 
 ## Triage checklist — new issue
 
 When a new issue is filed:
 
-1. **Auto-add to board.** `gh issue create` does not auto-add; use `gh project item-add {project_number} --owner {owner} --url <issue-url>`.
+1. **Auto-add to board.** `gh issue create` does not auto-add; use
+   `gh project item-add {project_number} --owner {owner} --url <issue-url>`.
 2. **Set Priority** — High / Medium / Low.
 3. **Set Work Stream** — per the fields above.
 4. **Leave Status as Backlog** unless explicitly scheduling.
@@ -260,6 +300,19 @@ def options_block(field: dict | None) -> str:
     for opt in field.get("options", []):
         lines.append(f"  {opt['name']}: {' ' * max(0, 20 - len(opt['name']))}{opt['id']}")
     return "\n".join(lines) + "\n"
+
+
+def options_kv_block(field: dict | None) -> str:
+    """Render a field's options as `- <name>: <id>` lines, one per option.
+
+    This is the machine-readable form Board._parse_field_blocks consumes:
+    any line matching ``- <name>: <non-whitespace-token>`` inside a
+    ``### FieldName`` section becomes a (name → option_id) entry.
+    """
+    if not field:
+        return "- (field not present)"
+    lines = [f"- {opt['name']}: {opt['id']}" for opt in field.get("options", [])]
+    return "\n".join(lines) if lines else "- (no options defined)"
 
 
 def status_table(field: dict | None) -> str:
@@ -321,12 +374,28 @@ def option_id(field: dict | None, name: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--url", required=True, help="GitHub Project v2 URL")
-    parser.add_argument("--repo", required=True, help="Repo slug (owner/repo) this board is paired with")
-    parser.add_argument("--output", default="docs/project-board.md", help="Output path (default: docs/project-board.md)")
+    parser.add_argument(
+        "--repo",
+        required=True,
+        help="Repo slug (owner/repo) this board is paired with",
+    )
+    parser.add_argument(
+        "--output",
+        default="docs/project-board.md",
+        help="Output path (default: docs/project-board.md)",
+    )
     parser.add_argument("--wip-limit", type=int, default=3)
-    parser.add_argument("--no-create", action="store_true", help="Don't offer to create missing fields")
+    parser.add_argument(
+        "--no-create",
+        action="store_true",
+        help="Don't offer to create missing fields",
+    )
     parser.add_argument("--force", action="store_true", help="Overwrite existing output file")
-    parser.add_argument("--non-interactive", action="store_true", help="Skip prompts (for automation)")
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Skip prompts (for automation)",
+    )
     args = parser.parse_args()
 
     try:
@@ -339,7 +408,7 @@ def main() -> int:
     try:
         project = fetch_project(owner, number)
         fields = fetch_fields(owner, number)
-    except RuntimeError as e:
+    except (RuntimeError, GhInvocationError) as e:
         print(f"bootstrap: {e}", file=sys.stderr)
         return 1
 
@@ -380,7 +449,7 @@ def main() -> int:
                     status = find_single_select_field(fields, "Status") or status
                     priority = find_single_select_field(fields, "Priority") or priority
                     work_stream = find_single_select_field(fields, "Work Stream") or work_stream
-                except RuntimeError as e:
+                except (RuntimeError, GhInvocationError) as e:
                     print(f"    Failed: {e}")
     elif missing:
         print(f"  Note: {[m[0] for m in missing]} missing — skipped creation.")
@@ -401,6 +470,9 @@ def main() -> int:
         status_field_id=status.get("id", "<unset>") if status else "<unset>",
         priority_field_id=priority.get("id", "<unset>") if priority else "<unset>",
         work_stream_field_id=work_stream.get("id", "<unset>") if work_stream else "<unset>",
+        status_options_kv=options_kv_block(status),
+        priority_options_kv=options_kv_block(priority),
+        work_stream_options_kv=options_kv_block(work_stream),
         status_options_block=options_block(status),
         priority_options_block=options_block(priority),
         work_stream_options_block=options_block(work_stream),
@@ -436,8 +508,8 @@ def main() -> int:
     print()
     print("Next steps:")
     print(f"  1. Review {output} and fill in work-stream scope descriptions if needed.")
-    print(f"  2. Run `scripts/sweep.py` to see any existing drift.")
-    print(f"  3. If this project uses plan/spec artifacts, see references/plan-spec-integration.md.")
+    print("  2. Run `scripts/sweep.py` to see any existing drift.")
+    print("  3. If this project uses plan/spec artifacts, see references/plan-spec-integration.md.")
     return 0
 
 

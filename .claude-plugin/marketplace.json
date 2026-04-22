@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "jared-marketplace",
+  "description": "Single-plugin marketplace for jared — GitHub Projects v2 board steward.",
+  "owner": {
+    "name": "Daniel Brock",
+    "email": "brockamer@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "jared",
+      "description": "Steward a GitHub Projects v2 board as the single source of truth. Files, moves, grooms, and structurally reviews issues with discipline.",
+      "source": ".",
+      "category": "development",
+      "homepage": "https://github.com/brockamer/jared"
+    }
+  ]
+}

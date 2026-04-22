@@ -9,7 +9,7 @@ Follow the Seven Questions in `references/structural-review.md`:
 1. **Shape** — one coherent project, or would 2+ boards serve better? See `references/new-board.md` for split criteria.
 2. **Phasing** — items correctly tied to phases/releases? Orphans? Implicit phases not yet named?
 3. **Milestones** — exist, dated, meaningful names, Roadmap view renders? See `references/milestones-and-roadmap.md`.
-4. **Dependencies** — build graph via `~/.claude/skills/jared/scripts/dependency-graph.py`. Cycles? Inversions? Long fragile chains?
+4. **Dependencies** — build graph via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo>`. Cycles? Inversions? Long fragile chains?
 5. **Metadata drift** — sweep findings classified: real drift vs. noise.
 6. **Deliverables** — each milestone has a one-sentence deliverable proving it's done?
 7. **Future arc** — what's the next 6–12 months beyond the current horizon?

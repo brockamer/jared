@@ -1,68 +1,82 @@
-# claude-skills
+# Jared
 
-A Claude Code plugin that bundles a skill and its matching slash commands.
+Claude Code plugin: a GitHub Projects v2 board steward. Treats the board
+as the single source of truth for what's being worked on. Files, moves,
+grooms, and structurally reviews issues with discipline.
 
-Currently ships one skill — **jared** — a GitHub Projects v2 steward that
-treats the board as the single source of truth for what's being worked on,
-with a disciplined set of slash commands for filing, grooming, starting,
-wrapping, and structurally reviewing work.
+## Install
+
+```
+/plugin marketplace add brockamer/jared
+/plugin install jared
+```
+
+Then in any project with a `docs/project-board.md`, use `/jared` for a fast
+status, or one of the workflow commands: `/jared-file`, `/jared-start`,
+`/jared-groom`, `/jared-wrap`, `/jared-reshape`, `/jared-init`.
+
+If the project has no `docs/project-board.md` yet, run `/jared-init` to
+bootstrap it against an existing (or new) GitHub Projects v2 board.
+
+## Developing
+
+This plugin lives at `~/Code/jared/`. For active development, install from
+the local checkout:
+
+```
+/plugin marketplace remove jared-marketplace
+/plugin marketplace add file:///home/brockamer/Code/jared
+/plugin install jared
+```
+
+After editing files under `~/Code/jared/`, run `/plugin update jared` to
+re-sync the plugin cache, then `/reload-plugins` to reload. Claude Code
+copies plugins into `~/.claude/plugins/cache/` at install time — edits to
+the source are not picked up until you re-sync. (See
+[plugin-marketplaces docs][pm].)
+
+[pm]: https://code.claude.com/docs/en/plugin-marketplaces.md
+
+## Testing
+
+```
+pytest                  # unit tests (fast, offline)
+pytest -m integration   # integration tests (runs against the testbed
+                        # in brockamer/jared-testbed; requires
+                        # tests/testbed.env configured)
+```
+
+See `tests/testbed-setup.md` for testbed setup.
 
 ## Layout
 
 ```
-claude-skills/
-├── .claude-plugin/
-│   └── plugin.json            ← plugin metadata
-├── commands/                  ← slash command stubs
-│   ├── jared.md               ← /jared        — fast read-only status
-│   ├── jared-file.md          ← /jared-file   — file a new issue with full metadata
-│   ├── jared-groom.md         ← /jared-groom  — routine board sweep
-│   ├── jared-init.md          ← /jared-init   — bootstrap Jared on a project
-│   ├── jared-reshape.md       ← /jared-reshape — structural review
-│   ├── jared-start.md         ← /jared-start  — begin work on an issue
-│   └── jared-wrap.md          ← /jared-wrap   — end-of-session handoff
-├── skills/
-│   └── jared/
-│       ├── SKILL.md           ← skill contract + frontmatter
-│       ├── references/        ← detailed references loaded on demand
-│       ├── scripts/           ← executable helpers (sweep.py, bootstrap, etc.)
-│       └── assets/            ← templates (issue body, plan conventions, etc.)
-├── .gitignore
-└── README.md
+.claude-plugin/
+  plugin.json           Plugin metadata
+  marketplace.json      Self-hosted marketplace manifest
+commands/               Slash-command stubs (7 of them)
+skills/jared/
+  SKILL.md              Skill contract
+  references/           Detail docs loaded on demand
+  scripts/              jared CLI + batch tools
+    jared               Unified CLI: file, move, set, close, comment,
+                        blocked-by, get-item, summary
+    lib/board.py        Shared helper: board parsing, gh wrapper,
+                        item-id lookup
+    sweep.py            Routine grooming sweep
+    bootstrap-project.py  Introspect a board; write docs/project-board.md
+    dependency-graph.py  Render issue-dependency graph
+    capture-context.py   Append Session notes / Decisions to issue body
+    archive-plan.py      Archive a completed plan doc
+  assets/               Templates (issue body, session note, etc.)
+tests/                  pytest suite
+docs/superpowers/       Specs and plans for this plugin's own work
 ```
 
-## Installing
+## Versioning
 
-### Machine-local (via symlinks)
+Semantic versioning in `plugin.json`. Git tag `v<x.y.z>` per release.
 
-The simplest setup — links the plugin's `skills/` and `commands/` into
-Claude Code's user-level directories:
+## License
 
-```bash
-git clone git@github.com:brockamer/claude-skills.git ~/Code/claude-skills
-mkdir -p ~/.claude/skills ~/.claude/commands
-ln -s ~/Code/claude-skills/skills/jared ~/.claude/skills/jared
-for f in ~/Code/claude-skills/commands/*.md; do
-  ln -s "$f" ~/.claude/commands/"$(basename "$f")"
-done
-```
-
-### As a Claude Code plugin
-
-If/when this repo is published to a plugin marketplace, `/plugin install
-jared` will be the preferred path. Until then, the symlink install above
-is equivalent.
-
-## Authoring new skills
-
-Use the `skill-creator` skill (from the claude-code-setup plugin) to
-scaffold and iterate. Core loop: draft → test cases → user review →
-iterate. When a skill has matching slash commands, colocate them in
-`commands/` — the plugin layout pairs them.
-
-## Modifying an existing skill
-
-Edit in place and commit. Claude Code loads skills fresh per session,
-so the next session picks up the new version automatically. For
-non-trivial changes, run eval iterations via skill-creator to verify
-the change didn't regress triggering or output quality.
+MIT.

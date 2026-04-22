@@ -124,4 +124,4 @@ After filing or editing, read the first 100 characters. Can you tell:
 
 Any No, rewrite.
 
-Read in list view (`gh issue list` output). Fits on one line? If not, trim.
+Read in list view (`jared summary` or `gh issue list`). Fits on one line? If not, trim.

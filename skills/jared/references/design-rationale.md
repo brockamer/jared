@@ -34,7 +34,7 @@ Skills fit all four. CLAUDE.md is passive; memory is associative; hooks are blun
 
 ## Why user-level, not project-level
 
-Jared lives at `~/.claude/skills/jared/`, not in any single project's repo.
+Jared installs as a user-scope Claude Code plugin (`/plugin install jared`), not into any single project's repo. At runtime the plugin files resolve through `${CLAUDE_PLUGIN_ROOT}`.
 
 - **Portability.** Applies to every project you touch, not just one.
 - **Single source of truth for the discipline.** Procedure improvements benefit every project.
