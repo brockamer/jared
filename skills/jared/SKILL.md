@@ -31,15 +31,32 @@ This file is the contract. It holds: project URL and IDs, field and option IDs (
 
 **If no convention doc exists and you're about to do board work, stop and run the bootstrap flow** (see "Bootstrapping a new project" below). A board without a documented convention is a board that will drift, and Jared has opinions about drift.
 
-## Tool selection — MCP first, `gh` as fallback
+## Tool selection — the three tiers
 
-Before operating on the board, check what's available:
+For any board operation, pick the right tier:
 
-1. Call `tool_search` for GitHub / issues / projects tools. If an MCP server (e.g., the official GitHub MCP) exposes typed tools for issues and projects v2, prefer those — they're schema-aware, agent-friendly, and don't require shelling out.
-2. If MCP tools aren't loaded, fall back to the `gh` CLI. See `references/operations.md` for the command reference.
-3. The bundled scripts (`sweep.py`, `bootstrap-project.py`, `dependency-graph.py`, `capture-context.py`) use `gh` because Python subprocesses can't call MCP tools. That's fine — scripts handle batch jobs; conversational work picks the best tool at runtime.
+**Tier 1 — single-call conversational ops.** Comment on an issue, close an issue, read an issue body, set one field. Prefer the GitHub MCP plugin's typed tools (`add_issue_comment`, `update_issue`, `issue_read`, `update_project_item_field_value`, etc.) when loaded. If MCP is absent, fall back to `jared <cmd>` below. Raw `gh` is a last resort.
 
-This means SKILL.md and references show `gh` commands as the concrete example, but if MCP is available, the call is "use the equivalent MCP tool" with the same semantics.
+**Tier 2 — multi-step orchestrations.** Any operation that would take more than one underlying call: filing an issue (create + add-to-board + set fields), moving an issue (lookup item-id + set Status), closing with verification (close + confirm auto-move), dependency edges (resolve both node-IDs + graphql mutation). Always use the `jared` CLI:
+
+```
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." --body-file - --priority High
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName>
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file -
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>     # JSON lookup helper
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary          # fast one-screen status
+```
+
+See `references/jared-cli.md` for the full subcommand reference.
+
+**Tier 3 — batch / advisory / setup.** Named batch scripts under `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/`: `sweep.py`, `bootstrap-project.py`, `dependency-graph.py`, `capture-context.py`, `archive-plan.py`. Each has its own slash command; invoke by name via those commands, not directly in conversation.
+
+**Escape hatch.** Raw `gh issue`, `gh project`, `gh api graphql` only for cases none of the above cover. See `references/operations.md` for the reference card.
+
+Jared never reconstructs a multi-step `gh` flow in conversation when a `jared` subcommand exists for it. Reaching for raw `gh` when `jared file` is the right tool is a drift signal.
 
 ## The discipline
 
@@ -69,7 +86,7 @@ Before writing code, editing docs, or making any change with durable effect, con
 
 1. **File it now.** Deferred filing is how scope goes invisible.
 2. If scope is uncertain, ask the user to confirm before filing.
-3. `gh issue create` does NOT auto-add to the board. The second step is mandatory: `gh project item-add`. See `references/operations.md`.
+3. Use `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file ...` (Tier 2). It creates the issue, adds it to the board, sets Priority + Status atomically, and verifies — killing the two-step `gh issue create` / `gh project item-add` footgun. See `references/jared-cli.md`.
 4. Set Priority and any other categorical fields the project defines (e.g., Work Stream on projects that use one) immediately. Issues without required field values sort to the bottom of the board and disappear.
 5. Use the issue body template at `assets/issue-body.md.template`.
 
@@ -103,7 +120,7 @@ See `references/context-capture.md` for the trigger patterns and the helper scri
 
 ### When completing work — close and verify
 
-Close the issue (`gh issue close` or via PR merge). The board should auto-move to Done — verify it actually did.
+Close via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>` — the CLI closes the issue and polls for the board's auto-move to Done, falling back to an explicit `Status=Done` set if the auto-move hasn't fired. A PR merge closes the issue too; same verification applies, so re-run `jared close` (idempotent) or `jared summary` to confirm the item landed in Done.
 
 After close, Jared asks two questions:
 
@@ -184,7 +201,7 @@ See `references/human-readable-board.md` for title/body templates and `assets/is
 When invoked against a repo that has no `docs/project-board.md`:
 
 1. Confirm with the user which GitHub project this repo should be paired with (ask for URL).
-2. Run `scripts/bootstrap-project.py --url <project-url> --repo <owner>/<repo>` to introspect the board's field schema via `gh project field-list` and emit a filled-in convention doc at `docs/project-board.md`.
+2. Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py --url <project-url> --repo <owner>/<repo>` to introspect the board's field schema and emit a filled-in convention doc at `docs/project-board.md`. The doc includes a machine-readable header block that the `jared` CLI reads for field/option IDs — don't hand-edit that block.
 3. If the project is fresh (no fields beyond defaults), offer to create Status (Backlog / Up Next / In Progress / Done) and Priority (High / Medium / Low). Optionally offer a Work Stream field — useful for projects with multiple distinct categories of work, overkill for small/single-domain projects where labels can do the same job.
 4. Optionally scaffold `docs/plan-conventions.md` and an issue template if the project wants Superpowers-style planning artifacts.
 
@@ -209,7 +226,7 @@ See `references/new-board.md` for the full bootstrap flow and `assets/project-bo
 Triggers handle most invocations. Slash commands exist for explicit, guaranteed invocation:
 
 - **`/jared`** — fast status: In Progress + top 3 Up Next + blocked + aging. Read-only.
-- **`/jared-file`** — guided issue filing with both `gh issue create` and `gh project item-add` plus fields set. Kills the two-step footgun.
+- **`/jared-file`** — guided issue filing. Delegates to `jared file` (Tier 2) which creates the issue, adds it to the board, sets Priority + Status + any extra single-select fields, and verifies — killing the two-step footgun.
 - **`/jared-start <issue-ref>`** — begin work: move to In Progress, load context, announce the session plan.
 - **`/jared-wrap`** — end session: Session notes, drift reconciliation, discovered-scope filing, plan archival proposals.
 - **`/jared-groom`** — routine sweep: metadata, WIP, aging, blocked, pullable check, plan/spec drift, label hygiene. Proposes, you approve.
@@ -222,7 +239,8 @@ Detailed `gh` / MCP command reference: `references/operations.md`. Covers file, 
 
 ## Reference pointers
 
-- `references/operations.md` — CLI and MCP command reference
+- `references/jared-cli.md` — subcommand-by-subcommand reference for the `jared` CLI (Tier 2)
+- `references/operations.md` — raw `gh` escape-hatch card (Tier 3)
 - `references/structural-review.md` — the Seven Questions for periodic deep review
 - `references/board-sweep.md` — grooming checklist
 - `references/dependencies.md` — dependency graph routine
