@@ -24,11 +24,8 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     OptionNotFound,
 )
 
-STUB_SUBCOMMANDS = [
-    "blocked-by",
-]
+STUB_SUBCOMMANDS: list[str] = []
 ALL_SUBCOMMANDS = [
-    *STUB_SUBCOMMANDS,
     "get-item",
     "summary",
     "set",
@@ -36,6 +33,7 @@ ALL_SUBCOMMANDS = [
     "close",
     "comment",
     "file",
+    "blocked-by",
 ]
 
 
@@ -117,6 +115,19 @@ def build_parser() -> argparse.ArgumentParser:
         '(e.g. "Work Stream=Planning"). Repeatable.',
     )
     file_p.set_defaults(func=_cmd_file)
+
+    dep = sub.add_parser(
+        "blocked-by",
+        help="Mark (or --remove) a blocked-by dependency edge between issues.",
+    )
+    dep.add_argument("dependent", type=int, help="Issue number that is blocked")
+    dep.add_argument("blocker", type=int, help="Issue number doing the blocking")
+    dep.add_argument(
+        "--remove",
+        action="store_true",
+        help="Remove the edge instead of adding it.",
+    )
+    dep.set_defaults(func=_cmd_blocked_by)
 
     return parser
 
@@ -331,6 +342,45 @@ def _cmd_file(args: argparse.Namespace) -> int:
 
     print(f"OK: filed #{issue_number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
+    return 0
+
+
+def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
+    data = board.run_gh([
+        "issue", "view",
+        str(issue_number),
+        "--repo", board.repo,
+        "--json", "id",
+    ])
+    node_id: str = data["id"]
+    return node_id
+
+
+def _cmd_blocked_by(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    try:
+        dep_id = _resolve_issue_node_id(board, args.dependent)
+        blocker_id = _resolve_issue_node_id(board, args.blocker)
+    except GhInvocationError as e:
+        print(f"error: could not resolve issue node IDs: {e}", file=sys.stderr)
+        return 2
+
+    mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
+    query = (
+        "mutation($issueId: ID!, $blockingIssueId: ID!) { "
+        f"  {mutation_name}("
+        "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
+        "  ) { issue { number } }"
+        "}"
+    )
+    try:
+        board.run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
+    except GhInvocationError as e:
+        print(f"error: {mutation_name} failed: {e}", file=sys.stderr)
+        return 2
+
+    action = "removed" if args.remove else "added"
+    print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}")
     return 0
 
 
