@@ -19,7 +19,7 @@ def test_summary_groups_by_status(
             '"status": "Up Next", "priority": "Medium"},'
             '{"id": "c", "content": {"number": 3, "title": "Issue three"}, '
             '"status": "Backlog", "priority": "Low"}'
-            ']}'
+            "]}"
         ),
     )
 
@@ -46,7 +46,7 @@ def test_summary_shows_blocked_section(
             '{"items": ['
             '{"id": "a", "content": {"number": 6, "title": "Stuck thing"}, '
             '"status": "Blocked", "priority": "High"}'
-            ']}'
+            "]}"
         ),
     )
 

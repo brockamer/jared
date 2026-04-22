@@ -45,11 +45,16 @@ def test_comment_invokes_issue_comment_with_body_file(
     calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
 
     mod = import_cli()
-    rc = mod.main([
-        "--board", str(board_md),
-        "comment", "42",
-        "--body-file", str(body_file),
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body-file",
+            str(body_file),
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 0, captured.err
@@ -68,11 +73,16 @@ def test_comment_from_stdin(
     monkeypatch.setattr("sys.stdin", StringIO("comment from stdin"))
 
     mod = import_cli()
-    rc = mod.main([
-        "--board", str(board_md),
-        "comment", "42",
-        "--body-file", "-",
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body-file",
+            "-",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 0, captured.err

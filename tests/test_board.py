@@ -9,7 +9,8 @@ def test_parse_project_board_md(tmp_path: Path) -> None:
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         # Project board
 
         - Project URL: https://github.com/users/brockamer/projects/7
@@ -22,7 +23,8 @@ def test_parse_project_board_md(tmp_path: Path) -> None:
 
         - Status (field ID: PVTSSF_status): Backlog, Up Next, In Progress, Done, Blocked
         - Priority (field ID: PVTSSF_prio): High, Medium, Low
-        """))
+        """)
+    )
 
     board = Board.from_path(board_md)
 
@@ -46,7 +48,8 @@ def test_field_and_option_lookup(tmp_path: Path) -> None:
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         - Project URL: https://github.com/users/brockamer/projects/7
         - Project number: 7
         - Project ID: PVT_kwHO_xyz
@@ -68,7 +71,8 @@ def test_field_and_option_lookup(tmp_path: Path) -> None:
         - High: OPTION_high
         - Medium: OPTION_med
         - Low: OPTION_low
-        """))
+        """)
+    )
 
     board = Board.from_path(board_md)
 
@@ -83,13 +87,15 @@ def test_unknown_field_raises(tmp_path: Path) -> None:
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         - Project URL: https://github.com/users/brockamer/projects/7
         - Project number: 7
         - Project ID: PVT_kwHO_xyz
         - Owner: brockamer
         - Repo: brockamer/findajob
-        """))
+        """)
+    )
 
     board = Board.from_path(board_md)
     with pytest.raises(FieldNotFound):
@@ -101,7 +107,8 @@ def test_unknown_option_raises(tmp_path: Path) -> None:
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         - Project URL: https://github.com/users/brockamer/projects/7
         - Project number: 7
         - Project ID: PVT_kwHO_xyz
@@ -111,7 +118,8 @@ def test_unknown_option_raises(tmp_path: Path) -> None:
         ### Priority
         - Field ID: PVTSSF_prio
         - High: OPTION_high
-        """))
+        """)
+    )
 
     board = Board.from_path(board_md)
     with pytest.raises(OptionNotFound):
@@ -121,13 +129,15 @@ def test_unknown_option_raises(tmp_path: Path) -> None:
 def _minimal_board(tmp_path: Path) -> Path:
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         - Project URL: https://github.com/users/brockamer/projects/7
         - Project number: 7
         - Project ID: PVT_kwHO_xyz
         - Owner: brockamer
         - Repo: brockamer/findajob
-    """))
+    """)
+    )
     return board_md
 
 
@@ -185,7 +195,7 @@ def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
             '{"items": ['
             '{"id": "PVTI_aaa", "content": {"number": 42}},'
             '{"id": "PVTI_bbb", "content": {"number": 99}}'
-            ']}'
+            "]}"
         )
         stderr = ""
 
@@ -201,9 +211,7 @@ def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         b.find_item_id(123456)
 
 
-def test_run_graphql_passes_query_and_vars(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_run_graphql_passes_query_and_vars(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from skills.jared.scripts.lib.board import Board
 
     b = Board.from_path(_minimal_board(tmp_path))

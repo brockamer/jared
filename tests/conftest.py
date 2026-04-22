@@ -58,13 +58,15 @@ def write_minimal_board(tmp_path: Path) -> Path:
     """
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         - Project URL: https://github.com/users/brockamer/projects/7
         - Project number: 7
         - Project ID: PVT_kwHO_xyz
         - Owner: brockamer
         - Repo: brockamer/findajob
-    """))
+    """)
+    )
     return board_md
 
 

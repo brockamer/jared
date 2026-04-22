@@ -43,9 +43,7 @@ class Board:
     @classmethod
     def from_path(cls, path: Path) -> Board:
         if not path.exists():
-            raise BoardConfigError(
-                f"Missing {path}. Run /jared-init to bootstrap the project."
-            )
+            raise BoardConfigError(f"Missing {path}. Run /jared-init to bootstrap the project.")
         text = path.read_text()
         return cls._parse(text, source=str(path))
 
@@ -119,8 +117,7 @@ class Board:
         if option not in options:
             available = ", ".join(sorted(options)) or "(none)"
             raise OptionNotFound(
-                f"Option '{option}' not found for field '{field_name}'. "
-                f"Available: {available}"
+                f"Option '{option}' not found for field '{field_name}'. Available: {available}"
             )
         return options[option]
 
@@ -132,9 +129,7 @@ class Board:
         try:
             return json.loads(stdout)
         except json.JSONDecodeError as e:
-            raise GhInvocationError(
-                f"gh returned non-JSON output: {stdout[:200]}"
-            ) from e
+            raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
 
     def run_gh_raw(self, args: list[str]) -> str:
         """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
@@ -156,13 +151,19 @@ class Board:
 
     def find_item_id(self, issue_number: int) -> str:
         """Look up the ProjectV2Item id for a given issue number on this board."""
-        data = self.run_gh([
-            "project", "item-list",
-            str(self.project_number),
-            "--owner", self.owner,
-            "--limit", "500",
-            "--format", "json",
-        ])
+        data = self.run_gh(
+            [
+                "project",
+                "item-list",
+                str(self.project_number),
+                "--owner",
+                self.owner,
+                "--limit",
+                "500",
+                "--format",
+                "json",
+            ]
+        )
         for item in data.get("items", []):
             content = item.get("content") or {}
             if content.get("number") == issue_number:

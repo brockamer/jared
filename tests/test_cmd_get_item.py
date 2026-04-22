@@ -16,7 +16,7 @@ def test_get_item_prints_json(
             '{"items": ['
             '{"id": "PVTI_aaa", "content": {"number": 42}, '
             '"status": "In Progress", "priority": "High"}'
-            ']}'
+            "]}"
         ),
     )
 

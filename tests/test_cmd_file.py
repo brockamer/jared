@@ -9,7 +9,8 @@ from tests.conftest import FakeGhResult, import_cli
 def _write_full_board(tmp_path: Path) -> Path:
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
-    board_md.write_text(dedent("""\
+    board_md.write_text(
+        dedent("""\
         - Project URL: https://github.com/users/brockamer/projects/7
         - Project number: 7
         - Project ID: PVT_kwHO_xyz
@@ -35,7 +36,8 @@ def _write_full_board(tmp_path: Path) -> Path:
         - Perception: OPTION_perc
         - Planning: OPTION_plan
         - Fleet Ops: OPTION_fleet
-    """))
+    """)
+    )
     return board_md
 
 
@@ -52,16 +54,20 @@ def _routed_fake(
         calls.append(args)
         joined = " ".join(args)
         if "issue create" in joined:
-            return FakeGhResult(stdout=f"https://github.com/brockamer/findajob/issues/{verify_number}\n")
+            return FakeGhResult(
+                stdout=f"https://github.com/brockamer/findajob/issues/{verify_number}\n"
+            )
         if "item-add" in joined:
             return FakeGhResult(stdout='{"id": "PVTI_new"}')
         if "item-list" in joined:
             # Post-create verification: item is on the project with Status set.
-            return FakeGhResult(stdout=(
-                f'{{"items": [{{"id": "PVTI_new", '
-                f'"content": {{"number": {verify_number}}}, '
-                f'"status": "{verify_status}"}}]}}'
-            ))
+            return FakeGhResult(
+                stdout=(
+                    f'{{"items": [{{"id": "PVTI_new", '
+                    f'"content": {{"number": {verify_number}}}, '
+                    f'"status": "{verify_status}"}}]}}'
+                )
+            )
         # item-edit and everything else
         return FakeGhResult(stdout="{}")
 
@@ -81,13 +87,19 @@ def test_file_sequences_create_add_status_priority(
     calls = _routed_fake(monkeypatch)
 
     mod = import_cli()
-    rc = mod.main([
-        "--board", str(board_md),
-        "file",
-        "--title", "Test issue",
-        "--body-file", str(body_file),
-        "--priority", "High",
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test issue",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "High",
+        ]
+    )
     captured = capsys.readouterr()
     assert rc == 0, captured.err
 
@@ -114,15 +126,23 @@ def test_file_with_custom_status_and_extra_field(
     calls = _routed_fake(monkeypatch, verify_status="Up Next")
 
     mod = import_cli()
-    rc = mod.main([
-        "--board", str(board_md),
-        "file",
-        "--title", "Test",
-        "--body-file", str(body_file),
-        "--priority", "Medium",
-        "--status", "Up Next",
-        "--field", "Work Stream=Planning",
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "Medium",
+            "--status",
+            "Up Next",
+            "--field",
+            "Work Stream=Planning",
+        ]
+    )
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     joined_edits = " ".join(" ".join(c) for c in calls if "item-edit" in c)
@@ -145,9 +165,7 @@ def test_file_verification_failure_exits_nonzero(
             return FakeGhResult(stdout='{"id": "PVTI_new"}')
         if "item-list" in joined:
             # Simulated regression: issue is on the board but Status is null
-            return FakeGhResult(
-                stdout='{"items": [{"id": "PVTI_new", "content": {"number": 42}}]}'
-            )
+            return FakeGhResult(stdout='{"items": [{"id": "PVTI_new", "content": {"number": 42}}]}')
         return FakeGhResult(stdout="{}")
 
     monkeypatch.setattr(
@@ -156,13 +174,19 @@ def test_file_verification_failure_exits_nonzero(
     )
 
     mod = import_cli()
-    rc = mod.main([
-        "--board", str(board_md),
-        "file",
-        "--title", "Test",
-        "--body-file", str(body_file),
-        "--priority", "Low",
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "Low",
+        ]
+    )
     captured = capsys.readouterr()
     assert rc != 0
     assert "status" in captured.err.lower() or "verification" in captured.err.lower()
