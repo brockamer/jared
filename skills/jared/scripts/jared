@@ -24,7 +24,6 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     OptionNotFound,
 )
 
-STUB_SUBCOMMANDS: list[str] = []
 ALL_SUBCOMMANDS = [
     "get-item",
     "summary",
@@ -52,10 +51,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="{" + ",".join(ALL_SUBCOMMANDS) + "}",
     )
-
-    for name in STUB_SUBCOMMANDS:
-        p = sub.add_parser(name, help=f"(stub) {name}")
-        p.set_defaults(func=_stub_factory(name))
 
     get_item = sub.add_parser(
         "get-item",
@@ -103,15 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     file_p.add_argument("--title", required=True)
     file_p.add_argument("--body-file", required=True)
-    file_p.add_argument(
-        "--priority", required=True, choices=["High", "Medium", "Low"]
-    )
+    file_p.add_argument("--priority", required=True, choices=["High", "Medium", "Low"])
     file_p.add_argument("--status", help="Status column (default: Backlog)")
     file_p.add_argument("--label", action="append", help="Issue label (repeatable)")
     file_p.add_argument(
         "--field",
         action="append",
-        help='NAME=VALUE for additional single-select fields '
+        help="NAME=VALUE for additional single-select fields "
         '(e.g. "Work Stream=Planning"). Repeatable.',
     )
     file_p.set_defaults(func=_cmd_file)
@@ -132,14 +125,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _stub_factory(name: str):  # type: ignore[no-untyped-def]
-    def run(_args: argparse.Namespace) -> int:
-        print(f"{name}: not implemented yet", file=sys.stderr)
-        return 2
-
-    return run
-
-
 def _cmd_get_item(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
     try:
@@ -148,17 +133,24 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    data = board.run_gh([
-        "project", "item-list",
-        str(board.project_number),
-        "--owner", board.owner,
-        "--limit", "500",
-        "--format", "json",
-    ])
+    data = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
     empty: dict[str, Any] = {}
     match: dict[str, Any] = next(
         (
-            item for item in data.get("items", [])
+            item
+            for item in data.get("items", [])
             if (item.get("content") or {}).get("number") == args.issue_number
         ),
         empty,
@@ -189,26 +181,37 @@ _CLOSE_VERIFY_SLEEP_SECS = 1.0
 def _cmd_close(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
 
-    board.run_gh([
-        "issue", "close",
-        str(args.issue_number),
-        "--repo", board.repo,
-    ])
+    board.run_gh(
+        [
+            "issue",
+            "close",
+            str(args.issue_number),
+            "--repo",
+            board.repo,
+        ]
+    )
 
     # GitHub auto-moves closed issues to Done via its board workflow, but
     # the propagation is eventually-consistent. Poll a few times before
     # falling back to an explicit Status=Done via _cmd_set.
     for _ in range(_CLOSE_VERIFY_ATTEMPTS):
-        data = board.run_gh([
-            "project", "item-list",
-            str(board.project_number),
-            "--owner", board.owner,
-            "--limit", "500",
-            "--format", "json",
-        ])
+        data = board.run_gh(
+            [
+                "project",
+                "item-list",
+                str(board.project_number),
+                "--owner",
+                board.owner,
+                "--limit",
+                "500",
+                "--format",
+                "json",
+            ]
+        )
         match: dict[str, Any] | None = next(
             (
-                i for i in data.get("items", [])
+                i
+                for i in data.get("items", [])
                 if (i.get("content") or {}).get("number") == args.issue_number
             ),
             None,
@@ -252,19 +255,21 @@ def _cmd_file(args: argparse.Namespace) -> int:
                 )
                 return 1
             name, value = spec.split("=", 1)
-            extra_edits.append(
-                (name, board.field_id(name), board.option_id(name, value))
-            )
+            extra_edits.append((name, board.field_id(name), board.option_id(name, value)))
     except (FieldNotFound, OptionNotFound) as e:
         print(str(e), file=sys.stderr)
         return 1
 
     # 1. Create the issue. gh prints the URL on stdout.
     create_args = [
-        "issue", "create",
-        "--repo", board.repo,
-        "--title", args.title,
-        "--body-file", args.body_file,
+        "issue",
+        "create",
+        "--repo",
+        board.repo,
+        "--title",
+        args.title,
+        "--body-file",
+        args.body_file,
     ]
     for label in args.label or []:
         create_args.extend(["--label", label])
@@ -280,13 +285,19 @@ def _cmd_file(args: argparse.Namespace) -> int:
 
     # 2. Add to the project board.
     try:
-        add_data = board.run_gh([
-            "project", "item-add",
-            str(board.project_number),
-            "--owner", board.owner,
-            "--url", issue_url,
-            "--format", "json",
-        ])
+        add_data = board.run_gh(
+            [
+                "project",
+                "item-add",
+                str(board.project_number),
+                "--owner",
+                board.owner,
+                "--url",
+                issue_url,
+                "--format",
+                "json",
+            ]
+        )
     except GhInvocationError as e:
         print(
             f"error: filed issue #{issue_number} but failed to add to project: {e}",
@@ -301,26 +312,40 @@ def _cmd_file(args: argparse.Namespace) -> int:
         (status_field, status_option),
         *[(f, o) for _, f, o in extra_edits],
     ]:
-        board.run_gh([
-            "project", "item-edit",
-            "--project-id", board.project_id,
-            "--id", item_id,
-            "--field-id", field_id,
-            "--single-select-option-id", option_id,
-        ])
+        board.run_gh(
+            [
+                "project",
+                "item-edit",
+                "--project-id",
+                board.project_id,
+                "--id",
+                item_id,
+                "--field-id",
+                field_id,
+                "--single-select-option-id",
+                option_id,
+            ]
+        )
 
     # 4. Verification: re-read the item and assert it's on the project with Status set.
     # This is the post-create invariant from the level-up feedback.
-    verify = board.run_gh([
-        "project", "item-list",
-        str(board.project_number),
-        "--owner", board.owner,
-        "--limit", "500",
-        "--format", "json",
-    ])
+    verify = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
     seen = next(
         (
-            i for i in verify.get("items", [])
+            i
+            for i in verify.get("items", [])
             if (i.get("content") or {}).get("number") == issue_number
         ),
         None,
@@ -346,12 +371,17 @@ def _cmd_file(args: argparse.Namespace) -> int:
 
 
 def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
-    data = board.run_gh([
-        "issue", "view",
-        str(issue_number),
-        "--repo", board.repo,
-        "--json", "id",
-    ])
+    data = board.run_gh(
+        [
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            board.repo,
+            "--json",
+            "id",
+        ]
+    )
     node_id: str = data["id"]
     return node_id
 
@@ -390,18 +420,21 @@ def _cmd_comment(args: argparse.Namespace) -> int:
 
     # gh issue comment requires a file path, even when we got the body
     # from stdin — write a temp file, invoke, clean up.
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", delete=False
-    ) as tf:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
         tf.write(body)
         tmp_path = tf.name
     try:
-        board.run_gh([
-            "issue", "comment",
-            str(args.issue_number),
-            "--repo", board.repo,
-            "--body-file", tmp_path,
-        ])
+        board.run_gh(
+            [
+                "issue",
+                "comment",
+                str(args.issue_number),
+                "--repo",
+                board.repo,
+                "--body-file",
+                tmp_path,
+            ]
+        )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     print(f"OK: commented on #{args.issue_number}")
@@ -418,26 +451,39 @@ def _cmd_set(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    board.run_gh([
-        "project", "item-edit",
-        "--project-id", board.project_id,
-        "--id", item_id,
-        "--field-id", field_id,
-        "--single-select-option-id", option_id,
-    ])
+    board.run_gh(
+        [
+            "project",
+            "item-edit",
+            "--project-id",
+            board.project_id,
+            "--id",
+            item_id,
+            "--field-id",
+            field_id,
+            "--single-select-option-id",
+            option_id,
+        ]
+    )
     print(f"OK: set {args.field_name}={args.value} on issue #{args.issue_number}")
     return 0
 
 
 def _cmd_summary(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
-    data = board.run_gh([
-        "project", "item-list",
-        str(board.project_number),
-        "--owner", board.owner,
-        "--limit", "500",
-        "--format", "json",
-    ])
+    data = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
     items: list[dict[str, Any]] = data.get("items", [])
 
     def by_status(status: str) -> list[dict[str, Any]]:
