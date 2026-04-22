@@ -24,18 +24,21 @@ Flow:
 
 6. **Add to the project board.** Use `gh project item-add` with the URL from step 5. Capture the item ID.
 
-7. **Set Priority.** Use `gh project item-edit` with the Priority field ID and the appropriate option ID.
+7. **Set Status=Backlog.** New items land with Status=None because the auto-add workflow doesn't populate it; items without Status sort below everything and disappear. Set Status explicitly via `gh project item-edit` with the Status field ID and the Backlog option ID. (If the user explicitly says this is starting now, set Status=In Progress instead — but default is Backlog.)
 
-8. **Set any other required project fields.** For each additional single-select field documented in `docs/project-board.md` (e.g., Work Stream on projects that use one), set it via the same `gh project item-edit` pattern. Skip silently if the project doesn't define extra fields.
+8. **Set Priority.** Use `gh project item-edit` with the Priority field ID and the appropriate option ID.
 
-9. **Report.** Show the issue URL, confirm Priority and any required categorical fields are set, note whether `## Planning` references exist.
+9. **Set any other required project fields.** For each additional single-select field documented in `docs/project-board.md` (e.g., Work Stream on projects that use one), set it via the same `gh project item-edit` pattern. Skip silently if the project doesn't define extra fields.
 
-10. **If dependencies were specified**, create them via native GitHub issue dependencies (see `references/operations.md`), falling back to body convention if unavailable.
+10. **Report.** Show the issue URL, confirm Status, Priority, and any required categorical fields are set. Note whether `## Planning` references exist.
+
+11. **If dependencies were specified**, create them via native GitHub issue dependencies (see `references/operations.md`), falling back to body convention if unavailable.
 
 Defaults when the user doesn't specify:
 
+- Status: Backlog (always set — never leave as None)
 - Priority: Medium (if the user doesn't name one)
 - Other required fields (e.g., Work Stream): ask — never guess
 - Labels: infer from content (e.g., "fix" → `bug`, "add" → `enhancement`, "refactor X" → `refactor`)
 
-Do not file without Priority and all other required project fields set. An issue without required field values sorts to the bottom and disappears.
+Do not file without Status, Priority, and all other required project fields set. An issue without required field values sorts to the bottom and disappears.

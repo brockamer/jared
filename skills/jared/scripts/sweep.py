@@ -5,9 +5,14 @@ sweep.py — audit a GitHub Projects v2 board for drift.
 Reads the project via `gh project item-list` and runs the checks from
 references/board-sweep.md:
 
-  1. Metadata completeness — every open item has Priority + any other
-     required field (e.g., Work Stream if the project uses it — detected
-     by whether any open item on the board has Work Stream set)
+  1. Metadata completeness — every open item has Status + Priority + any
+     other required field (e.g., Work Stream if the project uses it —
+     detected by whether any open item on the board has Work Stream set).
+     Status is checked because GitHub's auto-add-to-project workflow adds
+     items without populating Status; items landing as Status=None sort
+     below everything and vanish until someone sets it manually.
+  1b. Closed items not on Done — auto-move sometimes fails to fire;
+      closed issues with Status != Done accumulate and pollute queries.
   2. WIP cap — In Progress within limit, flag stalled items
   3. Up Next queue — size and pullable-top check
   4. Aging — High-priority Backlog items >14 days old
@@ -171,7 +176,10 @@ def check_metadata(items: list[dict]) -> list[str]:
         n = content.get("number")
         prio = field(i, "priority")
         ws = field(i, "work Stream", "workStream", "workstream")
+        status = i.get("status") or ""
         issues = []
+        if not status:
+            issues.append("no Status")
         if not prio:
             issues.append("no Priority")
         if work_stream_in_use and not ws:
@@ -179,6 +187,22 @@ def check_metadata(items: list[dict]) -> list[str]:
         if issues:
             missing.append(f"#{n}: {', '.join(issues)}")
     return missing
+
+
+def check_closed_not_done(items: list[dict]) -> list[str]:
+    """Closed issues should auto-move to Done. If they don't, flag for manual move."""
+    stuck = []
+    for i in items:
+        content = i.get("content") or {}
+        if content.get("state") != "CLOSED":
+            continue
+        status = i.get("status") or ""
+        if status == "Done":
+            continue
+        n = content.get("number")
+        title = (content.get("title") or i.get("title") or "")[:60]
+        stuck.append(f"#{n} [{status or 'no Status'}]: {title}")
+    return stuck
 
 
 def check_wip(items: list[dict], limit: int) -> list[str]:
@@ -494,6 +518,11 @@ def main() -> int:
         findings = check_plan_spec_drift(existing_plan_dirs, repo)
         for f in findings or ["  None"]:
             print(f if f.startswith(" ") else f"  {f}")
+    print()
+
+    print("== Closed items not on Done ==")
+    for line in check_closed_not_done(items) or ["None"]:
+        print(f"  {line}")
     print()
 
     print("== Session-note freshness (In Progress, last 3 days) ==")

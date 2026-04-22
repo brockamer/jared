@@ -19,7 +19,11 @@ Run in order. Each flag is a *proposal* to the user, not a unilateral fix.
 
 ### 1. Metadata completeness
 
-Every open item needs Priority, plus any categorical fields the project has defined (see `docs/project-board.md` for the canonical field list). Items without required field values sort to the bottom and disappear. `scripts/sweep.py` handles this check, along with WIP, aging, and legacy labels — it introspects the project's fields and only flags what's documented.
+Every open item needs **Status** and **Priority**, plus any categorical fields the project has defined (see `docs/project-board.md` for the canonical field list). Items without required field values sort to the bottom and disappear.
+
+Status in particular is easy to miss: GitHub's auto-add-to-project workflow adds issues to the board without populating Status, so items can land with Priority set (because `jared-file` sets it explicitly) but Status=None. `scripts/sweep.py` flags both gaps.
+
+`scripts/sweep.py` also flags **closed items whose Status ≠ Done** — GitHub's auto-move on close sometimes fails, and stale board state accumulates. Move them to Done manually during the sweep.
 
 ### 2. WIP
 
