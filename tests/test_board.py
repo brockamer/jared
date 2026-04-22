@@ -116,3 +116,86 @@ def test_unknown_option_raises(tmp_path: Path) -> None:
     board = Board.from_path(board_md)
     with pytest.raises(OptionNotFound):
         board.option_id("Priority", "Urgent")
+
+
+def _minimal_board(tmp_path: Path) -> Path:
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """))
+    return board_md
+
+
+def test_run_gh_parses_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"hello": "world"}'
+        stderr = ""
+
+    called_args: list[list[str]] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        called_args.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    result = b.run_gh(["api", "user"])
+    assert result == {"hello": "world"}
+    assert called_args == [["gh", "api", "user"]]
+
+
+def test_run_gh_non_zero_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "HTTP 401: Bad credentials"
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    with pytest.raises(GhInvocationError) as exc:
+        b.run_gh(["api", "user"])
+    assert "401" in str(exc.value)
+
+
+def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board, ItemNotFound
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"items": ['
+            '{"id": "PVTI_aaa", "content": {"number": 42}},'
+            '{"id": "PVTI_bbb", "content": {"number": 99}}'
+            ']}'
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    assert b.find_item_id(42) == "PVTI_aaa"
+    assert b.find_item_id(99) == "PVTI_bbb"
+
+    with pytest.raises(ItemNotFound):
+        b.find_item_id(123456)
