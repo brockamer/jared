@@ -25,3 +25,9 @@ Thumbs.db
 
 # Test config
 tests/testbed.env
+
+# Local venv
+.venv/
+
+# Editable install metadata
+*.egg-info/
