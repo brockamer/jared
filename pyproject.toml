@@ -32,6 +32,8 @@ strict = true
 python_version = "3.11"
 files = ["skills/jared/scripts", "tests"]
 exclude = ["skills/jared/scripts/__pycache__"]
+explicit_package_bases = true
+mypy_path = "."
 
 [tool.pytest.ini_options]
 markers = [
