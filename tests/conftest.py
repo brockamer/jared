@@ -93,3 +93,35 @@ def patch_gh(
         "skills.jared.scripts.lib.board.subprocess.run",
         lambda *a, **kw: fake,
     )
+
+
+def patch_gh_by_arg(
+    monkeypatch: pytest.MonkeyPatch,
+    responses: dict[str, str],
+    default: str = "{}",
+) -> list[list[str]]:
+    """Patch subprocess.run with routing by substring in the args.
+
+    `responses` maps a substring → stdout JSON. The fake_run scans the
+    argv list for the first matching substring and returns that response.
+    Useful when a subcommand makes multiple gh calls (e.g. `set` does
+    item-list then item-edit) and each needs a distinct stdout.
+
+    Returns a list that captures all invocation argvs in call order, for
+    assertions like "the second call contained --field-id PVTSSF_foo".
+    """
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        calls.append(args)
+        joined = " ".join(args)
+        for substring, stdout in responses.items():
+            if substring in joined:
+                return FakeGhResult(stdout=stdout)
+        return FakeGhResult(stdout=default)
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        fake_run,
+    )
+    return calls

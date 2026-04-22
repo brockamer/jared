@@ -14,18 +14,22 @@ from typing import Any
 # types are still enforced inside lib.board.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.board import Board, ItemNotFound  # type: ignore[import-not-found]  # noqa: E402
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    Board,
+    FieldNotFound,
+    ItemNotFound,
+    OptionNotFound,
+)
 
 
 STUB_SUBCOMMANDS = [
     "file",
     "move",
-    "set",
     "close",
     "comment",
     "blocked-by",
 ]
-ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary"]
+ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary", "set"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     summary = sub.add_parser("summary", help="One-screen board status summary.")
     summary.set_defaults(func=_cmd_summary)
+
+    set_p = sub.add_parser("set", help="Set a single-select field on an issue.")
+    set_p.add_argument("issue_number", type=int)
+    set_p.add_argument("field_name", help='e.g. "Priority" or "Status"')
+    set_p.add_argument("value", help='e.g. "High" or "In Progress"')
+    set_p.set_defaults(func=_cmd_set)
 
     return parser
 
@@ -101,6 +111,27 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
         "fields": {k: v for k, v in match.items() if k not in excluded},
     }
     print(json.dumps(output, indent=2))
+    return 0
+
+
+def _cmd_set(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    try:
+        item_id = board.find_item_id(args.issue_number)
+        field_id = board.field_id(args.field_name)
+        option_id = board.option_id(args.field_name, args.value)
+    except (ItemNotFound, FieldNotFound, OptionNotFound) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    board.run_gh([
+        "project", "item-edit",
+        "--project-id", board.project_id,
+        "--id", item_id,
+        "--field-id", field_id,
+        "--single-select-option-id", option_id,
+    ])
+    print(f"OK: set {args.field_name}={args.value} on issue #{args.issue_number}")
     return 0
 
 
