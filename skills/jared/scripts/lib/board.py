@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 class BoardConfigError(Exception):
@@ -17,6 +20,14 @@ class FieldNotFound(Exception):
 
 class OptionNotFound(Exception):
     """Raised when a field's option name is not present in docs/project-board.md."""
+
+
+class GhInvocationError(Exception):
+    """Raised when `gh` exits non-zero or returns unparseable output."""
+
+
+class ItemNotFound(Exception):
+    """Raised when no project item corresponds to the given issue number."""
 
 
 @dataclass
@@ -112,3 +123,43 @@ class Board:
                 f"Available: {available}"
             )
         return options[option]
+
+    def run_gh(self, args: list[str]) -> Any:
+        """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
+        result = subprocess.run(
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise GhInvocationError(
+                f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
+            )
+        stdout = result.stdout.strip()
+        if not stdout:
+            return {}
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError as e:
+            raise GhInvocationError(
+                f"gh returned non-JSON output: {stdout[:200]}"
+            ) from e
+
+    def find_item_id(self, issue_number: int) -> str:
+        """Look up the ProjectV2Item id for a given issue number on this board."""
+        data = self.run_gh([
+            "project", "item-list",
+            str(self.project_number),
+            "--owner", self.owner,
+            "--limit", "500",
+            "--format", "json",
+        ])
+        for item in data.get("items", []):
+            content = item.get("content") or {}
+            if content.get("number") == issue_number:
+                return str(item["id"])
+        raise ItemNotFound(
+            f"No project item for issue #{issue_number} in project "
+            f"{self.project_number}. Is the issue added to the board?"
+        )
