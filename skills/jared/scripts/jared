@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -25,10 +26,17 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 
 STUB_SUBCOMMANDS = [
     "file",
-    "comment",
     "blocked-by",
 ]
-ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary", "set", "move", "close"]
+ALL_SUBCOMMANDS = [
+    *STUB_SUBCOMMANDS,
+    "get-item",
+    "summary",
+    "set",
+    "move",
+    "close",
+    "comment",
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,6 +89,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     close_p.add_argument("issue_number", type=int)
     close_p.set_defaults(func=_cmd_close)
+
+    comment = sub.add_parser("comment", help="Add a comment to an issue.")
+    comment.add_argument("issue_number", type=int)
+    comment.add_argument(
+        "--body-file",
+        required=True,
+        help='Path to markdown file, or "-" for stdin.',
+    )
+    comment.set_defaults(func=_cmd_comment)
 
     return parser
 
@@ -177,6 +194,30 @@ def _cmd_close(args: argparse.Namespace) -> int:
     if rc == 0:
         print(f"OK: closed #{args.issue_number} (manual move to Done)")
     return rc
+
+
+def _cmd_comment(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
+
+    # gh issue comment requires a file path, even when we got the body
+    # from stdin — write a temp file, invoke, clean up.
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False
+    ) as tf:
+        tf.write(body)
+        tmp_path = tf.name
+    try:
+        board.run_gh([
+            "issue", "comment",
+            str(args.issue_number),
+            "--repo", board.repo,
+            "--body-file", tmp_path,
+        ])
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    print(f"OK: commented on #{args.issue_number}")
+    return 0
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
