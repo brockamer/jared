@@ -1,11 +1,13 @@
 # skill-creator evaluation workspaces — heavy, per-machine, not versioned
 *-workspace/
 
-# Python artifacts
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # OS crud
 .DS_Store
@@ -20,3 +22,12 @@ Thumbs.db
 # Test outputs that accidentally landed here
 *.log
 /tmp/
+
+# Test config
+tests/testbed.env
+
+# Local venv
+.venv/
+
+# Editable install metadata
+*.egg-info/

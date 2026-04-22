@@ -20,43 +20,51 @@ Usage:
   dependency-graph.py --repo owner/repo --milestone "v0.2"
   dependency-graph.py --repo owner/repo --summary      # one-liner for sweep output
 """
+
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import subprocess
 import sys
 from collections import defaultdict, deque
+from pathlib import Path
 
+# Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    GhInvocationError,
+)
+from lib.board import (
+    run_gh as board_run_gh,
+)
 
 # ---------- gh helpers ----------
 
 
-def run_gh(args: list[str]) -> dict | list:
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"{' '.join(args[:6])}... failed: {result.stderr.strip()}")
-    return json.loads(result.stdout) if result.stdout.strip() else {}
-
-
 def fetch_open_issues(repo: str, milestone: str | None) -> list[dict]:
     cmd = [
-        "gh", "issue", "list", "--repo", repo, "--state", "open",
-        "--limit", "500", "--json", "number,title,body,labels,state",
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--limit",
+        "500",
+        "--json",
+        "number,title,body,labels,state",
     ]
     if milestone:
         cmd += ["--milestone", milestone]
-    return run_gh(cmd)
+    return board_run_gh(cmd)
 
 
 def fetch_issue_state(repo: str, number: int) -> str:
     try:
-        data = run_gh(
-            ["gh", "issue", "view", str(number), "--repo", repo, "--json", "state"]
-        )
+        data = board_run_gh(["issue", "view", str(number), "--repo", repo, "--json", "state"])
         return data.get("state", "UNKNOWN")
-    except Exception:
+    except GhInvocationError:
         return "UNKNOWN"
 
 
@@ -81,20 +89,23 @@ def fetch_native_dependencies(repo: str, number: int) -> list[int] | None:
     """
     owner, name = repo.split("/", 1)
     try:
-        result = run_gh([
-            "gh", "api", "graphql",
-            "-f", f"query={query}",
-            "-F", f"owner={owner}",
-            "-F", f"repo={name}",
-            "-F", f"number={number}",
-        ])
-    except RuntimeError:
+        result = board_run_gh(
+            [
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"repo={name}",
+                "-F",
+                f"number={number}",
+            ]
+        )
+    except GhInvocationError:
         return None
-    issue = (
-        result.get("data", {})
-        .get("repository", {})
-        .get("issue")
-    )
+    issue = result.get("data", {}).get("repository", {}).get("issue")
     if issue is None:
         return None
     deps = (issue.get("blockedBy") or {}).get("nodes", [])
@@ -270,7 +281,7 @@ def format_summary(
 
 
 def format_dot(graph: dict[int, set[int]], titles: dict[int, str]) -> str:
-    lines = ["digraph deps {", '  rankdir=LR;', '  node [shape=box];']
+    lines = ["digraph deps {", "  rankdir=LR;", "  node [shape=box];"]
     for n in graph:
         title = titles.get(n, "?").replace('"', "'")[:40]
         lines.append(f'  "#{n}" [label="#{n}\\n{title}"];')
@@ -290,16 +301,22 @@ def main() -> int:
     parser.add_argument("--milestone", help="Limit to issues in this milestone")
     parser.add_argument("--format", choices=["text", "dot"], default="text")
     parser.add_argument("--summary", action="store_true", help="One-block summary")
-    parser.add_argument("--no-native", action="store_true", help="Skip native issue dependency lookups")
+    parser.add_argument(
+        "--no-native",
+        action="store_true",
+        help="Skip native issue dependency lookups",
+    )
     args = parser.parse_args()
 
-    print(f"Fetching open issues from {args.repo}" +
-          (f" (milestone {args.milestone!r})..." if args.milestone else "..."),
-          file=sys.stderr)
+    print(
+        f"Fetching open issues from {args.repo}"
+        + (f" (milestone {args.milestone!r})..." if args.milestone else "..."),
+        file=sys.stderr,
+    )
 
     try:
         issues = fetch_open_issues(args.repo, args.milestone)
-    except RuntimeError as e:
+    except GhInvocationError as e:
         print(f"dependency-graph: {e}", file=sys.stderr)
         return 1
 

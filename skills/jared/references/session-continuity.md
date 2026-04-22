@@ -112,7 +112,7 @@ Runs the full wrap in one command. Flow:
 
 5. **Propose plan/spec archival** if any issues shipped. See `references/plan-spec-integration.md`.
 
-6. **On user approval, post** via `gh issue comment` for each. Update `## Current state` on the issue bodies where it's changed significantly.
+6. **On user approval, post** via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file -` (pipe the note through stdin) for each. For `## Current state` body updates, use `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py --issue <N> --repo <owner>/<repo> --current-state "..."`.
 
 ## Auto-orientation on session start
 

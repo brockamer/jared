@@ -272,16 +272,39 @@ PROJECT_NUM=<from previous step>
 gh project link $PROJECT_NUM --owner brockamer --repo brockamer/jared-testbed
 ```
 
-- [ ] **Step 3: Confirm Status + Priority fields exist**
+- [ ] **Step 3: Customize the default Status field**
 
-GitHub adds `Status` by default. Verify + add Priority:
+GitHub adds a `Status` field by default with options `Todo / In Progress / Done`. Jared's convention is `Backlog / Up Next / In Progress / Blocked / Done` (five columns — **Blocked is a Status column, not a label**; dependencies between issues are modeled separately via native issue-dependency edges in Task 0.5.3).
+
+`gh` has no `field-edit` subcommand, so use GraphQL. First grab the Status field's node ID:
 
 ```bash
-gh project field-list $PROJECT_NUM --owner brockamer --format json \
-  | python3 -c "import json,sys; fs=json.load(sys.stdin).get('fields',[]); print([f.get('name') for f in fs])"
+STATUS_FIELD_ID=$(gh project field-list $PROJECT_NUM --owner brockamer --format json \
+  | python3 -c "import json,sys; print([f['id'] for f in json.load(sys.stdin)['fields'] if f['name']=='Status'][0])")
 ```
 
-If `Priority` is missing:
+Then replace options:
+
+```bash
+gh api graphql -f query='
+mutation($fieldId: ID!) {
+  updateProjectV2Field(input: {
+    fieldId: $fieldId
+    name: "Status"
+    singleSelectOptions: [
+      {name: "Backlog", color: GRAY, description: ""},
+      {name: "Up Next", color: BLUE, description: ""},
+      {name: "In Progress", color: YELLOW, description: ""},
+      {name: "Blocked", color: RED, description: ""},
+      {name: "Done", color: GREEN, description: ""}
+    ]
+  }) { projectV2Field { ... on ProjectV2SingleSelectField { options { id name } } } }
+}' -f fieldId="$STATUS_FIELD_ID"
+```
+
+Capture the five option IDs from the response — `item-edit` needs them in Task 0.5.3.
+
+- [ ] **Step 4: Add Priority field**
 
 ```bash
 gh project field-create $PROJECT_NUM --owner brockamer \
@@ -289,7 +312,7 @@ gh project field-create $PROJECT_NUM --owner brockamer \
   --single-select-options "High,Medium,Low"
 ```
 
-- [ ] **Step 4: Add Work Stream field** (three fictional options)
+- [ ] **Step 5: Add Work Stream field** (three fictional options)
 
 ```bash
 gh project field-create $PROJECT_NUM --owner brockamer \
@@ -306,40 +329,60 @@ gh project field-create $PROJECT_NUM --owner brockamer \
 15 fictional issues about a robotics tooling roadmap. Titles:
 
 1. "Add stereo-calibration watchdog to perception test harness" (High / Perception / In Progress)
-2. "Refactor path planner's obstacle inflation" (High / Planning / In Progress)
+2. "Refactor path planner's obstacle inflation" (High / Planning / In Progress) — blocked-by #11
 3. "Fleet dashboard: add battery-health column" (Medium / Fleet Ops / Up Next)
-4. "Instrument SLAM drift budget alerts" (Medium / Perception / Up Next)
+4. "Instrument SLAM drift budget alerts" (Medium / Perception / Up Next) — blocked-by #1
 5. "Migrate waypoint serializer to protobuf v3" (Medium / Planning / Up Next)
 6. "Fix intermittent timeout in fleet heartbeat" (High / Fleet Ops / Blocked)
 7. "Document sensor-extrinsics bootstrap for new hires" (Low / Perception / Backlog)
 8. "Prune deprecated trajectory types" (Low / Planning / Backlog)
 9. "Add fleet-ops on-call rotation doc" (Low / Fleet Ops / Backlog)
-10. "Rebuild occupancy grid viewer in React" (Medium / Perception / Backlog)
+10. "Rebuild occupancy grid viewer in React" (Medium / Perception / Backlog) — blocked-by #11
 11. "Replace ad-hoc costmap format with standard grid" (Medium / Planning / Backlog)
 12. "Wire up cost alarms for S3 log egress" (High / Fleet Ops / Backlog)
 13. "Retire v1 telemetry schema" (Low / Fleet Ops / Done, closed)
 14. "Add dark-mode support to fleet dashboard" (Low / Fleet Ops / Done, closed)
 15. "Publish perception benchmark baseline" (Medium / Perception / Done, closed)
 
+**Coverage:** All 5 Status columns, all 3 Priorities, all 3 Work Streams. Issue #6 exercises the pure Blocked-column case (no dep edges — work started, stuck externally). The three blocked-by edges exercise dep graph scenarios: in-progress→backlog (#2→#11), cross-stream fan-out (#10→#11 alongside #2→#11), and up-next→in-progress (#4→#1).
+
 - [ ] **Step 2: File them**
 
-Use the existing `gh issue create` + `gh project item-add` + `gh project item-edit` flow (this is the flow we're going to eliminate, which is fine — this is one-time seed work). Or, once any of Phase 2 is done, seed with `jared file` instead. For this first setup, file by hand:
+Use `gh issue create` + `gh project item-add` + `gh project item-edit` per issue (we're eliminating this multi-step flow in Phase 2, but need it here before Phase 2 exists). Script it — doing 15 by hand is error-prone. Example Python skeleton:
 
-```bash
-# For each row in the table, approximately:
-ISSUE_URL=$(gh issue create --repo brockamer/jared-testbed \
-  --title "<title>" --body "Seed item for jared integration tests. Fictional." \
-  --label "seed")
-# add to project:
-ITEM_JSON=$(gh project item-add $PROJECT_NUM --owner brockamer --url $ISSUE_URL --format json)
-# then item-edit for Priority + Status + Work Stream using the IDs discovered via field-list
+```python
+# For each seed row:
+#   1. gh issue create --repo brockamer/jared-testbed --title <t> --body <seed-body>
+#   2. gh project item-add $PROJECT_NUM --owner brockamer --url <url> --format json  -> item_id
+#   3. gh project item-edit --id <item_id> --project-id $PROJECT_ID \
+#        --field-id $STATUS_FIELD_ID --single-select-option-id <status-opt-id>
+#      ... repeat for Priority and Work Stream
+#   4. Verify: re-read the ProjectV2Item via GraphQL; halt if not on project or Status is null.
+#   5. If closed=true, gh issue close <n>
 ```
 
-Script this if you don't want to type 15 times — a scratch shell script is fine here, not committed.
+**Critical invariant (flagged in level-up feedback as a prior-Jared regression):** each iteration must verify, before moving on, that the new item is (a) on the project and (b) has Status set. A null Status or missing project membership is a hard failure — halt and inspect. Do not batch creates and hope.
 
-**Issues 6 (blocked), 13/14/15 (closed):**
-- For `#6`, set Status to "Blocked" option (if the field has one) or simulate via label; spec says integration tests cover the `Blocked` Status code path.
-- For `#13/14/15`, close them via `gh issue close`.
+Scratch script goes in `/tmp` — not committed. Phase 2 replaces it with `tests/testbed-reset.py`, which reads `tests/seed-issues.yaml`.
+
+**Issue #6 (Blocked):** set `Status="Blocked"` on the Status field. Do NOT use a label. Blocked is a dedicated Status column in the Jared convention (see `references/new-board.md` after Phase 4 update).
+
+**Issues 13/14/15 (closed):** `gh issue close <n>` after filing + status-setting.
+
+- [ ] **Step 3: Wire up dependency edges**
+
+Three blocked-by edges per the table above. `gh` has no built-in command; use the `addBlockedBy` GraphQL mutation:
+
+```bash
+gh api graphql -f query='
+mutation($blockee: ID!, $blocker: ID!) {
+  addBlockedBy(input: { issueId: $blockee, blockingIssueId: $blocker }) {
+    issue { number }
+  }
+}' -f blockee="<blockee-node-id>" -f blocker="<blocker-node-id>"
+```
+
+Issue node IDs come from `gh api repos/brockamer/jared-testbed/issues/<n>` (`.node_id`). Verify each edge by re-reading `repository.issue(number: N).blockedBy` for the blockee.
 
 ### Task 0.5.4: Write testbed setup doc
 
@@ -416,88 +459,20 @@ created later in Phase 2). It closes and deletes anything not in the seed set.
 
 - [ ] **Step 2: Write the seed file**
 
-Create `tests/seed-issues.yaml` capturing the 15 rows as YAML so it's machine-readable for future automation:
+Create `tests/seed-issues.yaml` — the machine-readable source of truth for the 15 seed entries. Schema per entry:
 
 ```yaml
-# Seed issues for the Jared testbed. Fictional robotics software project.
-# Loaded by tests/testbed-reset.py (created in Phase 2).
-- title: "Add stereo-calibration watchdog to perception test harness"
-  priority: High
-  work_stream: Perception
-  status: "In Progress"
-  closed: false
-- title: "Refactor path planner's obstacle inflation"
-  priority: High
-  work_stream: Planning
-  status: "In Progress"
-  closed: false
-- title: "Fleet dashboard: add battery-health column"
-  priority: Medium
-  work_stream: "Fleet Ops"
-  status: "Up Next"
-  closed: false
-- title: "Instrument SLAM drift budget alerts"
-  priority: Medium
-  work_stream: Perception
-  status: "Up Next"
-  closed: false
-- title: "Migrate waypoint serializer to protobuf v3"
-  priority: Medium
-  work_stream: Planning
-  status: "Up Next"
-  closed: false
-- title: "Fix intermittent timeout in fleet heartbeat"
-  priority: High
-  work_stream: "Fleet Ops"
-  status: "In Progress"
-  closed: false
-  blocked: true
-- title: "Document sensor-extrinsics bootstrap for new hires"
-  priority: Low
-  work_stream: Perception
-  status: Backlog
-  closed: false
-- title: "Prune deprecated trajectory types"
-  priority: Low
-  work_stream: Planning
-  status: Backlog
-  closed: false
-- title: "Add fleet-ops on-call rotation doc"
-  priority: Low
-  work_stream: "Fleet Ops"
-  status: Backlog
-  closed: false
-- title: "Rebuild occupancy grid viewer in React"
-  priority: Medium
-  work_stream: Perception
-  status: Backlog
-  closed: false
-- title: "Replace ad-hoc costmap format with standard grid"
-  priority: Medium
-  work_stream: Planning
-  status: Backlog
-  closed: false
-- title: "Wire up cost alarms for S3 log egress"
-  priority: High
-  work_stream: "Fleet Ops"
-  status: Backlog
-  closed: false
-- title: "Retire v1 telemetry schema"
-  priority: Low
-  work_stream: "Fleet Ops"
-  status: Done
-  closed: true
-- title: "Add dark-mode support to fleet dashboard"
-  priority: Low
-  work_stream: "Fleet Ops"
-  status: Done
-  closed: true
-- title: "Publish perception benchmark baseline"
-  priority: Medium
-  work_stream: Perception
-  status: Done
-  closed: true
+- title: <string>
+  priority: High | Medium | Low
+  work_stream: Perception | Planning | "Fleet Ops"
+  status: Backlog | "Up Next" | "In Progress" | Blocked | Done
+  closed: true | false
+  blocked_by: [<1-based seed index>, ...]   # optional; dependency edges
 ```
+
+`blocked_by` entries are 1-based indexes into this file's ordered list — the Phase 2 `tests/testbed-reset.py` resolves them against the order in the file.
+
+The definitive seed list (as committed in this phase) is in `tests/seed-issues.yaml`. Coverage: all 5 Status columns, all 3 Priorities, all 3 Work Streams, a pure Blocked-column case (#6), and 3 dependency edges (#2→#11, #10→#11, #4→#1).
 
 ### Task 0.5.5: Write testbed env example
 

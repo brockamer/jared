@@ -16,7 +16,11 @@ Flow:
    - `## Depends on` — all referenced issues are closed or already done
    If any is missing, pause and propose reshaping the issue first. Pullable is a discipline, not a formality.
 
-3. **Move to In Progress.** Use `gh project item-edit` with the Status field ID and In Progress option ID.
+3. **Move to In Progress.** One call:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
+   ```
 
 4. **Load context.** Fetch:
    - Full issue body (including `## Current state`, `## Decisions`, acceptance criteria in `<details>`)

@@ -6,13 +6,13 @@ Invoke the Jared skill to run a routine grooming pass. See `references/board-swe
 
 Flow:
 
-1. **Run `~/.claude/skills/jared/scripts/sweep.py`** for the mechanical checks: metadata completeness, WIP, Up Next size, stale High Backlog, stalled In Progress, blocked hygiene, legacy priority labels, plan/spec drift, Session-note freshness.
+1. **Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/sweep.py`** for the mechanical checks: metadata completeness, WIP, Up Next size, stale High Backlog, stalled In Progress, blocked hygiene, legacy priority labels, plan/spec drift, Session-note freshness.
 
 2. **Supplement with judgment checks** the script doesn't handle:
    - Pullable check on top of Up Next (does it have clear acceptance criteria, resolved dependencies?)
    - Label hygiene — deprecated labels, missing type labels
-   - Milestone coverage (per `~/.claude/skills/jared/references/milestones-and-roadmap.md` hygiene checklist)
-   - Dependency hygiene via `~/.claude/skills/jared/scripts/dependency-graph.py --summary` — cycles, priority inversions, broken chains
+   - Milestone coverage (per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/milestones-and-roadmap.md` hygiene checklist)
+   - Dependency hygiene via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo> --summary` — cycles, priority inversions, broken chains
    - Convention doc drift: does `docs/project-board.md` still match reality?
 
 3. **Bundle findings as a proposal.** Format:
@@ -33,7 +33,7 @@ Flow:
    - #18 in High Backlog since <date> (26d). Propose downgrade to Medium.
 
    == Plan/spec drift ==
-   - docs/superpowers/plans/2026-04-10-feature.md references only closed issues. Propose archiving via ~/.claude/skills/jared/scripts/archive-plan.py.
+   - docs/superpowers/plans/2026-04-10-feature.md references only closed issues. Propose archiving via ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py.
    - docs/superpowers/specs/2026-04-02-xyz.md has no ## Issue(s) section. Propose filing or deleting.
 
    == Dependencies ==
@@ -53,7 +53,7 @@ Flow:
    - Metadata fills (Priority, and any other required fields for this project)
    - Label adjustments
    - Aging demotions (after per-item confirm)
-   - Plan archivals via `~/.claude/skills/jared/scripts/archive-plan.py`
+   - Plan archivals via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
    - Convention doc patch
 
 5. **Don't apply destructive changes en masse without per-item confirm.** Closing issues, deleting anything, or bulk-reshaping issue bodies requires item-by-item OK.
