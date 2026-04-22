@@ -11,6 +11,14 @@ class BoardConfigError(Exception):
     """Raised when docs/project-board.md is missing or malformed."""
 
 
+class FieldNotFound(Exception):
+    """Raised when a field name is not present in docs/project-board.md."""
+
+
+class OptionNotFound(Exception):
+    """Raised when a field's option name is not present in docs/project-board.md."""
+
+
 @dataclass
 class Board:
     project_number: int
@@ -46,10 +54,61 @@ class Board:
         owner = find(r"Owner:\s*(\S+)")
         repo = find(r"Repo:\s*(\S+)")
 
+        field_ids, field_options = cls._parse_field_blocks(text)
+
         return cls(
             project_number=project_number,
             project_id=project_id,
             owner=owner,
             repo=repo,
             project_url=project_url,
+            _field_ids=field_ids,
+            _field_options=field_options,
         )
+
+    @staticmethod
+    def _parse_field_blocks(text: str) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+        field_ids: dict[str, str] = {}
+        field_options: dict[str, dict[str, str]] = {}
+
+        # Split on "### " at start of line. Each block opens with the field name.
+        blocks = re.split(r"^### ", text, flags=re.MULTILINE)[1:]
+        for block in blocks:
+            lines = block.splitlines()
+            if not lines:
+                continue
+            field_name = lines[0].strip()
+            options: dict[str, str] = {}
+            field_id: str | None = None
+            for line in lines[1:]:
+                m = re.match(r"^\s*-\s*Field ID:\s*(\S+)\s*$", line)
+                if m:
+                    field_id = m.group(1)
+                    continue
+                m = re.match(r"^\s*-\s*(.+?):\s*(OPTION_\S+)\s*$", line)
+                if m:
+                    options[m.group(1).strip()] = m.group(2).strip()
+            if field_id is None:
+                continue
+            field_ids[field_name] = field_id
+            field_options[field_name] = options
+
+        return field_ids, field_options
+
+    def field_id(self, name: str) -> str:
+        if name not in self._field_ids:
+            available = ", ".join(sorted(self._field_ids)) or "(none)"
+            raise FieldNotFound(
+                f"Field '{name}' not found in project-board.md. Available: {available}"
+            )
+        return self._field_ids[name]
+
+    def option_id(self, field_name: str, option: str) -> str:
+        options = self._field_options.get(field_name, {})
+        if option not in options:
+            available = ", ".join(sorted(options)) or "(none)"
+            raise OptionNotFound(
+                f"Option '{option}' not found for field '{field_name}'. "
+                f"Available: {available}"
+            )
+        return options[option]
