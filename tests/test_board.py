@@ -199,3 +199,34 @@ def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     with pytest.raises(ItemNotFound):
         b.find_item_id(123456)
+
+
+def test_run_graphql_passes_query_and_vars(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    captured: dict[str, list[str]] = {}
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"data": {"ok": true}}'
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured["args"] = args
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    result = b.run_graphql("query { ok }", owner="brockamer", number=7)
+    assert result == {"data": {"ok": True}}
+
+    args = captured["args"]
+    assert args[:4] == ["gh", "api", "graphql", "-f"]
+    assert any(a == "query=query { ok }" for a in args)
+    # Strings use -f; ints use -F so gh infers numeric type.
+    assert "-f" in args and "owner=brockamer" in args
+    assert "-F" in args and "number=7" in args
