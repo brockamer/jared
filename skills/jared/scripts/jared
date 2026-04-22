@@ -19,13 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     Board,
     FieldNotFound,
+    GhInvocationError,
     ItemNotFound,
     OptionNotFound,
 )
 
-
 STUB_SUBCOMMANDS = [
-    "file",
     "blocked-by",
 ]
 ALL_SUBCOMMANDS = [
@@ -36,6 +35,7 @@ ALL_SUBCOMMANDS = [
     "move",
     "close",
     "comment",
+    "file",
 ]
 
 
@@ -98,6 +98,25 @@ def build_parser() -> argparse.ArgumentParser:
         help='Path to markdown file, or "-" for stdin.',
     )
     comment.set_defaults(func=_cmd_comment)
+
+    file_p = sub.add_parser(
+        "file",
+        help="File a new issue + add to board + set fields atomically.",
+    )
+    file_p.add_argument("--title", required=True)
+    file_p.add_argument("--body-file", required=True)
+    file_p.add_argument(
+        "--priority", required=True, choices=["High", "Medium", "Low"]
+    )
+    file_p.add_argument("--status", help="Status column (default: Backlog)")
+    file_p.add_argument("--label", action="append", help="Issue label (repeatable)")
+    file_p.add_argument(
+        "--field",
+        action="append",
+        help='NAME=VALUE for additional single-select fields '
+        '(e.g. "Work Stream=Planning"). Repeatable.',
+    )
+    file_p.set_defaults(func=_cmd_file)
 
     return parser
 
@@ -194,6 +213,125 @@ def _cmd_close(args: argparse.Namespace) -> int:
     if rc == 0:
         print(f"OK: closed #{args.issue_number} (manual move to Done)")
     return rc
+
+
+def _cmd_file(args: argparse.Namespace) -> int:
+    """Atomic: create issue, add to project, set Priority + Status + extras, verify.
+
+    Implements the 'new issue must land on board with Status set' invariant
+    (see memory: jared file must guarantee project membership + status).
+    Any failure halts before the user's workflow moves on.
+    """
+    board = Board.from_path(Path(args.board))
+    status = args.status or "Backlog"
+
+    # Pre-resolve all field/option IDs before we touch GitHub. Fails fast on
+    # misconfigured board without creating an orphan issue.
+    try:
+        prio_field = board.field_id("Priority")
+        prio_option = board.option_id("Priority", args.priority)
+        status_field = board.field_id("Status")
+        status_option = board.option_id("Status", status)
+        extra_edits: list[tuple[str, str, str]] = []
+        for spec in args.field or []:
+            if "=" not in spec:
+                print(
+                    f"error: --field expects NAME=VALUE, got {spec!r}",
+                    file=sys.stderr,
+                )
+                return 1
+            name, value = spec.split("=", 1)
+            extra_edits.append(
+                (name, board.field_id(name), board.option_id(name, value))
+            )
+    except (FieldNotFound, OptionNotFound) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    # 1. Create the issue. gh prints the URL on stdout.
+    create_args = [
+        "issue", "create",
+        "--repo", board.repo,
+        "--title", args.title,
+        "--body-file", args.body_file,
+    ]
+    for label in args.label or []:
+        create_args.extend(["--label", label])
+    try:
+        issue_url = board.run_gh_raw(create_args)
+    except GhInvocationError as e:
+        print(f"error: gh issue create failed: {e}", file=sys.stderr)
+        return 2
+    if not issue_url.startswith("http"):
+        print(f"error: unexpected gh issue create output: {issue_url[:200]}", file=sys.stderr)
+        return 2
+    issue_number = int(issue_url.rsplit("/", 1)[-1])
+
+    # 2. Add to the project board.
+    try:
+        add_data = board.run_gh([
+            "project", "item-add",
+            str(board.project_number),
+            "--owner", board.owner,
+            "--url", issue_url,
+            "--format", "json",
+        ])
+    except GhInvocationError as e:
+        print(
+            f"error: filed issue #{issue_number} but failed to add to project: {e}",
+            file=sys.stderr,
+        )
+        return 2
+    item_id = add_data["id"]
+
+    # 3. Set Priority + Status + extras in order.
+    for field_id, option_id in [
+        (prio_field, prio_option),
+        (status_field, status_option),
+        *[(f, o) for _, f, o in extra_edits],
+    ]:
+        board.run_gh([
+            "project", "item-edit",
+            "--project-id", board.project_id,
+            "--id", item_id,
+            "--field-id", field_id,
+            "--single-select-option-id", option_id,
+        ])
+
+    # 4. Verification: re-read the item and assert it's on the project with Status set.
+    # This is the post-create invariant from the level-up feedback.
+    verify = board.run_gh([
+        "project", "item-list",
+        str(board.project_number),
+        "--owner", board.owner,
+        "--limit", "500",
+        "--format", "json",
+    ])
+    seen = next(
+        (
+            i for i in verify.get("items", [])
+            if (i.get("content") or {}).get("number") == issue_number
+        ),
+        None,
+    )
+    if seen is None:
+        print(
+            f"error: filed issue #{issue_number} but post-create verification "
+            f"could not find it on project {board.project_number}",
+            file=sys.stderr,
+        )
+        return 2
+    if not seen.get("status"):
+        print(
+            f"error: filed issue #{issue_number} is on the project but Status "
+            f"is null. This is the regression the level-up guards against.",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"OK: filed #{issue_number} → {status}, Priority={args.priority}")
+    print(f"URL: {issue_url}")
+    return 0
 
 
 def _cmd_comment(args: argparse.Namespace) -> int:

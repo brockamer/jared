@@ -126,6 +126,22 @@ class Board:
 
     def run_gh(self, args: list[str]) -> Any:
         """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
+        stdout = self.run_gh_raw(args)
+        if not stdout:
+            return {}
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError as e:
+            raise GhInvocationError(
+                f"gh returned non-JSON output: {stdout[:200]}"
+            ) from e
+
+    def run_gh_raw(self, args: list[str]) -> str:
+        """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
+
+        Some gh commands return plain text (e.g. `gh issue create` prints a URL).
+        Callers that need the raw string use this; JSON responses use run_gh.
+        """
         result = subprocess.run(
             ["gh", *args],
             capture_output=True,
@@ -136,15 +152,7 @@ class Board:
             raise GhInvocationError(
                 f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
             )
-        stdout = result.stdout.strip()
-        if not stdout:
-            return {}
-        try:
-            return json.loads(stdout)
-        except json.JSONDecodeError as e:
-            raise GhInvocationError(
-                f"gh returned non-JSON output: {stdout[:200]}"
-            ) from e
+        return result.stdout.strip()
 
     def find_item_id(self, issue_number: int) -> str:
         """Look up the ProjectV2Item id for a given issue number on this board."""
