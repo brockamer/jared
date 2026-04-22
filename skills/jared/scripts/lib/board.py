@@ -90,11 +90,21 @@ class Board:
             options: dict[str, str] = {}
             field_id: str | None = None
             for line in lines[1:]:
+                # Stop parsing this block if we hit a new section header —
+                # prevents narrative bullets below the field blocks from being
+                # mis-interpreted as options.
+                if line.startswith("#"):
+                    break
                 m = re.match(r"^\s*-\s*Field ID:\s*(\S+)\s*$", line)
                 if m:
                     field_id = m.group(1)
                     continue
-                m = re.match(r"^\s*-\s*(.+?):\s*(OPTION_\S+)\s*$", line)
+                # Option line: "- <Option Name>: <id>" where <id> is any non-
+                # whitespace token. Real gh option IDs are 8-char hex
+                # (e.g. "0369b485"); the test-fixture prefix "OPTION_foo" also
+                # matches. Narrative bullets like "- Backlog: captured but …"
+                # are avoided because a space in the value won't match \S+.
+                m = re.match(r"^\s*-\s*(.+?):\s*(\S+)\s*$", line)
                 if m:
                     options[m.group(1).strip()] = m.group(2).strip()
             if field_id is None:
