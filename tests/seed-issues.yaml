@@ -1,0 +1,88 @@
+# Seed issues for the Jared testbed. Fictional robotics software project.
+# Loaded by tests/testbed-reset.py (created in Phase 2).
+#
+# Status values reflect Jared's 5-column Kanban convention:
+# Backlog / Up Next / In Progress / Blocked / Done.
+#
+# `blocked_by` lists issue numbers that block this one (native GitHub issue
+# dependency edges). Order is defined by the numbered `- title: ...` entries
+# in this file; the reset tool resolves #N references against that order.
+
+- title: "Add stereo-calibration watchdog to perception test harness"
+  priority: High
+  work_stream: Perception
+  status: "In Progress"
+  closed: false
+- title: "Refactor path planner's obstacle inflation"
+  priority: High
+  work_stream: Planning
+  status: "In Progress"
+  closed: false
+  blocked_by: [11]
+- title: "Fleet dashboard: add battery-health column"
+  priority: Medium
+  work_stream: "Fleet Ops"
+  status: "Up Next"
+  closed: false
+- title: "Instrument SLAM drift budget alerts"
+  priority: Medium
+  work_stream: Perception
+  status: "Up Next"
+  closed: false
+  blocked_by: [1]
+- title: "Migrate waypoint serializer to protobuf v3"
+  priority: Medium
+  work_stream: Planning
+  status: "Up Next"
+  closed: false
+- title: "Fix intermittent timeout in fleet heartbeat"
+  priority: High
+  work_stream: "Fleet Ops"
+  status: "Blocked"
+  closed: false
+- title: "Document sensor-extrinsics bootstrap for new hires"
+  priority: Low
+  work_stream: Perception
+  status: Backlog
+  closed: false
+- title: "Prune deprecated trajectory types"
+  priority: Low
+  work_stream: Planning
+  status: Backlog
+  closed: false
+- title: "Add fleet-ops on-call rotation doc"
+  priority: Low
+  work_stream: "Fleet Ops"
+  status: Backlog
+  closed: false
+- title: "Rebuild occupancy grid viewer in React"
+  priority: Medium
+  work_stream: Perception
+  status: Backlog
+  closed: false
+  blocked_by: [11]
+- title: "Replace ad-hoc costmap format with standard grid"
+  priority: Medium
+  work_stream: Planning
+  status: Backlog
+  closed: false
+- title: "Wire up cost alarms for S3 log egress"
+  priority: High
+  work_stream: "Fleet Ops"
+  status: Backlog
+  closed: false
+- title: "Retire v1 telemetry schema"
+  priority: Low
+  work_stream: "Fleet Ops"
+  status: Done
+  closed: true
+- title: "Add dark-mode support to fleet dashboard"
+  priority: Low
+  work_stream: "Fleet Ops"
+  status: Done
+  closed: true
+- title: "Publish perception benchmark baseline"
+  priority: Medium
+  work_stream: Perception
+  status: Done
+  closed: true
