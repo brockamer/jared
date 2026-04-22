@@ -25,7 +25,7 @@ Flow:
    - In Progress items that were actually completed → propose closing
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why
    - Scope discovered but not filed → propose filing new issues now (can use `/jared-file`-style flow inline)
-   - Plans/specs whose issues just closed → propose archival via `~/.claude/skills/jared/scripts/archive-plan.py`
+   - Plans/specs whose issues just closed → propose archival via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
 
 4. **Present all drafts consolidated** for user review:
 
@@ -49,10 +49,11 @@ Flow:
    ```
 
 5. **On approval, apply in order:**
-   - Post Session note comments (one per issue)
-   - Apply reconciliation (close, move, file)
-   - Run `~/.claude/skills/jared/scripts/archive-plan.py --scan` for shippable plans
-   - Update `## Current state` on issues where it meaningfully changed this session (via `~/.claude/skills/jared/scripts/capture-context.py`)
+   - Post Session note comments: for each issue, pipe the note to
+     `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file -`
+   - Apply reconciliation: `jared close <N>` for completed items, `jared move <N> "Backlog"` (or `"Up Next"`) for abandoned ones, `jared file ...` for newly-filed scope
+   - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
+   - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
 
 6. **Confirm and close out.** Print a one-line summary: "Wrapped N issues, filed N new, archived N plans, reconciled N drift items. Ready for next session."
 
