@@ -24,12 +24,11 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 
 STUB_SUBCOMMANDS = [
     "file",
-    "move",
     "close",
     "comment",
     "blocked-by",
 ]
-ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary", "set"]
+ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary", "set", "move"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
     set_p.add_argument("field_name", help='e.g. "Priority" or "Status"')
     set_p.add_argument("value", help='e.g. "High" or "In Progress"')
     set_p.set_defaults(func=_cmd_set)
+
+    move = sub.add_parser(
+        "move",
+        help="Move an issue to a new Status (Backlog/Up Next/In Progress/Blocked/Done).",
+    )
+    move.add_argument("issue_number", type=int)
+    move.add_argument("status", help='e.g. "In Progress"')
+    move.set_defaults(func=_cmd_move)
 
     return parser
 
@@ -112,6 +119,13 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
     }
     print(json.dumps(output, indent=2))
     return 0
+
+
+def _cmd_move(args: argparse.Namespace) -> int:
+    # Shortcut: set Status=<status>. Synthesize the attrs _cmd_set reads.
+    args.field_name = "Status"
+    args.value = args.status
+    return _cmd_set(args)
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
