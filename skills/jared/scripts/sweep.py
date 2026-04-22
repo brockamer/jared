@@ -16,10 +16,11 @@ references/board-sweep.md:
   2. WIP cap — In Progress within limit, flag stalled items
   3. Up Next queue — size and pullable-top check
   4. Aging — High-priority Backlog items >14 days old
-  5. Blocked hygiene — `blocked` label + `## Blocked by` body section
-  6. Legacy priority labels — should be stripped
-  7. Plan/spec drift — active plans citing closed issues, plans without issues
-  8. Session-note freshness — In Progress items without recent Session notes
+  5. Blocked-status hygiene — items in Blocked column have `## Blocked by` section; flag Blocked items >7 days
+  6. Native dependency hygiene — blockedBy edges pointing at closed issues
+  7. Legacy priority labels — should be stripped
+  8. Plan/spec drift — active plans citing closed issues, plans without issues
+  9. Session-note freshness — In Progress items without recent Session notes
 
 Usage:
   sweep.py                             # read config from ./docs/project-board.md
@@ -107,6 +108,41 @@ def fetch_open_issues_bulk(repo: str) -> list[dict]:
     if result.returncode != 0:
         raise RuntimeError(f"gh issue list failed: {result.stderr}")
     return json.loads(result.stdout)
+
+
+def fetch_native_blocked_by(repo: str) -> dict[int, list[dict]]:
+    """One GraphQL call to get blockedBy for all open issues. Returns {number: [{number, state}]}.
+
+    Tries 'blockedBy' first; falls back to 'issueDependencies' on schema error.
+    """
+    owner, name = repo.split("/", 1)
+    for field_name in ("blockedBy", "issueDependencies"):
+        q = (
+            "query($o:String!,$r:String!,$c:String){repository(owner:$o,name:$r){"
+            f"issues(first:100,after:$c,states:OPEN){{pageInfo{{hasNextPage endCursor}}"
+            f"nodes{{number {field_name}(first:20){{nodes{{number state}}}}}}}}}}}}"
+        )
+        result: dict[int, list[dict]] = {}
+        cursor = None
+        try:
+            while True:
+                cmd = ["gh", "api", "graphql", "-f", f"query={q}",
+                       "-F", f"o={owner}", "-F", f"r={name}"]
+                if cursor:
+                    cmd += ["-F", f"c={cursor}"]
+                p = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                data = json.loads(p.stdout)["data"]["repository"]["issues"]
+                for node in data["nodes"]:
+                    result[node["number"]] = node[field_name]["nodes"]
+                if not data["pageInfo"]["hasNextPage"]:
+                    break
+                cursor = data["pageInfo"]["endCursor"]
+            return result
+        except subprocess.CalledProcessError as e:
+            if "Field" in (e.stderr or "") and "doesn" in (e.stderr or ""):
+                continue
+            raise
+    raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
 
 
 def fetch_recent_comments(repo: str, number: int, limit: int = 5) -> list[dict]:
@@ -274,14 +310,48 @@ def check_in_progress_staleness(
     return stale
 
 
-def check_blocked_hygiene(issues_by_number: dict[int, dict]) -> list[str]:
-    findings = []
-    for n, issue in issues_by_number.items():
-        labels = [l["name"] for l in issue.get("labels", [])]
-        if "blocked" in labels:
-            body = issue.get("body", "") or ""
-            if "## Blocked by" not in body:
-                findings.append(f"#{n}: labeled `blocked` but body has no `## Blocked by` section")
+def check_blocked_status_hygiene(
+    items: list[dict],
+    issues_by_number: dict[int, dict],
+    blocked_aging_days: int,
+) -> list[str]:
+    """Items in Blocked Status must have ## Blocked by; flag ones stuck >N days."""
+    findings: list[str] = []
+    today = dt.date.today()
+    for item in items:
+        if (item.get("status") or "").strip() != "Blocked":
+            continue
+        content = item.get("content") or {}
+        n = content.get("number")
+        if not n or n not in issues_by_number:
+            continue
+        issue = issues_by_number[n]
+        body = issue.get("body") or ""
+        if "## Blocked by" not in body:
+            findings.append(f"#{n}: in Blocked status but body has no `## Blocked by` section")
+        updated = issue.get("updatedAt", "")
+        if updated:
+            updated_date = dt.datetime.fromisoformat(updated.replace("Z", "+00:00")).date()
+            age = (today - updated_date).days
+            if age > blocked_aging_days:
+                findings.append(f"#{n}: in Blocked status with no activity for {age} days")
+    return findings
+
+
+def check_native_dependencies(
+    blocked_by: dict[int, list[dict]],
+    issues_by_number: dict[int, dict],
+) -> list[str]:
+    """Flag native blockedBy edges pointing at closed issues — propose removing."""
+    findings: list[str] = []
+    for n, blockers in blocked_by.items():
+        if n not in issues_by_number:
+            continue
+        for b in blockers:
+            if b.get("state") == "CLOSED":
+                findings.append(
+                    f"#{n}: blockedBy #{b['number']} which is closed — propose removing edge"
+                )
     return findings
 
 
@@ -403,6 +473,8 @@ def main() -> int:
     )
     parser.add_argument("--wip-limit", type=int, default=3, help="In Progress cap")
     parser.add_argument("--staleness-days", type=int, default=14, help="High Backlog age threshold")
+    parser.add_argument("--blocked-aging-days", type=int, default=7,
+                        help="Flag Blocked-status items with no activity beyond this (default: 7)")
     args = parser.parse_args()
 
     # Resolve owner/project
@@ -494,12 +566,24 @@ def main() -> int:
             print(f"  {s}")
     print()
 
-    print("== Blocked hygiene ==")
+    print(f"== Blocked-status hygiene (>{args.blocked_aging_days}d) ==")
     if not issues_by_number:
         print("  (skipped — no issue data)")
     else:
-        for f in check_blocked_hygiene(issues_by_number) or ["None"]:
+        for f in check_blocked_status_hygiene(items, issues_by_number, args.blocked_aging_days) or ["None"]:
             print(f"  {f}")
+    print()
+
+    print("== Native dependency hygiene ==")
+    if not repo:
+        print("  (skipped — repo not determined)")
+    else:
+        try:
+            native_blocked_by = fetch_native_blocked_by(repo)
+            for f in check_native_dependencies(native_blocked_by, issues_by_number) or ["None"]:
+                print(f"  {f}")
+        except RuntimeError as e:
+            print(f"  (skipped — {e})")
     print()
 
     print("== Legacy 'priority: *' labels ==")
