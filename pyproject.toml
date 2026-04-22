@@ -23,6 +23,16 @@ packages = []
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Legacy batch scripts (sweep.py, bootstrap-project.py, etc.) pre-date the new
+# ruff config and will be migrated in Phase 3. Exclude them here until that
+# cleanup happens, so Phase 2 lint passes don't surface pre-existing findings.
+extend-exclude = [
+    "skills/jared/scripts/sweep.py",
+    "skills/jared/scripts/bootstrap-project.py",
+    "skills/jared/scripts/archive-plan.py",
+    "skills/jared/scripts/capture-context.py",
+    "skills/jared/scripts/dependency-graph.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
