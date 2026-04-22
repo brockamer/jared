@@ -82,6 +82,52 @@ def test_field_and_option_lookup(tmp_path: Path) -> None:
     assert board.option_id("Priority", "High") == "OPTION_high"
 
 
+def test_field_and_option_lookup_with_real_hex_ids(tmp_path: Path) -> None:
+    """Real GH option IDs are 8-char hex (e.g. '0369b485'), not OPTION_foo.
+
+    Regression test for the parser: bootstrap-project.py writes the IDs that
+    `gh project field-list` returns, and those IDs do not carry the fake
+    OPTION_ prefix the Phase 2 fixtures use. The parser must accept both.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/2
+        - Project number: 2
+        - Project ID: PVT_kwHOAgGulc4BVayY
+        - Owner: brockamer
+        - Repo: brockamer/jared-testbed
+
+        ### Status
+        - Field ID: PVTSSF_lAHOAgGulc4BVayYzhQ2uI0
+        - Backlog: 0369b485
+        - Up Next: 22683596
+        - In Progress: d58e3645
+        - Blocked: 423ecf89
+        - Done: 727e952b
+
+        ### Priority
+        - Field ID: PVTSSF_lAHOAgGulc4BVayYzhQ2uak
+        - High: 701eda34
+        - Medium: bda6ffa1
+        - Low: bf0a61ce
+
+        Narrative follows — bullets like "- Backlog: Captured but not yet
+        scheduled." below this point must not pollute the options map.
+        """)
+    )
+
+    board = Board.from_path(board_md)
+
+    assert board.field_id("Status") == "PVTSSF_lAHOAgGulc4BVayYzhQ2uI0"
+    assert board.option_id("Status", "Backlog") == "0369b485"
+    assert board.option_id("Status", "Blocked") == "423ecf89"
+    assert board.option_id("Priority", "High") == "701eda34"
+
+
 def test_unknown_field_raises(tmp_path: Path) -> None:
     from skills.jared.scripts.lib.board import Board, FieldNotFound
 
