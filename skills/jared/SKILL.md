@@ -78,7 +78,7 @@ On deck: #<M> <title>, #<P> <title>
 Blockers: #<Q> (<reason>)
 ```
 
-This replaces the handoff-prompt pattern entirely. Run `scripts/board-summary.sh` if you want a quick surface; for full context use the richer query in `references/session-continuity.md`.
+This replaces the handoff-prompt pattern entirely. Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` for a quick surface; for full context see the richer query in `references/session-continuity.md`.
 
 ### Before substantive work — confirm it's on the board
 
