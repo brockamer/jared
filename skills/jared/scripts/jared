@@ -24,9 +24,8 @@ STUB_SUBCOMMANDS = [
     "close",
     "comment",
     "blocked-by",
-    "summary",
 ]
-ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item"]
+ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     get_item.add_argument("issue_number", type=int)
     get_item.set_defaults(func=_cmd_get_item)
+
+    summary = sub.add_parser("summary", help="One-screen board status summary.")
+    summary.set_defaults(func=_cmd_summary)
 
     return parser
 
@@ -99,6 +101,51 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
         "fields": {k: v for k, v in match.items() if k not in excluded},
     }
     print(json.dumps(output, indent=2))
+    return 0
+
+
+def _cmd_summary(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+    data = board.run_gh([
+        "project", "item-list",
+        str(board.project_number),
+        "--owner", board.owner,
+        "--limit", "500",
+        "--format", "json",
+    ])
+    items: list[dict[str, Any]] = data.get("items", [])
+
+    def by_status(status: str) -> list[dict[str, Any]]:
+        return [i for i in items if i.get("status") == status]
+
+    def render_item(item: dict[str, Any], *, with_priority: bool = True) -> str:
+        content = item.get("content") or {}
+        num = content.get("number")
+        title = content.get("title", "")
+        if with_priority:
+            prio = item.get("priority") or "-"
+            return f"  #{num} [{prio}] {title}"
+        return f"  #{num} {title}"
+
+    in_progress = by_status("In Progress")
+    up_next_all = by_status("Up Next")
+    up_next = up_next_all[:3]
+    blocked = by_status("Blocked")
+
+    print(f"Board: {board.project_url}")
+    print()
+    print(f"In Progress ({len(in_progress)}):")
+    for it in in_progress:
+        print(render_item(it))
+    print()
+    print(f"Up Next (top 3 of {len(up_next_all)}):")
+    for it in up_next:
+        print(render_item(it))
+    if blocked:
+        print()
+        print(f"Blocked ({len(blocked)}):")
+        for it in blocked:
+            print(render_item(it, with_priority=False))
     return 0
 
 
