@@ -53,28 +53,17 @@ gh api graphql -f query='
   }' -F issueId=<dependent-id> -F blockingIssueId=<blocker-id>
 ```
 
-## Fallback: body conventions
+## Body context (not parsed)
 
-Use when native dependencies aren't available or for cross-repo dependencies (which the native feature doesn't handle well).
+A `## Depends on` section may appear in an issue body as human-readable prose explaining *why* the dependency matters (context, sequencing rationale, what breaks if violated). It is **not authoritative** and is not parsed by sweeps or scripts. The canonical relationship is always the native `blockedBy` edge.
 
-Two sections in the issue body:
+The `## Blocks` body section is retired. To express the inverse direction, add a `blockedBy` edge on the dependent issue instead.
 
-```markdown
-## Depends on
-- #42 (what this needs)
-- #47
-
-## Blocks
-- #55 (what this is blocking)
-```
-
-Both are `#<number>` references so GitHub auto-links and creates bidirectional mentions. Parsing is regex `#(\d+)` under each heading.
-
-**For cross-repo:** `<owner>/<repo>#N`.
+**For cross-repo dependencies** (native `blockedBy` doesn't cross repos), a prose note in `## Depends on` is acceptable as a human reminder. The relationship will not appear in native dependency views.
 
 ## Building a dependency graph
 
-`scripts/dependency-graph.py` walks both mechanisms (native + body-convention) and builds a directed graph.
+`scripts/dependency-graph.py` reads native `blockedBy` and builds a directed graph.
 
 ```bash
 # Full summary
