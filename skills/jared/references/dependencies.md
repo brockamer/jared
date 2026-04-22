@@ -4,25 +4,26 @@ Dependencies between issues — "A must ship before B can start" — are first-c
 
 ## Primary: native GitHub issue dependencies
 
-GitHub issue dependencies are GA. Prefer them over body conventions. They render natively in issue timelines and Projects views, and a `gh api graphql` call creates them.
+GitHub issue dependencies are GA. Prefer them over body conventions — they render natively in issue timelines and Projects views, and the `jared` CLI manages them atomically.
 
 ### Creating a dependency
 
 ```bash
-# Get node IDs for both issues
-BLOCKER_ID=$(gh issue view <A> --repo <owner>/<repo> --json id --jq '.id')
-DEPENDENT_ID=$(gh issue view <B> --repo <owner>/<repo> --json id --jq '.id')
-
 # Mark B blocked by A
-gh api graphql -f query='
-  mutation($issueId: ID!, $blockingIssueId: ID!) {
-    addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
-      issue { number }
-    }
-  }' -F issueId="$DEPENDENT_ID" -F blockingIssueId="$BLOCKER_ID"
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <B> <A>
+```
+
+Under the hood the CLI resolves both issue node-IDs via `gh issue view` and runs the `addBlockedBy` GraphQL mutation. See `references/jared-cli.md` for the full subcommand reference.
+
+### Removing a dependency
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <B> <A> --remove
 ```
 
 ### Reading dependencies
+
+For ad-hoc inspection, `gh api graphql` is the escape hatch:
 
 ```bash
 gh api graphql -f query='
@@ -42,16 +43,7 @@ gh api graphql -f query='
   }' -F owner=<owner> -F repo=<repo> -F number=<issue-number>
 ```
 
-### Removing
-
-```bash
-gh api graphql -f query='
-  mutation($issueId: ID!, $blockingIssueId: ID!) {
-    removeBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
-      issue { number }
-    }
-  }' -F issueId=<dependent-id> -F blockingIssueId=<blocker-id>
-```
+For structural analysis across a whole board, use `dependency-graph.py` (below).
 
 ## Body context (not parsed)
 
@@ -63,17 +55,17 @@ The `## Blocks` body section is retired. To express the inverse direction, add a
 
 ## Building a dependency graph
 
-`scripts/dependency-graph.py` reads native `blockedBy` and builds a directed graph.
+`dependency-graph.py` reads native `blockedBy` and builds a directed graph.
 
 ```bash
 # Full summary
-scripts/dependency-graph.py
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo>
 
 # Just the issues in a specific milestone
-scripts/dependency-graph.py --milestone "v0.2 — Materials Viewer"
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo> --milestone "v0.2 — Materials Viewer"
 
 # Emit Graphviz DOT for rendering
-scripts/dependency-graph.py --format dot > deps.dot
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo> --format dot > deps.dot
 dot -Tpng deps.dot -o deps.png
 ```
 
