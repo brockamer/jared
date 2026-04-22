@@ -16,11 +16,15 @@ Not started.
 
 </details>
 
-## Depends on
-(none)
+<!--
+Dependencies are tracked natively via GitHub's `blockedBy` API, not in body markup.
+Add an edge with: addBlockedBy(issueId, blockingIssueId). See references/dependencies.md.
 
-## Blocks
-(none)
+Add a "## Blocked by" section ONLY when this issue is in the Blocked Status column.
+Format:
+  ## Blocked by
+  Waiting on <person/event>, expected by <date>. <one-line context>
+-->
 
 ## Planning
 (none)

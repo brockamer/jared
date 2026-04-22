@@ -9,7 +9,6 @@ Command reference for board operations. All examples assume values that live in 
 - `<project-number>` — integer project number (e.g., 1)
 - `<project-id>` — node ID starting with `PVT_`
 - `<status-field-id>`, `<priority-field-id>` — standard field node IDs
-- `<work-stream-field-id>` — project-specific field node ID (only if the project defines a Work Stream field)
 - `<backlog-option-id>`, `<up-next-option-id>`, etc. — single-select option IDs
 - `<issue-number>` — integer issue number
 - `<item-id>` — project item node ID (different from issue node ID)
@@ -85,9 +84,6 @@ Not started.
 
 </details>
 
-## Depends on
-(none)
-
 ## Planning
 (none)
 EOF
@@ -126,6 +122,18 @@ gh project item-edit \
   --id <item-id> \
   --field-id <status-field-id> \
   --single-select-option-id <target-status-option-id>
+```
+
+## Moving to Blocked status
+
+Use only when an item was pulled to In Progress and then hit an unanticipated stoppage. Always add a `## Blocked by` section to the issue body naming the unblock owner and the specific event being waited on. Remove the section when the item moves back to In Progress or Backlog.
+
+```bash
+gh project item-edit \
+  --project-id <project-id> \
+  --id <item-id> \
+  --field-id <status-field-id> \
+  --single-select-option-id <blocked-option-id>
 ```
 
 ## Closing an issue + verifying auto-move to Done
@@ -219,27 +227,35 @@ gh issue edit <issue-number> --repo <owner>/<repo> --add-label "bug,pipeline-qua
 gh issue edit <issue-number> --repo <owner>/<repo> --remove-label "priority: high"
 ```
 
-## Dependencies — native GitHub issue dependencies
+## Native dependency mutations
 
-GitHub issue dependencies are GA. Prefer them over body conventions.
+`addBlockedBy` / `removeBlockedBy` are the canonical mutations. Verify names via introspection if uncertain — some schema versions use `addIssueDependency` / `issueDependencies` instead.
 
 ```bash
-# Mark issue B blocked by issue A (via the GraphQL API)
+# Verify actual mutation names
+gh api graphql -f query='{ __type(name: "Mutation") { fields { name } } }' \
+  | python3 -c "import sys,json; print('\n'.join(f['name'] for f in json.load(sys.stdin)['data']['__type']['fields'] if 'block' in f['name'].lower() or 'depend' in f['name'].lower()))"
+
+# Mark issue B blocked by issue A
+BLOCKER_ID=$(gh issue view <A> --repo <owner>/<repo> --json id --jq '.id')
+DEPENDENT_ID=$(gh issue view <B> --repo <owner>/<repo> --json id --jq '.id')
 gh api graphql -f query='
   mutation($issueId: ID!, $blockingIssueId: ID!) {
     addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
       issue { number }
     }
-  }' -F issueId=<issue-b-node-id> -F blockingIssueId=<issue-a-node-id>
+  }' -F issueId="$DEPENDENT_ID" -F blockingIssueId="$BLOCKER_ID"
+
+# Remove an edge
+gh api graphql -f query='
+  mutation($issueId: ID!, $blockingIssueId: ID!) {
+    removeBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
+      issue { number }
+    }
+  }' -F issueId="$DEPENDENT_ID" -F blockingIssueId="$BLOCKER_ID"
 ```
 
-Get issue node IDs via:
-
-```bash
-gh issue view <issue-number> --repo <owner>/<repo> --json id --jq '.id'
-```
-
-If the repo doesn't have dependencies enabled (or you need cross-repo dependencies), fall back to body conventions. See `references/dependencies.md`.
+A `blockedBy` edge does NOT automatically move an item to the Blocked column. Items move to Blocked only when actively stuck during In Progress. See `references/dependencies.md` for the conceptual model.
 
 ## Searching issues
 

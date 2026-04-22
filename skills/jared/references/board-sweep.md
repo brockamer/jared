@@ -37,9 +37,13 @@ Status in particular is easy to miss: GitHub's auto-add-to-project workflow adds
 - Is the top item **pullable**? Specifically: does it have (a) a clear next action stated in the body, (b) acceptance criteria, (c) all dependencies unblocked? If not, propose reshaping it or pulling the next pullable item instead.
 - Up Next items without Priority set — fix.
 
-### 4. Blocked items
+### 4. Blocked-status items
 
-Every `blocked`-labeled item needs a `## Blocked by` section in its body naming the blocker and the owner of unblocking. If the label is on but the section is missing, flag for fix. If the named blocker issue is now closed, propose unblocking.
+Every item currently in the **Blocked Status column** needs a `## Blocked by` section in its body naming the unblock owner and what specifically is being waited on. If a Blocked-status item lacks this section, flag for fix.
+
+Also flag items that have been in Blocked status for more than 7 days — propose unblocking, punting back to Backlog, or breaking the blocker into a smaller issue.
+
+(The old `blocked` label is retired. A `blockedBy` edge alone does not put an issue in the Blocked column. Items move to Blocked only when actively stuck after being pulled to In Progress.)
 
 ### 5. Aging
 
@@ -67,11 +71,14 @@ For each near-term milestone:
 
 ### 9. Dependency hygiene
 
-For each open issue with dependencies (native GitHub issue dependencies or `## Depends on` body section):
+For each open issue with native `blockedBy` edges:
 
-- Referenced issues still exist?
-- Dependent's Priority higher than or equal to its dependencies' Priority? (Priority inversions are red flags.)
+- Referenced blocker still exists and is open? Edges pointing at closed issues should be removed.
+- Dependent's Priority higher than or equal to its blockers' Priority? (Priority inversions are red flags.)
 - Any circular dependencies? Fix hard.
+- Chains >3 deep? Fragile — slip cascades. Consider parallelizing or cutting scope.
+
+`## Depends on` body sections (if present) are prose context only and are not parsed.
 
 Run `scripts/dependency-graph.py --summary` for a compact view.
 
