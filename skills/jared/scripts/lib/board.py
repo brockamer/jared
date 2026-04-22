@@ -163,3 +163,15 @@ class Board:
             f"No project item for issue #{issue_number} in project "
             f"{self.project_number}. Is the issue added to the board?"
         )
+
+    def run_graphql(self, query: str, **variables: str | int | bool) -> Any:
+        """Run a GraphQL query via `gh api graphql` with named variables.
+
+        Uses gh's `-F` for bool/int (so gh casts to the right type) and `-f`
+        for strings. Results come back parsed from JSON.
+        """
+        args = ["api", "graphql", "-f", f"query={query}"]
+        for name, value in variables.items():
+            flag = "-F" if isinstance(value, bool | int) and not isinstance(value, str) else "-f"
+            args.extend([flag, f"{name}={value}"])
+        return self.run_gh(args)
