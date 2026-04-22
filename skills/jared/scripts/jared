@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +25,10 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 
 STUB_SUBCOMMANDS = [
     "file",
-    "close",
     "comment",
     "blocked-by",
 ]
-ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary", "set", "move"]
+ALL_SUBCOMMANDS = [*STUB_SUBCOMMANDS, "get-item", "summary", "set", "move", "close"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     move.add_argument("issue_number", type=int)
     move.add_argument("status", help='e.g. "In Progress"')
     move.set_defaults(func=_cmd_move)
+
+    close_p = sub.add_parser(
+        "close",
+        help="Close issue + verify/force auto-move to Done.",
+    )
+    close_p.add_argument("issue_number", type=int)
+    close_p.set_defaults(func=_cmd_close)
 
     return parser
 
@@ -126,6 +133,50 @@ def _cmd_move(args: argparse.Namespace) -> int:
     args.field_name = "Status"
     args.value = args.status
     return _cmd_set(args)
+
+
+_CLOSE_VERIFY_ATTEMPTS = 3
+_CLOSE_VERIFY_SLEEP_SECS = 1.0
+
+
+def _cmd_close(args: argparse.Namespace) -> int:
+    board = Board.from_path(Path(args.board))
+
+    board.run_gh([
+        "issue", "close",
+        str(args.issue_number),
+        "--repo", board.repo,
+    ])
+
+    # GitHub auto-moves closed issues to Done via its board workflow, but
+    # the propagation is eventually-consistent. Poll a few times before
+    # falling back to an explicit Status=Done via _cmd_set.
+    for _ in range(_CLOSE_VERIFY_ATTEMPTS):
+        data = board.run_gh([
+            "project", "item-list",
+            str(board.project_number),
+            "--owner", board.owner,
+            "--limit", "500",
+            "--format", "json",
+        ])
+        match: dict[str, Any] | None = next(
+            (
+                i for i in data.get("items", [])
+                if (i.get("content") or {}).get("number") == args.issue_number
+            ),
+            None,
+        )
+        if match and match.get("status") == "Done":
+            print(f"OK: closed #{args.issue_number}, board auto-moved to Done")
+            return 0
+        time.sleep(_CLOSE_VERIFY_SLEEP_SECS)
+
+    args.field_name = "Status"
+    args.value = "Done"
+    rc = _cmd_set(args)
+    if rc == 0:
+        print(f"OK: closed #{args.issue_number} (manual move to Done)")
+    return rc
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
