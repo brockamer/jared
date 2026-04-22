@@ -27,7 +27,6 @@ target-version = "py311"
 # ruff config and will be migrated in Phase 3. Exclude them here until that
 # cleanup happens, so Phase 2 lint passes don't surface pre-existing findings.
 extend-exclude = [
-    "skills/jared/scripts/sweep.py",
     "skills/jared/scripts/bootstrap-project.py",
     "skills/jared/scripts/archive-plan.py",
     "skills/jared/scripts/capture-context.py",

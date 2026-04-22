@@ -122,32 +122,10 @@ class Board:
         return options[option]
 
     def run_gh(self, args: list[str]) -> Any:
-        """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
-        stdout = self.run_gh_raw(args)
-        if not stdout:
-            return {}
-        try:
-            return json.loads(stdout)
-        except json.JSONDecodeError as e:
-            raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
+        return run_gh(args)
 
     def run_gh_raw(self, args: list[str]) -> str:
-        """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
-
-        Some gh commands return plain text (e.g. `gh issue create` prints a URL).
-        Callers that need the raw string use this; JSON responses use run_gh.
-        """
-        result = subprocess.run(
-            ["gh", *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise GhInvocationError(
-                f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
-            )
-        return result.stdout.strip()
+        return run_gh_raw(args)
 
     def find_item_id(self, issue_number: int) -> str:
         """Look up the ProjectV2Item id for a given issue number on this board."""
@@ -174,13 +152,47 @@ class Board:
         )
 
     def run_graphql(self, query: str, **variables: str | int | bool) -> Any:
-        """Run a GraphQL query via `gh api graphql` with named variables.
+        return run_graphql(query, **variables)
 
-        Uses gh's `-F` for bool/int (so gh casts to the right type) and `-f`
-        for strings. Results come back parsed from JSON.
-        """
-        args = ["api", "graphql", "-f", f"query={query}"]
-        for name, value in variables.items():
-            flag = "-F" if isinstance(value, bool | int) and not isinstance(value, str) else "-f"
-            args.extend([flag, f"{name}={value}"])
-        return self.run_gh(args)
+
+def run_gh(args: list[str]) -> Any:
+    """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
+    stdout = run_gh_raw(args)
+    if not stdout:
+        return {}
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
+
+
+def run_gh_raw(args: list[str]) -> str:
+    """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
+
+    Some gh commands return plain text (e.g. `gh issue create` prints a URL).
+    Callers that need the raw string use this; JSON responses use run_gh.
+    """
+    result = subprocess.run(
+        ["gh", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise GhInvocationError(
+            f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
+        )
+    return result.stdout.strip()
+
+
+def run_graphql(query: str, **variables: str | int | bool) -> Any:
+    """Run a GraphQL query via `gh api graphql` with named variables.
+
+    Uses gh's `-F` for bool/int (so gh casts to the right type) and `-f`
+    for strings. Results come back parsed from JSON.
+    """
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for name, value in variables.items():
+        flag = "-F" if isinstance(value, bool | int) and not isinstance(value, str) else "-f"
+        args.extend([flag, f"{name}={value}"])
+    return run_gh(args)
