@@ -60,15 +60,7 @@ def test_split_sections_handles_body_with_no_headings() -> None:
 
 
 def test_update_current_state_replaces_body_preserves_heading() -> None:
-    body = (
-        "## Current state\n"
-        "\n"
-        "Old content.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "Criterion A.\n"
-    )
+    body = "## Current state\n\nOld content.\n\n## Acceptance criteria\n\nCriterion A.\n"
     _, sections, _ = cc.split_sections(body)
     cc.update_current_state(sections, "New content line 1.\nLine 2.")
 
