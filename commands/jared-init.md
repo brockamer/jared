@@ -10,9 +10,9 @@ Flow:
    - Does this repo already have a paired GitHub Project? If yes, URL?
    - If not, should Jared create one?
 
-2. **Run `scripts/bootstrap-project.py`.**
+2. **Run `~/.claude/skills/jared/scripts/bootstrap-project.py`.**
    ```bash
-   scripts/bootstrap-project.py --url <project-url> --repo <owner>/<repo>
+   ~/.claude/skills/jared/scripts/bootstrap-project.py --url <project-url> --repo <owner>/<repo>
    ```
    This introspects the board's fields and emits `docs/project-board.md` with IDs filled in. For a fresh project, offers to create Status and Priority. Work Stream is optional — useful when the project has multiple distinct categories of work; skipped when it doesn't. For an existing convention doc, shows a diff.
 
@@ -22,7 +22,7 @@ Flow:
 
    - **Plan/spec drift** in `docs/superpowers/plans/` and `docs/superpowers/specs/`:
      - Plans without `## Issue` sections → propose filing issues or deleting
-     - Plans whose issues are all closed → propose archiving via `scripts/archive-plan.py`
+     - Plans whose issues are all closed → propose archiving via `~/.claude/skills/jared/scripts/archive-plan.py`
      - Specs in the same state → same treatment
 
    - **Legacy priority labels** (`priority: high`, `priority: med`, `priority: low`) — propose stripping from open issues.
@@ -58,7 +58,7 @@ Flow:
 
 5. **Execute approved bundles in order.** Commit the migration as a single commit with a detailed message so the diff is reviewable and reversible (see `references/migration.md` for rollback).
 
-6. **Post-migration sweep.** Run `scripts/sweep.py` to confirm the board is clean. Report residuals.
+6. **Post-migration sweep.** Run `~/.claude/skills/jared/scripts/sweep.py` to confirm the board is clean. Report residuals.
 
 7. **Close with the standard session-start orientation** so the user sees the board in its new steady state.
 
