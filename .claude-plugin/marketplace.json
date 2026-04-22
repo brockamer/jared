@@ -10,7 +10,7 @@
     {
       "name": "jared",
       "description": "Steward a GitHub Projects v2 board as the single source of truth. Files, moves, grooms, and structurally reviews issues with discipline.",
-      "source": ".",
+      "source": "./",
       "category": "development",
       "homepage": "https://github.com/brockamer/jared"
     }
