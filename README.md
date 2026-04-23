@@ -27,8 +27,7 @@ Status, verify. There is no path to "on the board but invisible".
 
 **Status.** v0.2.0, pre-1.0. The plugin's own development runs on a
 Jared-stewarded project board; a dedicated `brockamer/jared-testbed`
-repo backs the integration tests. Seven slash commands, eight CLI
-subcommands, unit + integration test suite.
+repo backs the integration tests.
 
 ---
 
