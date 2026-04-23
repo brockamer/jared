@@ -26,6 +26,9 @@ Thumbs.db
 # Test config
 tests/testbed.env
 
+# Per-user Claude Code permissions (not versioned)
+.claude/settings.local.json
+
 # Local venv
 .venv/
 

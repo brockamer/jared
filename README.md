@@ -4,6 +4,16 @@ Claude Code plugin: a GitHub Projects v2 board steward. Treats the board
 as the single source of truth for what's being worked on. Files, moves,
 grooms, and structurally reviews issues with discipline.
 
+<p align="center">
+  <a href="docs/field-notes-full.png">
+    <img src="docs/field-notes-full.png"
+         alt="Jared — Field Notes: the board is a mirror of reality, not a plan. Click to expand."
+         width="480">
+  </a>
+  <br>
+  <em>Field Notes — why Jared exists. Click to expand.</em>
+</p>
+
 ## Install
 
 ```
@@ -17,6 +27,21 @@ status, or one of the workflow commands: `/jared-file`, `/jared-start`,
 
 If the project has no `docs/project-board.md` yet, run `/jared-init` to
 bootstrap it against an existing (or new) GitHub Projects v2 board.
+
+<details>
+<summary><strong>Pocket reference</strong> — install snippets, triggers, the five board states, the Session-note template, anti-patterns. Click to open.</summary>
+
+<p align="center">
+  <a href="docs/pocket-reference-full.png">
+    <img src="docs/pocket-reference-full.png"
+         alt="Jared — Pocket Reference: install, triggers, board states, session-note template, anti-patterns. Click to expand."
+         width="560">
+  </a>
+  <br>
+  <em>Click the image for full-resolution.</em>
+</p>
+
+</details>
 
 ## Developing
 
