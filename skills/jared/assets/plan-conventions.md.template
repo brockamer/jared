@@ -81,7 +81,7 @@ Both specs and plans are working artifacts. The issue is the permanent record. W
 
 ## After the plan ships
 
-When the issue(s) referenced in the `## Issue` section close:
+When the issue(s) or PR(s) referenced in the `## Issue` section ship (issues closed, PRs merged):
 
 1. **The plan archives.** Move the file to `docs/superpowers/plans/archived/YYYY-MM/` (YYYY-MM is the month the issue closed). Prepend a header:
 

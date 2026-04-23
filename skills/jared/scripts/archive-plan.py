@@ -120,10 +120,13 @@ def archive_one(
     if not refs:
         return f"{plan_path}: no ## Issue section; skipping"
 
-    # Check all referenced issue states
+    # Check all referenced issue states. A plan's ## Issues section may
+    # cite an issue (CLOSED when shipped) or a PR (MERGED when shipped);
+    # both count as "shipped" for archival purposes.
+    SHIPPED = ("CLOSED", "MERGED")
     states = {n: issue_state(repo, n) for n in refs}
-    if not all(s[0] == "CLOSED" for s in states.values()):
-        open_ones = [n for n, (s, _) in states.items() if s != "CLOSED"]
+    if not all(s[0] in SHIPPED for s in states.values()):
+        open_ones = [n for n, (s, _) in states.items() if s not in SHIPPED]
         return f"{plan_path}: not all issues closed (open: {open_ones}); skipping"
 
     # Determine ship date from latest closedAt
@@ -222,7 +225,7 @@ def scan_and_archive(
 # ---------- Main ----------
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--plan", help="Single plan file to archive")
     parser.add_argument(
@@ -238,14 +241,19 @@ def main() -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.plan and not args.scan:
         print("archive-plan: pass --plan <path> or --scan", file=sys.stderr)
         return 1
 
     if args.plan:
-        archive_one(Path(args.plan), args.repo, dry_run=args.dry_run, yes=args.yes)
+        # Surface archive_one's return value on the --plan path so a skip
+        # (e.g. "not all issues closed") is visible instead of vanishing
+        # into exit=0 — matches the --scan loop's reporting.
+        result = archive_one(Path(args.plan), args.repo, dry_run=args.dry_run, yes=args.yes)
+        if result:
+            print(result)
 
     if args.scan:
         plan_dirs = [Path(p) for p in (args.plan_dir or [])] or DEFAULT_PLAN_DIRS
