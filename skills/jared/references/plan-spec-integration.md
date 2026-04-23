@@ -101,7 +101,7 @@ When you want to amend the plan with a material change to the plan itself (not a
 `references/board-sweep.md` flags:
 
 - Active plans (not in `archived/`) with no `## Issue` section.
-- Active plans whose referenced issues are all closed — propose archival.
+- Active plans whose referenced issues/PRs have all shipped (issues CLOSED, PRs MERGED) — propose archival.
 - Active plans whose referenced issues are stale (>30 days no update) — flag for review.
 - Active specs with no `## Issue(s)` section.
 - Issues with a `## Planning` section pointing to a non-existent file (plan was moved/deleted without updating).
@@ -109,7 +109,7 @@ When you want to amend the plan with a material change to the plan itself (not a
 ## The archival script
 
 ```bash
-# Archive a single plan (assumes all referenced issues are closed)
+# Archive a single plan (assumes all referenced issues/PRs have shipped: CLOSED or MERGED)
 scripts/archive-plan.py --plan docs/superpowers/plans/2026-04-17-feature.md
 
 # Batch — find all plans whose issues are closed, propose archival

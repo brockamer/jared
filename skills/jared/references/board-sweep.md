@@ -87,7 +87,7 @@ Run `scripts/dependency-graph.py --summary` for a compact view.
 Scan `docs/superpowers/plans/` (or the project's equivalent):
 
 - Active plans (not in `archived/`) with no `## Issue: #N` section — propose filing an issue or deleting the plan.
-- Active plans whose referenced issues are **all closed** — propose archiving to `archived/YYYY-MM/` with a header pointing to the issue(s).
+- Active plans whose referenced issues/PRs have **all shipped** (issues CLOSED, PRs MERGED) — propose archiving to `archived/YYYY-MM/` with a header pointing to them.
 - Active plans whose referenced issues are stale (>30 days no update) — flag for review.
 
 Same check for `specs/` directory.
