@@ -45,6 +45,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 # mypy can't follow the sys.path manipulation; types are still enforced inside lib.board.
@@ -251,8 +252,21 @@ def check_metadata(items: list[dict]) -> list[str]:
     return missing
 
 
-def check_closed_not_done(items: list[dict]) -> list[str]:
-    """Closed issues should auto-move to Done. If they don't, flag for manual move."""
+def check_closed_not_done(items: list[dict]) -> list[dict]:
+    """Closed issues should auto-move to Done. If they don't, return them.
+
+    Detection-only. Each entry is {number, title, current_status} — callers
+    decide the rendering (e.g. sweep's main() adds the `Propose: jared set
+    <N> Status Done` remediation suffix in its render loop). Keeping
+    format out of the detector means the next sweep-check that needs a
+    Propose-style remediation can follow the same pattern at its own
+    render site without reinventing the formatter here.
+
+    The drift usually comes from projects whose built-in "Item closed →
+    Done" workflow is disabled — paths like `gh issue close` and PR-merge
+    auto-close rely on it entirely (only `jared close` has its own
+    explicit-Status fallback).
+    """
     stuck = []
     for i in items:
         content = i.get("content") or {}
@@ -261,10 +275,28 @@ def check_closed_not_done(items: list[dict]) -> list[str]:
         status = i.get("status") or ""
         if status == "Done":
             continue
-        n = content.get("number")
-        title = (content.get("title") or i.get("title") or "")[:60]
-        stuck.append(f"#{n} [{status or 'no Status'}]: {title}")
+        stuck.append(
+            {
+                "number": content.get("number"),
+                "title": (content.get("title") or i.get("title") or "")[:60],
+                "current_status": status or "no Status",
+            }
+        )
     return stuck
+
+
+def format_closed_not_done_line(entry: dict[str, Any]) -> str:
+    """Render a stuck-item entry with its remediation command.
+
+    Format lives at the sweep/groom render site, not in the detector.
+    Other sweep checks that want a Propose-style suffix follow this same
+    shape — their format helper, their render site.
+    """
+    n = entry["number"]
+    return (
+        f"#{n} [{entry['current_status']}]: {entry['title']} — "
+        f"Propose: jared set {n} Status Done"
+    )
 
 
 def check_wip(items: list[dict], limit: int) -> list[str]:
@@ -638,8 +670,12 @@ def main() -> int:
     print()
 
     print("== Closed items not on Done ==")
-    for line in check_closed_not_done(items) or ["None"]:
-        print(f"  {line}")
+    stuck = check_closed_not_done(items)
+    if stuck:
+        for entry in stuck:
+            print(f"  {format_closed_not_done_line(entry)}")
+    else:
+        print("  None")
     print()
 
     print("== Session-note freshness (In Progress, last 3 days) ==")

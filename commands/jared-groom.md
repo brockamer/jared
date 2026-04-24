@@ -32,6 +32,14 @@ Flow:
    == Aging ==
    - #18 in High Backlog since <date> (26d). Propose downgrade to Medium.
 
+   == Closed ≠ Done ==
+   - #92 [Backlog]: Title — Propose: jared set 92 Status Done
+   - #93 [Backlog]: Title — Propose: jared set 93 Status Done
+   (See sweep.py check_closed_not_done. Stuck items usually come from
+   projects whose "Item closed → Done" workflow is disabled; jared close
+   has a Status=Done fallback but raw `gh issue close` and PR-merge
+   auto-close rely on the workflow.)
+
    == Plan/spec drift ==
    - docs/superpowers/plans/2026-04-10-feature.md references only closed issues. Propose archiving via ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py.
    - docs/superpowers/specs/2026-04-02-xyz.md has no ## Issue(s) section. Propose filing or deleting.
@@ -52,6 +60,7 @@ Flow:
 4. **On approval, apply.** Execute in order (safest first):
    - Metadata fills (Priority, and any other required fields for this project)
    - Label adjustments
+   - Closed ≠ Done fixes (after per-item confirm, run `jared set <N> Status Done`)
    - Aging demotions (after per-item confirm)
    - Plan archivals via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
    - Convention doc patch

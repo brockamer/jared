@@ -51,6 +51,20 @@ Re-running `bootstrap-project.py` on a project whose `docs/project-board.md` is 
 
 All prose, custom sections, code fences, and links are preserved verbatim; only the bullet block is added. After the patch, the doc parses via the canonical path (no fallback code needed), which the unit tests in `tests/test_bootstrap_project_patch.py` pin.
 
+### Auto-move workflow dependency
+
+GitHub Projects v2 has a built-in workflow called "Item closed" that moves items to the Done status whenever their underlying issue/PR closes. Jared's close discipline assumes it's enabled — and `bootstrap-project.py` now queries the project's workflows on init and emits a loud stderr warning when the workflow is off.
+
+Three close paths, one of them safe either way:
+
+| Path | Requires the workflow? |
+|---|---|
+| `jared close <N>` | No — polls for auto-move, falls back to explicit `Status=Done` |
+| `gh issue close <N>` | **Yes** — no fallback |
+| PR merge with `Closes #N` | **Yes** — no fallback |
+
+If you run on a project with the workflow off, paths 2 and 3 silently leave items in their pre-close Status column (typically Backlog or In Progress) while GitHub reports them as closed. `sweep.py` / `/jared-groom` detect this (`check_closed_not_done`) and now propose `jared set <N> Status Done` per stuck item — the routine sweep drains the drift instead of just reporting it.
+
 ### 3. Optional: scaffold Superpowers-style planning
 
 If the user wants plan/spec artifacts (many software projects do), offer to scaffold:
