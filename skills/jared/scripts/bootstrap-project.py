@@ -40,7 +40,7 @@ from lib.board import (
 )
 
 STANDARD_FIELDS = {
-    "Status": ["Backlog", "Up Next", "In Progress", "Done"],
+    "Status": ["Backlog", "Up Next", "In Progress", "Blocked", "Done"],
     "Priority": ["High", "Medium", "Low"],
     "Work Stream": [],  # User-defined
 }
@@ -290,7 +290,7 @@ file directly.
 
 - In Progress stays small. More than ~{wip_limit} items means focus is scattered.
 - Up Next is ordered — top item is what gets worked next. Priority field breaks ties.
-- Nothing in In Progress without Priority and Work Stream set.
+- {in_progress_rule}
 - When an issue closes, it moves to Done automatically.
 
 ## Priority field
@@ -305,12 +305,7 @@ file directly.
 
 ## Work Stream field
 
-{work_stream_table}
-
-**Rules:**
-
-- Work streams are project-specific and describe the kind of work, not its priority or status.
-- Every open issue should belong to exactly one work stream.
+{work_stream_section}
 
 ## Labels
 
@@ -325,7 +320,9 @@ Suggested defaults (create via `gh label create` as needed):
 | `enhancement` | New capability |
 | `refactor` | Restructuring without behavior change |
 | `documentation` | Docs-only change |
-| `blocked` | Waiting on a dependency (must pair with `## Blocked by` in body) |
+
+**Do not** create a `blocked` label. Blocked is a Status column on this
+board, not a label — see Status above.
 
 Project-specific scope labels (e.g., `infra`, `frontend`, `customer-facing`) belong here
 too — add them as needed.
@@ -334,14 +331,9 @@ too — add them as needed.
 
 When a new issue is filed:
 
-1. **Auto-add to board.** `gh issue create` does not auto-add; use
-   `gh project item-add {project_number} --owner {owner} --url <issue-url>`.
-2. **Set Priority** — High / Medium / Low.
-3. **Set Work Stream** — per the fields above.
-4. **Leave Status as Backlog** unless explicitly scheduling.
-5. **Apply labels** for issue type and scope.
+{triage_checklist}
 
-An issue without Priority and Work Stream sorts to the bottom and disappears.
+{triage_disappears}
 
 ## Fields quick reference (for gh project CLI)
 
@@ -490,6 +482,11 @@ def status_table(field: dict | None) -> str:
         "Backlog": "Captured but not yet scheduled.",
         "Up Next": "Scheduled to be picked up next. The on-deck queue.",
         "In Progress": "Actively being worked on right now.",
+        "Blocked": (
+            "Waiting on a dependency. Pair with a `## Blocked by` section "
+            "in the issue body, or use `jared blocked-by` to record a native "
+            "GitHub issue dependency."
+        ),
         "Done": "Closed issues. Auto-populated when an issue closes.",
     }
     for opt in field.get("options", []):
@@ -526,6 +523,59 @@ def work_stream_table(field: dict | None) -> str:
     return "\n".join(rows)
 
 
+def work_stream_section(field: dict | None) -> str:
+    """Render the body of the `## Work Stream field` section.
+
+    When no Work Stream field exists on the board, jared treats the concept as
+    unused: the section survives as a marker (to flag projects that later want
+    to add one) but carries no rules or table.
+    """
+    if field is None:
+        return "_Not used on this project._"
+    return (
+        f"{work_stream_table(field)}\n"
+        "\n"
+        "**Rules:**\n"
+        "\n"
+        "- Work streams are project-specific and describe the kind of work, "
+        "not its priority or status.\n"
+        "- Every open issue should belong to exactly one work stream."
+    )
+
+
+def in_progress_rule(has_work_stream: bool) -> str:
+    """The In Progress rule bullet. Drops Work Stream when the field is absent."""
+    if has_work_stream:
+        return "Nothing in In Progress without Priority and Work Stream set."
+    return "Nothing in In Progress without Priority set."
+
+
+def triage_checklist(has_work_stream: bool, project_number: str, owner: str) -> str:
+    """Numbered triage checklist. Drops step 3 (Set Work Stream) when absent."""
+    steps = [
+        (
+            "**Auto-add to board.** `gh issue create` does not auto-add; use\n"
+            f"   `gh project item-add {project_number} --owner {owner} --url <issue-url>`."
+        ),
+        "**Set Priority** — High / Medium / Low.",
+    ]
+    if has_work_stream:
+        steps.append("**Set Work Stream** — per the fields above.")
+    steps.extend(
+        [
+            "**Leave Status as Backlog** unless explicitly scheduling.",
+            "**Apply labels** for issue type and scope.",
+        ]
+    )
+    return "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
+
+
+def triage_disappears(has_work_stream: bool) -> str:
+    """Final footer line of the triage section. Drops Work Stream when absent."""
+    required = "Priority and Work Stream" if has_work_stream else "Priority"
+    return f"An issue without {required} sorts to the bottom and disappears."
+
+
 def option_id(field: dict | None, name: str) -> str:
     if not field:
         return "<unset>"
@@ -533,6 +583,55 @@ def option_id(field: dict | None, name: str) -> str:
         if opt["name"].lower() == name.lower():
             return opt["id"]
     return "<unset>"
+
+
+def render_doc(
+    *,
+    project_title: str,
+    project_url: str,
+    project_number: str,
+    project_id: str,
+    owner: str,
+    repo: str,
+    bootstrap_date: str,
+    wip_limit: int,
+    status: dict | None,
+    priority: dict | None,
+    work_stream: dict | None,
+) -> str:
+    """Render the full project-board.md convention doc from introspected fields.
+
+    Factored out of `main` so tests can exercise conditional rendering
+    (Work Stream present vs. absent, Blocked column description, etc.)
+    without stubbing `gh` calls.
+    """
+    has_ws = work_stream is not None
+    return TEMPLATE.format(
+        project_title=project_title,
+        project_url=project_url,
+        project_number=project_number,
+        project_id=project_id,
+        owner=owner,
+        repo=repo,
+        bootstrap_date=bootstrap_date,
+        wip_limit=wip_limit,
+        status_columns_table=status_table(status),
+        priority_table=priority_table(priority),
+        work_stream_section=work_stream_section(work_stream),
+        status_field_id=status.get("id", "<unset>") if status else "<unset>",
+        priority_field_id=priority.get("id", "<unset>") if priority else "<unset>",
+        work_stream_field_id=work_stream.get("id", "<unset>") if work_stream else "<unset>",
+        status_options_kv=options_kv_block(status),
+        priority_options_kv=options_kv_block(priority),
+        work_stream_options_kv=options_kv_block(work_stream),
+        status_options_block=options_block(status),
+        priority_options_block=options_block(priority),
+        work_stream_options_block=options_block(work_stream),
+        up_next_option_id=option_id(status, "Up Next"),
+        in_progress_rule=in_progress_rule(has_ws),
+        triage_checklist=triage_checklist(has_ws, project_number, owner),
+        triage_disappears=triage_disappears(has_ws),
+    )
 
 
 # ---------- Main ----------
@@ -659,7 +758,7 @@ def main() -> int:
         print(f"  Note: {[m[0] for m in missing]} missing — skipped creation.")
 
     # Generate convention doc
-    content = TEMPLATE.format(
+    content = render_doc(
         project_title=project_title,
         project_url=args.url,
         project_number=number,
@@ -668,19 +767,9 @@ def main() -> int:
         repo=args.repo,
         bootstrap_date=dt.date.today().isoformat(),
         wip_limit=args.wip_limit,
-        status_columns_table=status_table(status),
-        priority_table=priority_table(priority),
-        work_stream_table=work_stream_table(work_stream),
-        status_field_id=status.get("id", "<unset>") if status else "<unset>",
-        priority_field_id=priority.get("id", "<unset>") if priority else "<unset>",
-        work_stream_field_id=work_stream.get("id", "<unset>") if work_stream else "<unset>",
-        status_options_kv=options_kv_block(status),
-        priority_options_kv=options_kv_block(priority),
-        work_stream_options_kv=options_kv_block(work_stream),
-        status_options_block=options_block(status),
-        priority_options_block=options_block(priority),
-        work_stream_options_block=options_block(work_stream),
-        up_next_option_id=option_id(status, "Up Next"),
+        status=status,
+        priority=priority,
+        work_stream=work_stream,
     )
 
     # Write
