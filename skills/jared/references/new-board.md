@@ -38,6 +38,19 @@ For a genuinely blank project (just created), the script proposes creating:
 
 For existing boards with custom fields, the script preserves them and records them in the convention doc; the user can tell Jared how to interpret any non-standard fields.
 
+### Upgrading an older project-board.md
+
+Projects that were paired with Jared before the machine-readable bullet block existed have a `docs/project-board.md` that carries the project URL only in a markdown link and the Project ID in a code fence, but no `- Project URL:` / `- Project number:` / `- Owner:` / `- Repo:` bullets. The jared CLI's parser tolerates that shape via fallbacks (URL regex, git-remote inference), but the convention doc itself is better off canonical.
+
+Re-running `bootstrap-project.py` on a project whose `docs/project-board.md` is missing any of the five bullets triggers a **patch mode** instead of a full-template rewrite:
+
+1. The script reads the existing doc, detects which bullets are absent, and renders only the five-line bullet block.
+2. It writes a `<output>.new` file containing the existing doc with the bullet block inserted just after the H1 heading.
+3. It shows a unified diff so you can verify nothing else changed.
+4. You approve by `mv`-ing the `.new` over the original (or re-running with `--force`).
+
+All prose, custom sections, code fences, and links are preserved verbatim; only the bullet block is added. After the patch, the doc parses via the canonical path (no fallback code needed), which the unit tests in `tests/test_bootstrap_project_patch.py` pin.
+
 ### 3. Optional: scaffold Superpowers-style planning
 
 If the user wants plan/spec artifacts (many software projects do), offer to scaffold:

@@ -16,6 +16,8 @@ Flow:
    ```
    This introspects the board's fields and emits `docs/project-board.md` with IDs filled in. For a fresh project, offers to create Status and Priority. Work Stream is optional — useful when the project has multiple distinct categories of work; skipped when it doesn't. For an existing convention doc, shows a diff.
 
+   If the existing `docs/project-board.md` predates the machine-readable bullet block (URL only in a markdown link, Project ID in a code fence, no `- Project URL:` / `- Project number:` / `- Owner:` / `- Repo:` bullets), the script enters **patch mode**: it proposes inserting just the bullet block near the top of the file, preserving all prose and custom sections verbatim. See `references/new-board.md` → "Upgrading an older project-board.md".
+
 3. **Run the migration pass** (see `references/migration.md`). Scan for and propose fixing:
 
    - **tmp handoff prompts** (`tmp/next-session-prompt-*.md`, `docs/session-prompts/*`, anything matching the pattern) — propose filing content as retro Session notes on referenced issues, or as new issues for unfiled scope, then delete the source files.
