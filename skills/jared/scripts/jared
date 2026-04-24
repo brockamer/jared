@@ -178,6 +178,56 @@ def _cmd_move(args: argparse.Namespace) -> int:
 _CLOSE_VERIFY_ATTEMPTS = 3
 _CLOSE_VERIFY_SLEEP_SECS = 1.0
 
+_FILE_VERIFY_ATTEMPTS = 3
+_FILE_VERIFY_SLEEP_SECS = 1.0
+
+
+def _poll_for_project_item(
+    board: Board,
+    issue_number: int,
+    *,
+    predicate: "Any",
+    attempts: int,
+    sleep_secs: float,
+) -> dict[str, Any] | None:
+    """Poll `gh project item-list` until predicate(item) is truthy or attempts run out.
+
+    GitHub's project operations are eventually-consistent: item-add, auto-move
+    on close, and status writes can all lag the next read by hundreds of
+    milliseconds. Both _cmd_close and _cmd_file need the same "poll-with-sleep
+    until the mirror reflects reality" pattern — sharing it here keeps the
+    timing shape identical and gives the next verify-site a ready reference.
+
+    Sleep only happens *between* attempts, not after the final one.
+    """
+    for i in range(attempts):
+        data = board.run_gh(
+            [
+                "project",
+                "item-list",
+                str(board.project_number),
+                "--owner",
+                board.owner,
+                "--limit",
+                "500",
+                "--format",
+                "json",
+            ]
+        )
+        match: dict[str, Any] | None = next(
+            (
+                item
+                for item in data.get("items", [])
+                if (item.get("content") or {}).get("number") == issue_number
+            ),
+            None,
+        )
+        if match is not None and predicate(match):
+            return match
+        if i < attempts - 1:
+            time.sleep(sleep_secs)
+    return None
+
 
 def _cmd_close(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
@@ -195,32 +245,16 @@ def _cmd_close(args: argparse.Namespace) -> int:
     # GitHub auto-moves closed issues to Done via its board workflow, but
     # the propagation is eventually-consistent. Poll a few times before
     # falling back to an explicit Status=Done via _cmd_set.
-    for _ in range(_CLOSE_VERIFY_ATTEMPTS):
-        data = board.run_gh(
-            [
-                "project",
-                "item-list",
-                str(board.project_number),
-                "--owner",
-                board.owner,
-                "--limit",
-                "500",
-                "--format",
-                "json",
-            ]
-        )
-        match: dict[str, Any] | None = next(
-            (
-                i
-                for i in data.get("items", [])
-                if (i.get("content") or {}).get("number") == args.issue_number
-            ),
-            None,
-        )
-        if match and match.get("status") == "Done":
-            print(f"OK: closed #{args.issue_number}, board auto-moved to Done")
-            return 0
-        time.sleep(_CLOSE_VERIFY_SLEEP_SECS)
+    match = _poll_for_project_item(
+        board,
+        args.issue_number,
+        predicate=lambda item: item.get("status") == "Done",
+        attempts=_CLOSE_VERIFY_ATTEMPTS,
+        sleep_secs=_CLOSE_VERIFY_SLEEP_SECS,
+    )
+    if match is not None:
+        print(f"OK: closed #{args.issue_number}, board auto-moved to Done")
+        return 0
 
     args.field_name = "Status"
     args.value = "Done"
@@ -328,40 +362,26 @@ def _cmd_file(args: argparse.Namespace) -> int:
             ]
         )
 
-    # 4. Verification: re-read the item and assert it's on the project with Status set.
-    # This is the post-create invariant from the level-up feedback.
-    verify = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
-    seen = next(
-        (
-            i
-            for i in verify.get("items", [])
-            if (i.get("content") or {}).get("number") == issue_number
-        ),
-        None,
+    # 4. Verification: poll until the item is on the project AND its Status is
+    # set. The two were previously separate single-shot checks that both flaked
+    # under eventual-consistency lag on item-add. The shared helper polls with
+    # a short sleep between attempts so the common case (state already
+    # consistent on the first read) costs nothing, while a stale first read
+    # still converges.
+    seen = _poll_for_project_item(
+        board,
+        issue_number,
+        predicate=lambda item: bool(item.get("status")),
+        attempts=_FILE_VERIFY_ATTEMPTS,
+        sleep_secs=_FILE_VERIFY_SLEEP_SECS,
     )
     if seen is None:
+        total_wait = _FILE_VERIFY_SLEEP_SECS * (_FILE_VERIFY_ATTEMPTS - 1)
         print(
-            f"error: filed issue #{issue_number} but post-create verification "
-            f"could not find it on project {board.project_number}",
-            file=sys.stderr,
-        )
-        return 2
-    if not seen.get("status"):
-        print(
-            f"error: filed issue #{issue_number} is on the project but Status "
-            f"is null. This is the regression the level-up guards against.",
+            f"error: filed issue #{issue_number}; post-create verification could "
+            f"not confirm it on project {board.project_number} within {total_wait:g}s. "
+            f"The issue may still be on the board — inspect manually with "
+            f"`jared get-item {issue_number}`.",
             file=sys.stderr,
         )
         return 2
