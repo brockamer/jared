@@ -417,6 +417,10 @@ def test_git_remote_inference_parses_common_forms(
         ("https://github.com/brockamer/jared\n", "brockamer/jared"),
         ("ssh://git@github.com/brockamer/jared.git\n", "brockamer/jared"),
         ("git@github.com:owner/repo-with-dashes.git\n", "owner/repo-with-dashes"),
+        # Repo names with dots (e.g. `claude.vim`) must not confuse the
+        # optional `.git` suffix stripper.
+        ("git@github.com:someone/claude.vim.git\n", "someone/claude.vim"),
+        ("https://github.com/someone/claude.vim\n", "someone/claude.vim"),
     ]
 
     for remote_url, expected in cases:
