@@ -87,3 +87,43 @@ def test_comment_from_stdin(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     assert bodies == ["comment from stdin"]
+
+
+def test_comment_handles_plain_text_url_response(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """gh issue comment returns a plain-text URL on stdout, not JSON.
+
+    Regression for #24: _cmd_comment used the JSON-parsing wrapper and every
+    successful invocation printed `gh returned non-JSON output: <url>` to
+    stderr, making the user think the post failed.
+    """
+    board_md = write_minimal_board(tmp_path)
+    body_file = tmp_path / "note.md"
+    body_file.write_text("hello")
+
+    url = "https://github.com/brockamer/findajob/issues/42#issuecomment-4312200024"
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        return FakeGhResult(stdout=url)
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body-file",
+            str(body_file),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.err == ""
+    assert "OK:" in captured.out
+    assert "42" in captured.out
+    assert url in captured.out
