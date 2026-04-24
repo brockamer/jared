@@ -1,3 +1,7 @@
+---
+**Shipped in #4, #8, #9, #10, #12, #13, #18, #22, #24, #25 on 2026-04-24. Final decisions captured in issue body.**
+---
+
 # Jared Level-Up Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -11,6 +15,19 @@
 **Spec:** `docs/superpowers/specs/2026-04-22-jared-levelup-design.md` — read it first. This plan implements that spec phase-by-phase.
 
 **Convention:** Scripts invoked from skill/command context use `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared <subcommand>`. Never hardcode `~/.claude/skills/...` paths.
+
+## Issue(s)
+
+- #4 — jared file: GraphQL rate limit during batch filing
+- #8 — jared CLI: leaked tracebacks from typed exceptions
+- #9 — jared parser: pre-header-block project-board.md rejection
+- #10 — jared file: single-shot verification vs. eventual-consistency lag
+- #12 — jared CLI: inconsistent error-message prefix
+- #13 — jared-init: legacy project-board.md detect + patch
+- #18 — Closed issues stuck in pre-close Status column
+- #22 — jared close: poll retry + symmetric rate-limit handling
+- #24 — jared comment: parses gh plain-text URL response as JSON
+- #25 — jared-init: link Projects v2 board to repo
 
 ---
 
