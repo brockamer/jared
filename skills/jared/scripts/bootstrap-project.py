@@ -103,6 +103,54 @@ def fetch_workflows(owner_type: str, owner: str, number: str) -> list[dict]:
     return nodes if isinstance(nodes, list) else []
 
 
+def link_project_to_repo(project_id: str, repo_slug: str) -> tuple[bool, str]:
+    """Link a ProjectV2 to a repository so it appears under <repo> → Projects tab.
+
+    GitHub's `linkProjectV2ToRepository` mutation is idempotent — re-running
+    against an already-linked pair returns the same node and no error. Per
+    #25, callers should always attempt the link when both IDs are in scope
+    and treat failures as warnings (permissions, transient network), not
+    aborts.
+
+    Returns (ok, message). ok=True on successful link (including no-op
+    re-link). ok=False with a diagnostic when the repo can't be resolved or
+    the mutation errors.
+    """
+    if "/" not in repo_slug:
+        return False, f"invalid repo slug (expected owner/repo): {repo_slug}"
+    owner, name = repo_slug.split("/", 1)
+
+    try:
+        repo_data = board_run_graphql(
+            "query($owner: String!, $name: String!) {"
+            " repository(owner: $owner, name: $name) { id }"
+            " }",
+            owner=owner,
+            name=name,
+        )
+    except GhInvocationError as e:
+        return False, f"could not resolve repo id for {repo_slug}: {e}"
+
+    repo_node = ((repo_data or {}).get("data") or {}).get("repository")
+    repo_id = (repo_node or {}).get("id")
+    if not isinstance(repo_id, str):
+        return False, f"repo id not found for {repo_slug}"
+
+    mutation = (
+        "mutation($projectId: ID!, $repositoryId: ID!) {"
+        " linkProjectV2ToRepository("
+        " input: {projectId: $projectId, repositoryId: $repositoryId}"
+        " ) { repository { id } }"
+        " }"
+    )
+    try:
+        board_run_graphql(mutation, projectId=project_id, repositoryId=repo_id)
+    except GhInvocationError as e:
+        return False, str(e)
+
+    return True, f"linked project to {repo_slug}"
+
+
 def find_single_select_field(fields: list[dict], name: str) -> dict | None:
     """Case-insensitive, space-insensitive match on field name."""
     target = name.lower().replace(" ", "")
@@ -561,6 +609,17 @@ def main() -> int:
     project_title = project.get("title", f"Project {number}")
     print(f"  Project: {project_title}")
     print(f"  Fields found: {', '.join(f['name'] for f in fields)}")
+
+    # Link the project to the repo so it appears under <repo> → Projects tab.
+    # Idempotent on GitHub's side; warn but don't abort on failure (#25).
+    ok, link_msg = link_project_to_repo(project_id, args.repo)
+    if ok:
+        print(f"  Linked project #{number} to {args.repo}")
+    else:
+        print(
+            f"  WARNING: could not link project to {args.repo}: {link_msg}",
+            file=sys.stderr,
+        )
 
     # Identify or create standard fields
     status = find_single_select_field(fields, "Status")
