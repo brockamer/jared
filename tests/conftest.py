@@ -49,6 +49,23 @@ def import_cli() -> ModuleType:
     return mod
 
 
+def import_bootstrap() -> ModuleType:
+    """Load `bootstrap-project.py` as a module.
+
+    The hyphen in the filename blocks a normal `import`, and the script
+    isn't on sys.path; SourceFileLoader sidesteps both so tests can exercise
+    the pure helpers (legacy-doc detection, header rendering, etc.) without
+    running the full gh-backed main().
+    """
+    path = SKILL_SCRIPTS / "bootstrap-project.py"
+    loader = SourceFileLoader("bootstrap_project", str(path))
+    spec = importlib.util.spec_from_loader("bootstrap_project", loader)
+    assert spec is not None
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
 def write_minimal_board(tmp_path: Path) -> Path:
     """Write a minimal valid docs/project-board.md into tmp_path/docs/.
 
