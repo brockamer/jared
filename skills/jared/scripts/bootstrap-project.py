@@ -293,6 +293,90 @@ This file is the minimum. See the skill's references for:
 """
 
 
+# ---------- Legacy-doc detection and patching ----------
+#
+# Some projects (e.g. findajob) have a `docs/project-board.md` that predates
+# the machine-readable bullet block: the URL lives in a markdown link, the
+# Project ID is buried in a code fence, and the other three fields aren't
+# written down at all. `lib/board.py` tolerates that shape at parse-time via
+# fallbacks (see #9), but we still want the convention doc itself to be
+# canonicalized when the user opts in. Instead of rewriting the whole doc
+# (which destroys custom prose), we detect the missing bullets and offer a
+# minimal patch that inserts the bullet block near the top, preserving the
+# rest verbatim.
+
+
+HEADER_BULLETS = ["Project URL", "Project number", "Project ID", "Owner", "Repo"]
+
+
+def detect_missing_header_bullets(text: str) -> list[str]:
+    """Return the bullet-field names that aren't present as `- <field>: <val>` lines.
+
+    A bullet is "present" only when it appears as a list item with a non-empty
+    value — e.g., `- Project URL: https://github.com/users/.../projects/1`.
+    Code-fence occurrences (`Project ID:          PVT_...`) don't count
+    because the jared CLI's parser only consults the bullet form; the fallback
+    from #9 handles inference from prose but doesn't make the convention doc
+    canonical. Returned list preserves HEADER_BULLETS' order.
+    """
+    missing: list[str] = []
+    for field_name in HEADER_BULLETS:
+        pattern = rf"^\s*-\s*{re.escape(field_name)}:\s*\S+"
+        if not re.search(pattern, text, flags=re.MULTILINE):
+            missing.append(field_name)
+    return missing
+
+
+def render_header_block(
+    *, project_url: str, project_number: int, project_id: str, owner: str, repo: str
+) -> str:
+    """Render the five machine-readable bullets exactly as the full template emits."""
+    return (
+        f"- Project URL: {project_url}\n"
+        f"- Project number: {project_number}\n"
+        f"- Project ID: {project_id}\n"
+        f"- Owner: {owner}\n"
+        f"- Repo: {repo}\n"
+    )
+
+
+def find_header_insertion_point(text: str) -> int:
+    """Return a char offset where the header bullet block should land.
+
+    Heuristic: just after the first H1 heading (and a trailing blank line if
+    present). No H1? Insert at the top. This keeps the block near the file's
+    start — where the jared parser's regex scans hit it first — without
+    displacing a document's leading title or intro paragraph.
+    """
+    m = re.search(r"^#[^\n]*\n", text, flags=re.MULTILINE)
+    if m is None:
+        return 0
+    end = m.end()
+    # If the line after the H1 is blank, skip past it so we don't produce
+    # `# Title\n- Project URL: ...`.
+    if end < len(text) and text[end] == "\n":
+        end += 1
+    return end
+
+
+def patch_legacy_doc(existing: str, header_block: str) -> str:
+    """Insert `header_block` into `existing` at the computed insertion point.
+
+    The inserted content is bracketed by blank lines so the bullets never
+    butt up against surrounding prose or headings. All original prose,
+    headings, code fences, and links are preserved verbatim.
+    """
+    pos = find_header_insertion_point(existing)
+    before = existing[:pos]
+    after = existing[pos:]
+    # Trailing blank line ensures separation from whatever prose follows.
+    separator = "" if after.startswith("\n") else "\n"
+    return f"{before}{header_block}{separator}{after}"
+
+
+# ---------- Full-doc template rendering ----------
+
+
 def options_block(field: dict | None) -> str:
     if not field:
         return "  (field not present)\n"
@@ -413,6 +497,12 @@ def main() -> int:
         return 1
 
     project_id = project.get("id")
+    if not isinstance(project_id, str):
+        print(
+            f"bootstrap: project response missing 'id' field: {project}",
+            file=sys.stderr,
+        )
+        return 1
     project_title = project.get("title", f"Project {number}")
     print(f"  Project: {project_title}")
     print(f"  Fields found: {', '.join(f['name'] for f in fields)}")
@@ -488,7 +578,43 @@ def main() -> int:
         if existing == content:
             print(f"\n{output}: already up to date.")
             return 0
-        # Show diff
+        # Legacy-shape detection: if the existing doc is missing some of the
+        # machine-readable header bullets, propose a minimal patch that
+        # inserts just those bullets, preserving the rest of the file. A
+        # full-template rewrite (the else branch) would destroy custom
+        # prose a project has accumulated.
+        missing_bullets = detect_missing_header_bullets(existing)
+        if missing_bullets:
+            header = render_header_block(
+                project_url=args.url,
+                project_number=int(number),
+                project_id=project_id,
+                owner=owner,
+                repo=args.repo,
+            )
+            patched = patch_legacy_doc(existing, header)
+            print(
+                f"\n{output} is missing the jared header block "
+                f"({', '.join(missing_bullets)})."
+            )
+            print("Proposed patch — insert five machine-readable bullets near the top:\n")
+            for line in difflib.unified_diff(
+                existing.splitlines(keepends=True),
+                patched.splitlines(keepends=True),
+                fromfile=f"{output} (existing)",
+                tofile=f"{output} (patched)",
+            ):
+                sys.stdout.write(line)
+            new_path = output.with_suffix(output.suffix + ".new")
+            new_path.write_text(patched)
+            print(f"\nPatched content written to {new_path}")
+            print(f"Review, then: mv {new_path} {output}   (or re-run with --force)")
+            print(
+                "Note: the rest of your doc (prose, custom sections) is preserved verbatim; "
+                "only the bullet block is added."
+            )
+            return 0
+        # Full-template diff (existing doc has all bullets but differs from template)
         print(f"\n{output} already exists. Diff (existing → new):\n")
         for line in difflib.unified_diff(
             existing.splitlines(keepends=True),
