@@ -1,8 +1,25 @@
+---
+**Shipped in #4, #8, #9, #10, #12, #13, #18, #22, #24, #25 on 2026-04-24. Final decisions captured in issue body.**
+---
+
 # Jared Level-Up — Design Spec
 
 **Date:** 2026-04-22
 **Author:** Daniel Brock (with Claude Opus 4.7)
 **Status:** Approved for implementation planning
+
+## Issue(s)
+
+- #4 — jared file: GraphQL rate limit during batch filing
+- #8 — jared CLI: leaked tracebacks from typed exceptions
+- #9 — jared parser: pre-header-block project-board.md rejection
+- #10 — jared file: single-shot verification vs. eventual-consistency lag
+- #12 — jared CLI: inconsistent error-message prefix
+- #13 — jared-init: legacy project-board.md detect + patch
+- #18 — Closed issues stuck in pre-close Status column
+- #22 — jared close: poll retry + symmetric rate-limit handling
+- #24 — jared comment: parses gh plain-text URL response as JSON
+- #25 — jared-init: link Projects v2 board to repo
 
 ## Summary
 
