@@ -252,7 +252,15 @@ def check_metadata(items: list[dict]) -> list[str]:
 
 
 def check_closed_not_done(items: list[dict]) -> list[str]:
-    """Closed issues should auto-move to Done. If they don't, flag for manual move."""
+    """Closed issues should auto-move to Done. If they don't, flag for manual move.
+
+    Each returned line names the stuck item AND the remediation command, so
+    the /jared-groom conversational flow can propose a concrete next action:
+    `jared set <N> Status Done` per item, with per-item approval. The drift
+    usually comes from projects whose built-in "Item closed → Done" workflow
+    is disabled — paths like `gh issue close` and PR-merge auto-close rely
+    on it entirely (only `jared close` has its own explicit-Status fallback).
+    """
     stuck = []
     for i in items:
         content = i.get("content") or {}
@@ -263,7 +271,10 @@ def check_closed_not_done(items: list[dict]) -> list[str]:
             continue
         n = content.get("number")
         title = (content.get("title") or i.get("title") or "")[:60]
-        stuck.append(f"#{n} [{status or 'no Status'}]: {title}")
+        stuck.append(
+            f"#{n} [{status or 'no Status'}]: {title} — "
+            f"Propose: jared set {n} Status Done"
+        )
     return stuck
 
 
