@@ -175,6 +175,51 @@ def _cmd_move(args: argparse.Namespace) -> int:
 _CLOSE_VERIFY_ATTEMPTS = 3
 _CLOSE_VERIFY_SLEEP_SECS = 1.0
 
+_POLL_ITEM_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      projectItems(first: 10) {
+        nodes {
+          id
+          project { number }
+          fieldValues(first: 20) {
+            nodes {
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                field { ... on ProjectV2SingleSelectField { name } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _extract_item_for_project(
+    data: Any, *, project_number: int
+) -> dict[str, Any] | None:
+    """Pick the projectItems node belonging to `project_number` and flatten
+    its fieldValues into {"id", "status", ...}. Status comes from the
+    single-select field literally named "Status"."""
+    issue = ((data or {}).get("data") or {}).get("repository", {}).get("issue")
+    if not issue:
+        return None
+    for node in issue.get("projectItems", {}).get("nodes", []):
+        if (node.get("project") or {}).get("number") != project_number:
+            continue
+        flat: dict[str, Any] = {"id": node.get("id")}
+        for fv in (node.get("fieldValues") or {}).get("nodes", []):
+            field_name = (fv.get("field") or {}).get("name")
+            if field_name:
+                flat[field_name.lower()] = fv.get("name")
+        return flat
+    return None
+
+
 def _poll_for_project_item(
     board: Board,
     issue_number: int,
@@ -183,38 +228,27 @@ def _poll_for_project_item(
     attempts: int,
     sleep_secs: float,
 ) -> dict[str, Any] | None:
-    """Poll `gh project item-list` until predicate(item) is truthy or attempts run out.
+    """Poll a single-item GraphQL query until predicate(item) holds or
+    attempts run out.
 
-    GitHub's project operations are eventually-consistent: item-add, auto-move
-    on close, and status writes can all lag the next read by hundreds of
-    milliseconds. Both _cmd_close and _cmd_file need the same "poll-with-sleep
-    until the mirror reflects reality" pattern — sharing it here keeps the
-    timing shape identical and gives the next verify-site a ready reference.
+    GitHub's project operations are eventually-consistent: auto-move on close
+    can lag the next read by hundreds of milliseconds. Fix for #22: query only
+    the issue's projectItems (scoped to this board's project_number) instead
+    of scanning `gh project item-list --limit 500`, which rate-limits under
+    close sprees.
 
-    Sleep only happens *between* attempts, not after the final one.
+    Returns a dict with at least `id` and `status` keys (other single-select
+    fields flattened by lowercased name), or None if no match passes the
+    predicate within `attempts` tries. Sleep only happens *between* attempts.
     """
     for i in range(attempts):
-        data = board.run_gh(
-            [
-                "project",
-                "item-list",
-                str(board.project_number),
-                "--owner",
-                board.owner,
-                "--limit",
-                "500",
-                "--format",
-                "json",
-            ]
+        data = board.run_graphql(
+            _POLL_ITEM_QUERY,
+            owner=board.owner,
+            repo=board.repo.split("/", 1)[1],
+            number=issue_number,
         )
-        match: dict[str, Any] | None = next(
-            (
-                item
-                for item in data.get("items", [])
-                if (item.get("content") or {}).get("number") == issue_number
-            ),
-            None,
-        )
+        match = _extract_item_for_project(data, project_number=board.project_number)
         if match is not None and predicate(match):
             return match
         if i < attempts - 1:
