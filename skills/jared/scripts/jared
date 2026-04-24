@@ -175,10 +175,6 @@ def _cmd_move(args: argparse.Namespace) -> int:
 _CLOSE_VERIFY_ATTEMPTS = 3
 _CLOSE_VERIFY_SLEEP_SECS = 1.0
 
-_FILE_VERIFY_ATTEMPTS = 3
-_FILE_VERIFY_SLEEP_SECS = 1.0
-
-
 def _poll_for_project_item(
     board: Board,
     issue_number: int,
@@ -357,38 +353,14 @@ def _cmd_file(args: argparse.Namespace) -> int:
             ]
         )
 
-    # 4. Verification: poll until the item appears on the project. The retry
-    # handles eventual-consistency lag between item-add and the next item-list
-    # read. After the helper returns, check Status separately with its own
-    # error message — null Status is a genuine regression (the level-up
-    # atomicity guarantee), not propagation lag, so it deserves a distinct
-    # alarm that names the regression rather than being quietly folded into
-    # the "could not confirm" path.
-    seen = _poll_for_project_item(
-        board,
-        issue_number,
-        predicate=lambda item: True,
-        attempts=_FILE_VERIFY_ATTEMPTS,
-        sleep_secs=_FILE_VERIFY_SLEEP_SECS,
-    )
-    if seen is None:
-        total_wait = _FILE_VERIFY_SLEEP_SECS * (_FILE_VERIFY_ATTEMPTS - 1)
-        print(
-            f"error: filed issue #{issue_number}; post-create verification could "
-            f"not confirm it on project {board.project_number} within {total_wait:g}s. "
-            f"The issue may still be on the board — inspect manually with "
-            f"`jared get-item {issue_number}`.",
-            file=sys.stderr,
-        )
-        return 2
-    if not seen.get("status"):
-        print(
-            f"error: filed issue #{issue_number} is on the project but Status "
-            f"is null. This is the regression the level-up guards against.",
-            file=sys.stderr,
-        )
-        return 2
-
+    # No post-create verification: `gh project item-add` returned the item-id
+    # without error (caught above as GhInvocationError), and each item-edit
+    # mutation either returned exit 0 (write landed server-side) or raised.
+    # Re-reading via `item-list --limit 500` to confirm was the hot path that
+    # drained the GraphQL budget and rate-limited ~11 issues into any batch
+    # filing (#4). If a real write-path regression ever surfaces, a single
+    # `node(id: <item-id>)` GraphQL query would be the cheap verify shape —
+    # one call, not a list-all scan.
     print(f"OK: filed #{issue_number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
     return 0
