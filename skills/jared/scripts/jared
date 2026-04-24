@@ -420,7 +420,8 @@ def _cmd_comment(args: argparse.Namespace) -> int:
         tf.write(body)
         tmp_path = tf.name
     try:
-        board.run_gh(
+        # gh issue comment prints the new comment's URL as plain text, not JSON.
+        comment_url = board.run_gh_raw(
             [
                 "issue",
                 "comment",
@@ -433,7 +434,7 @@ def _cmd_comment(args: argparse.Namespace) -> int:
         )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
-    print(f"OK: commented on #{args.issue_number}")
+    print(f"OK: commented on #{args.issue_number} ({comment_url})")
     return 0
 
 
