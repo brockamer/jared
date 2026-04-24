@@ -45,28 +45,78 @@ class Board:
         if not path.exists():
             raise BoardConfigError(f"Missing {path}. Run /jared-init to bootstrap the project.")
         text = path.read_text()
-        return cls._parse(text, source=str(path))
+        repo_fallback = _infer_repo_from_git(path.parent.parent)
+        return cls._parse(text, source=str(path), repo_fallback=repo_fallback)
 
     @classmethod
-    def _parse(cls, text: str, *, source: str) -> Board:
-        def find(pattern: str) -> str:
+    def _parse(cls, text: str, *, source: str, repo_fallback: str | None = None) -> Board:
+        # Bootstrapped-with-header docs carry machine-readable bullets for all
+        # five fields; older hand-written docs (e.g. pre-bootstrap.py) only
+        # carry the Project ID and put everything else in prose. Each field
+        # tries its bullet first, then a fallback derived from other content
+        # — so canonical docs take the fast path and legacy docs still parse.
+        def find_optional(pattern: str) -> str | None:
             m = re.search(pattern, text, re.MULTILINE)
-            if not m:
-                raise BoardConfigError(
-                    f"Could not find required field matching r'{pattern}' in {source}"
-                )
-            return m.group(1).strip()
+            return m.group(1).strip() if m else None
 
-        project_url = find(r"Project URL:\s*(\S+)")
-        project_number = int(find(r"Project number:\s*(\d+)"))
-        project_id = find(r"Project ID:\s*(\S+)")
-        owner = find(r"Owner:\s*(\S+)")
-        repo = find(r"Repo:\s*(\S+)")
+        # The URL fallback doubles as the source for project_number and owner,
+        # so resolve it first. Accepts either the bullet or the first
+        # github.com/{users,orgs}/<owner>/projects/<N> link in the doc.
+        project_url = find_optional(r"Project URL:\s*(\S+)")
+        url_match: re.Match[str] | None = None
+        if project_url is None:
+            url_match = re.search(
+                r"https?://github\.com/(?:users|orgs)/([^/\s]+)/projects/(\d+)",
+                text,
+            )
+            if url_match is not None:
+                project_url = url_match.group(0)
+        else:
+            url_match = re.search(
+                r"https?://github\.com/(?:users|orgs)/([^/\s]+)/projects/(\d+)",
+                project_url,
+            )
+
+        project_id = find_optional(r"Project ID:\s*(\S+)")
+
+        number_raw = find_optional(r"Project number:\s*(\d+)")
+        project_number_val: int | None = int(number_raw) if number_raw else None
+        if project_number_val is None and url_match is not None:
+            project_number_val = int(url_match.group(2))
+
+        owner = find_optional(r"Owner:\s*(\S+)") or (
+            url_match.group(1) if url_match else None
+        )
+
+        repo = find_optional(r"Repo:\s*(\S+)") or repo_fallback
+
+        missing: list[str] = []
+        if project_url is None:
+            missing.append("Project URL")
+        if project_id is None:
+            missing.append("Project ID")
+        if project_number_val is None:
+            missing.append("Project number")
+        if owner is None:
+            missing.append("Owner")
+        if repo is None:
+            missing.append("Repo")
+        if missing:
+            raise BoardConfigError(
+                f"{source} missing required field(s): {', '.join(missing)}. "
+                "Run /jared-init to bootstrap or patch the file."
+            )
+        # Narrow Optional types after the missing-fields check for mypy.
+        assert project_url is not None
+        assert project_id is not None
+        assert project_number_val is not None
+        assert owner is not None
+        assert repo is not None
 
         field_ids, field_options = cls._parse_field_blocks(text)
 
         return cls(
-            project_number=project_number,
+            project_number=project_number_val,
             project_id=project_id,
             owner=owner,
             repo=repo,
@@ -193,6 +243,33 @@ def run_gh_raw(args: list[str]) -> str:
             f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
         )
     return result.stdout.strip()
+
+
+def _infer_repo_from_git(repo_root: Path) -> str | None:
+    """Return "owner/repo" from `git remote get-url origin`, or None.
+
+    Fallback used when docs/project-board.md doesn't specify a `- Repo:`
+    bullet — older bootstrap-less docs lean on this. Accepts SSH
+    (`git@github.com:owner/repo.git`) and HTTPS
+    (`https://github.com/owner/repo[.git]`) remote forms.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip()
+    m = re.search(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", url)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}"
 
 
 def run_graphql(query: str, **variables: str | int | bool) -> Any:
