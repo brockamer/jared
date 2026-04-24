@@ -61,11 +61,11 @@ def test_cli_unknown_subcommand_exits_nonzero() -> None:
 
 
 # Error-surface invariants: each of the five typed exceptions from lib.board
-# must reach the CLI as a clean one-line stderr message with a non-zero
-# exit. No Python traceback should ever leak for these known error cases —
-# that's the contract CLAUDE.md describes, and main()'s top-level except
-# backstops the per-subcommand catches so a missing catch upstream doesn't
-# regress the user-facing behavior.
+# must reach the CLI as a clean one-line stderr message with the `jared:`
+# prefix and a non-zero exit. No Python traceback should ever leak for these
+# known error cases — that's the contract CLAUDE.md describes, and main()'s
+# top-level except handles all five uniformly so every subcommand's error
+# output looks the same to the user.
 
 
 def _assert_clean_error(out: str, err: str, expected_in_stderr: str) -> None:
@@ -73,6 +73,10 @@ def _assert_clean_error(out: str, err: str, expected_in_stderr: str) -> None:
     assert "Traceback" not in err, f"stderr leaked a traceback:\n{err}"
     assert expected_in_stderr in err, (
         f"expected {expected_in_stderr!r} in stderr, got:\n{err}"
+    )
+    # Every typed-exception error goes through main()'s uniform prefix.
+    assert "jared:" in err, (
+        f"expected 'jared:' prefix in stderr (uniform error format), got:\n{err}"
     )
 
 
@@ -88,9 +92,6 @@ def test_cli_board_config_error_is_clean(
     assert rc == 1
     captured = capsys.readouterr()
     _assert_clean_error(captured.out, captured.err, "Missing")
-    assert "jared:" in captured.err, (
-        "main()'s top-level handler should prefix with 'jared:'"
-    )
 
 
 def test_cli_field_not_found_is_clean(
