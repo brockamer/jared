@@ -57,7 +57,7 @@ file directly.
 - In Progress stays small. More than ~3 items means focus is scattered.
 - Up Next is ordered — top item is what gets worked next. Priority field breaks ties.
 - Nothing in In Progress without Priority set.
-- When an issue closes, it moves to Done automatically.
+- When an issue closes, it moves to Done automatically — but only when the project's built-in "Item closed → Done" workflow is enabled. `jared close` has an explicit Status=Done fallback that works regardless; raw `gh issue close` and PR-merge auto-close rely on the workflow. If the workflow is off, `/jared-groom` flags stuck items and proposes `jared set <N> Status Done` per item.
 
 ## Priority field
 

@@ -35,6 +35,9 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (
     run_gh as board_run_gh,
 )
+from lib.board import (
+    run_graphql as board_run_graphql,
+)
 
 STANDARD_FIELDS = {
     "Status": ["Backlog", "Up Next", "In Progress", "Done"],
@@ -66,6 +69,38 @@ def fetch_project(owner: str, number: str) -> dict:
 def fetch_fields(owner: str, number: str) -> list[dict]:
     data = board_run_gh(["project", "field-list", number, "--owner", owner, "--format", "json"])
     return data.get("fields", [])
+
+
+def fetch_workflows(owner_type: str, owner: str, number: str) -> list[dict]:
+    """Return [{name, enabled, number}, ...] for the project's built-in workflows.
+
+    Returns an empty list (not an error) if the response shape is unexpected
+    — workflow queries are part of GitHub's evolving Projects v2 API surface,
+    and we'd rather degrade to "can't detect" than halt bootstrap. The caller
+    warns when `Item closed` is present-but-disabled; it skips the warning
+    silently when we can't query at all.
+    """
+    root = "organization" if owner_type == "orgs" else "user"
+    query = (
+        "query($owner: String!, $number: Int!) {"
+        f"  {root}(login: $owner) {{"
+        "    projectV2(number: $number) {"
+        "      workflows(first: 30) {"
+        "        nodes { name enabled number }"
+        "      }"
+        "    }"
+        "  }"
+        "}"
+    )
+    try:
+        data = board_run_graphql(query, owner=owner, number=int(number))
+    except GhInvocationError:
+        return []
+    try:
+        nodes = data["data"][root]["projectV2"]["workflows"]["nodes"]
+    except (KeyError, TypeError):
+        return []
+    return nodes if isinstance(nodes, list) else []
 
 
 def find_single_select_field(fields: list[dict], name: str) -> dict | None:
@@ -495,6 +530,26 @@ def main() -> int:
     except (RuntimeError, GhInvocationError) as e:
         print(f"bootstrap: {e}", file=sys.stderr)
         return 1
+
+    # Workflow check: without the built-in "Item closed → Done" workflow,
+    # paths that close issues outside of `jared close` (raw `gh issue close`,
+    # PR-merge auto-close) will leave items stuck in their pre-close Status.
+    # `jared close` itself has an explicit-Status fallback so it stays
+    # correct either way, but users running on this board with the workflow
+    # off will accumulate the drift silently. Warn early.
+    workflows = fetch_workflows(owner_type, owner, number)
+    item_closed = next(
+        (w for w in workflows if w.get("name") == "Item closed"), None
+    )
+    if item_closed is not None and not item_closed.get("enabled"):
+        print(
+            "\nWARNING: the 'Item closed' workflow is DISABLED on this project.\n"
+            "  Closed issues will NOT auto-move to Done unless closed via `jared close`\n"
+            "  (which has an explicit Status=Done fallback). Raw `gh issue close` and\n"
+            "  PR-merge auto-close will leave items stuck in their pre-close column.\n"
+            f"  Enable at: {args.url}/workflows\n",
+            file=sys.stderr,
+        )
 
     project_id = project.get("id")
     if not isinstance(project_id, str):
