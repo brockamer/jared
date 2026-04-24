@@ -8,7 +8,7 @@ Argument parsing: `$ARGUMENTS` may contain `#14`, `14`, a URL, or a short string
 
 Flow:
 
-1. **Check WIP.** Read current In Progress count. If already at the project's configured cap (default 3), STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
+1. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` and read the `In Progress (N)` header — that `N` is the current count. If it's already at the project's configured cap (default 3), STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
 2. **Check pullable state.** Read the target issue's body and verify:
    - First paragraph is a clear summary
