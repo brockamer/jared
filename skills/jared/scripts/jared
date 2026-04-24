@@ -129,11 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _cmd_get_item(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
-    try:
-        item_id = board.find_item_id(args.issue_number)
-    except ItemNotFound as e:
-        print(str(e), file=sys.stderr)
-        return 1
+    item_id = board.find_item_id(args.issue_number)
 
     data = board.run_gh(
         [
@@ -276,25 +272,23 @@ def _cmd_file(args: argparse.Namespace) -> int:
     status = args.status or "Backlog"
 
     # Pre-resolve all field/option IDs before we touch GitHub. Fails fast on
-    # misconfigured board without creating an orphan issue.
-    try:
-        prio_field = board.field_id("Priority")
-        prio_option = board.option_id("Priority", args.priority)
-        status_field = board.field_id("Status")
-        status_option = board.option_id("Status", status)
-        extra_edits: list[tuple[str, str, str]] = []
-        for spec in args.field or []:
-            if "=" not in spec:
-                print(
-                    f"error: --field expects NAME=VALUE, got {spec!r}",
-                    file=sys.stderr,
-                )
-                return 1
-            name, value = spec.split("=", 1)
-            extra_edits.append((name, board.field_id(name), board.option_id(name, value)))
-    except (FieldNotFound, OptionNotFound) as e:
-        print(str(e), file=sys.stderr)
-        return 1
+    # misconfigured board without creating an orphan issue. FieldNotFound /
+    # OptionNotFound propagate to main()'s top-level catch for uniform
+    # `jared:`-prefixed output.
+    prio_field = board.field_id("Priority")
+    prio_option = board.option_id("Priority", args.priority)
+    status_field = board.field_id("Status")
+    status_option = board.option_id("Status", status)
+    extra_edits: list[tuple[str, str, str]] = []
+    for spec in args.field or []:
+        if "=" not in spec:
+            print(
+                f"error: --field expects NAME=VALUE, got {spec!r}",
+                file=sys.stderr,
+            )
+            return 1
+        name, value = spec.split("=", 1)
+        extra_edits.append((name, board.field_id(name), board.option_id(name, value)))
 
     # 1. Create the issue. gh prints the URL on stdout.
     create_args = [
@@ -473,13 +467,9 @@ def _cmd_comment(args: argparse.Namespace) -> int:
 
 def _cmd_set(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
-    try:
-        item_id = board.find_item_id(args.issue_number)
-        field_id = board.field_id(args.field_name)
-        option_id = board.option_id(args.field_name, args.value)
-    except (ItemNotFound, FieldNotFound, OptionNotFound) as e:
-        print(str(e), file=sys.stderr)
-        return 1
+    item_id = board.find_item_id(args.issue_number)
+    field_id = board.field_id(args.field_name)
+    option_id = board.option_id(args.field_name, args.value)
 
     board.run_gh(
         [
