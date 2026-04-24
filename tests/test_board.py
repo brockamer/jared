@@ -284,3 +284,172 @@ def test_run_graphql_passes_query_and_vars(monkeypatch: pytest.MonkeyPatch, tmp_
     # Strings use -f; ints use -F so gh infers numeric type.
     assert "-f" in args and "owner=brockamer" in args
     assert "-F" in args and "number=7" in args
+
+
+# Legacy board-doc fallbacks: older docs (pre-bootstrap-project.py) lack
+# the machine-readable bullet block, so the parser has to infer the header
+# fields from prose + git remote. These tests pin the fallback behavior
+# so a canonical doc and a legacy doc pointing at the same project both
+# parse to identical Board values.
+
+
+_LEGACY_FINDAJOB_PROJECT_URL = "https://github.com/users/brockamer/projects/1"
+_LEGACY_FINDAJOB_DOC = dedent(f"""\
+    # Project Board — How It Works
+
+    The GitHub Projects v2 board at [findajob Pipeline]({_LEGACY_FINDAJOB_PROJECT_URL})
+    is the **single source of truth**.
+
+    ## Fields quick reference
+
+    ```
+    Project ID:          PVT_kwHOAgGulc4BUtxZ
+    Status field ID:     PVTSSF_status
+      Backlog:           opt_backlog
+    Priority field ID:   PVTSSF_prio
+      High:              opt_high
+    ```
+""")
+
+
+def test_legacy_doc_parses_via_url_prose_and_repo_fallback() -> None:
+    """URL in a markdown link, ID in a code block, no owner/repo/number bullets.
+
+    The real repro: findajob's own docs/project-board.md. All four bullet-only
+    fields are absent; everything has to come from fallbacks. Passing
+    `repo_fallback` bypasses the git-subprocess call so the test is hermetic.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    board = Board._parse(
+        _LEGACY_FINDAJOB_DOC,
+        source="<test>",
+        repo_fallback="brockamer/findajob",
+    )
+
+    assert board.project_url == _LEGACY_FINDAJOB_PROJECT_URL
+    assert board.project_number == 1
+    assert board.project_id == "PVT_kwHOAgGulc4BUtxZ"
+    assert board.owner == "brockamer"
+    assert board.repo == "brockamer/findajob"
+
+
+def test_canonical_and_legacy_docs_produce_equivalent_board() -> None:
+    """Canonical (bullets) and legacy (prose) shapes must resolve identically."""
+    from skills.jared.scripts.lib.board import Board
+
+    canonical_text = dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/1
+        - Project number: 1
+        - Project ID: PVT_kwHOAgGulc4BUtxZ
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """)
+
+    canonical = Board._parse(canonical_text, source="<canonical>")
+    legacy = Board._parse(
+        _LEGACY_FINDAJOB_DOC,
+        source="<legacy>",
+        repo_fallback="brockamer/findajob",
+    )
+
+    assert canonical.project_url == legacy.project_url
+    assert canonical.project_number == legacy.project_number
+    assert canonical.project_id == legacy.project_id
+    assert canonical.owner == legacy.owner
+    assert canonical.repo == legacy.repo
+
+
+def test_doc_missing_url_entirely_raises_board_config_error() -> None:
+    """If neither a bullet nor a projects/<N> URL is anywhere in the text, fail."""
+    from skills.jared.scripts.lib.board import Board, BoardConfigError
+
+    text = dedent("""\
+        # Project board
+        Project ID:  PVT_kwHO_xyz
+        (no URL bullet, no markdown link, nothing to infer from)
+    """)
+
+    with pytest.raises(BoardConfigError) as exc:
+        Board._parse(text, source="docs/project-board.md", repo_fallback="brockamer/jared")
+
+    msg = str(exc.value)
+    assert "Project URL" in msg
+    assert "Project number" in msg
+    assert "Owner" in msg
+    # Friendly hint pointing at the fix path.
+    assert "/jared-init" in msg
+
+
+def test_partial_bullet_doc_prefers_bullet_over_fallback() -> None:
+    """If the bullet is present, use its value; don't let the URL-regex fallback win."""
+    from skills.jared.scripts.lib.board import Board
+
+    text = dedent("""\
+        # Header with a link pointing elsewhere:
+        See [sibling project](https://github.com/users/brockamer/projects/99)
+        for context.
+
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_xyz
+        - Owner: brockamer
+        - Repo: brockamer/jared
+    """)
+
+    board = Board._parse(text, source="<test>")
+
+    # Bullet URL wins; the 99 project in prose must not leak through.
+    assert board.project_number == 7
+    assert board.project_url.endswith("/projects/7")
+
+
+def test_git_remote_inference_parses_common_forms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_infer_repo_from_git extracts owner/repo from SSH and HTTPS remote URLs."""
+    from skills.jared.scripts.lib.board import _infer_repo_from_git
+    from tests.conftest import FakeGhResult
+
+    cases = [
+        ("git@github.com:brockamer/jared.git\n", "brockamer/jared"),
+        ("https://github.com/brockamer/jared.git\n", "brockamer/jared"),
+        ("https://github.com/brockamer/jared\n", "brockamer/jared"),
+        ("ssh://git@github.com/brockamer/jared.git\n", "brockamer/jared"),
+        ("git@github.com:owner/repo-with-dashes.git\n", "owner/repo-with-dashes"),
+        # Repo names with dots (e.g. `claude.vim`) must not confuse the
+        # optional `.git` suffix stripper.
+        ("git@github.com:someone/claude.vim.git\n", "someone/claude.vim"),
+        ("https://github.com/someone/claude.vim\n", "someone/claude.vim"),
+    ]
+
+    for remote_url, expected in cases:
+        fake = FakeGhResult(stdout=remote_url, returncode=0)
+        monkeypatch.setattr(
+            "skills.jared.scripts.lib.board.subprocess.run",
+            lambda *a, _r=fake, **kw: _r,
+        )
+        assert _infer_repo_from_git(tmp_path) == expected, remote_url
+
+
+def test_git_remote_inference_returns_none_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If `git remote get-url origin` fails or git is absent, return None."""
+    from skills.jared.scripts.lib.board import _infer_repo_from_git
+    from tests.conftest import FakeGhResult
+
+    failed = FakeGhResult(
+        stdout="", returncode=128, stderr="fatal: No such remote 'origin'"
+    )
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: failed,
+    )
+    assert _infer_repo_from_git(tmp_path) is None
+
+    def _raise_fnf(*a: object, **kw: object) -> None:
+        raise FileNotFoundError("git not on PATH")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", _raise_fnf)
+    assert _infer_repo_from_git(tmp_path) is None
