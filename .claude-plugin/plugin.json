@@ -1,7 +1,7 @@
 {
   "name": "jared",
   "description": "Jared — steward a GitHub Projects v2 board as the single source of truth. Files, moves, grooms, and structurally reviews issues with discipline. Includes /jared, /jared-file, /jared-groom, /jared-reshape, /jared-start, /jared-wrap, /jared-init.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Daniel Brock"
   },
