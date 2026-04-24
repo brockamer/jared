@@ -191,8 +191,13 @@ def test_file_verification_failure_exits_nonzero(
         ]
     )
     captured = capsys.readouterr()
-    assert rc != 0
-    assert "status" in captured.err.lower() or "verification" in captured.err.lower()
+    assert rc == 2
+    # This test simulates the specific null-Status regression (item present
+    # on the board but Status never got set) — distinct from propagation lag.
+    # The error message must name the regression, not the generic "may still
+    # be on the board" wording used for stale-read failures.
+    assert "null" in captured.err.lower()
+    assert "regression" in captured.err.lower()
 
 
 def test_file_verification_retries_through_eventual_consistency(

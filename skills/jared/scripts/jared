@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 # Make sibling lib/ importable regardless of cwd. mypy can't follow the
@@ -186,7 +187,7 @@ def _poll_for_project_item(
     board: Board,
     issue_number: int,
     *,
-    predicate: "Any",
+    predicate: Callable[[dict[str, Any]], bool],
     attempts: int,
     sleep_secs: float,
 ) -> dict[str, Any] | None:
@@ -362,16 +363,17 @@ def _cmd_file(args: argparse.Namespace) -> int:
             ]
         )
 
-    # 4. Verification: poll until the item is on the project AND its Status is
-    # set. The two were previously separate single-shot checks that both flaked
-    # under eventual-consistency lag on item-add. The shared helper polls with
-    # a short sleep between attempts so the common case (state already
-    # consistent on the first read) costs nothing, while a stale first read
-    # still converges.
+    # 4. Verification: poll until the item appears on the project. The retry
+    # handles eventual-consistency lag between item-add and the next item-list
+    # read. After the helper returns, check Status separately with its own
+    # error message — null Status is a genuine regression (the level-up
+    # atomicity guarantee), not propagation lag, so it deserves a distinct
+    # alarm that names the regression rather than being quietly folded into
+    # the "could not confirm" path.
     seen = _poll_for_project_item(
         board,
         issue_number,
-        predicate=lambda item: bool(item.get("status")),
+        predicate=lambda item: True,
         attempts=_FILE_VERIFY_ATTEMPTS,
         sleep_secs=_FILE_VERIFY_SLEEP_SECS,
     )
@@ -382,6 +384,13 @@ def _cmd_file(args: argparse.Namespace) -> int:
             f"not confirm it on project {board.project_number} within {total_wait:g}s. "
             f"The issue may still be on the board — inspect manually with "
             f"`jared get-item {issue_number}`.",
+            file=sys.stderr,
+        )
+        return 2
+    if not seen.get("status"):
+        print(
+            f"error: filed issue #{issue_number} is on the project but Status "
+            f"is null. This is the regression the level-up guards against.",
             file=sys.stderr,
         )
         return 2
