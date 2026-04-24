@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 # Make sibling lib/ importable regardless of cwd. mypy can't follow the
@@ -178,6 +179,56 @@ def _cmd_move(args: argparse.Namespace) -> int:
 _CLOSE_VERIFY_ATTEMPTS = 3
 _CLOSE_VERIFY_SLEEP_SECS = 1.0
 
+_FILE_VERIFY_ATTEMPTS = 3
+_FILE_VERIFY_SLEEP_SECS = 1.0
+
+
+def _poll_for_project_item(
+    board: Board,
+    issue_number: int,
+    *,
+    predicate: Callable[[dict[str, Any]], bool],
+    attempts: int,
+    sleep_secs: float,
+) -> dict[str, Any] | None:
+    """Poll `gh project item-list` until predicate(item) is truthy or attempts run out.
+
+    GitHub's project operations are eventually-consistent: item-add, auto-move
+    on close, and status writes can all lag the next read by hundreds of
+    milliseconds. Both _cmd_close and _cmd_file need the same "poll-with-sleep
+    until the mirror reflects reality" pattern — sharing it here keeps the
+    timing shape identical and gives the next verify-site a ready reference.
+
+    Sleep only happens *between* attempts, not after the final one.
+    """
+    for i in range(attempts):
+        data = board.run_gh(
+            [
+                "project",
+                "item-list",
+                str(board.project_number),
+                "--owner",
+                board.owner,
+                "--limit",
+                "500",
+                "--format",
+                "json",
+            ]
+        )
+        match: dict[str, Any] | None = next(
+            (
+                item
+                for item in data.get("items", [])
+                if (item.get("content") or {}).get("number") == issue_number
+            ),
+            None,
+        )
+        if match is not None and predicate(match):
+            return match
+        if i < attempts - 1:
+            time.sleep(sleep_secs)
+    return None
+
 
 def _cmd_close(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
@@ -195,32 +246,16 @@ def _cmd_close(args: argparse.Namespace) -> int:
     # GitHub auto-moves closed issues to Done via its board workflow, but
     # the propagation is eventually-consistent. Poll a few times before
     # falling back to an explicit Status=Done via _cmd_set.
-    for _ in range(_CLOSE_VERIFY_ATTEMPTS):
-        data = board.run_gh(
-            [
-                "project",
-                "item-list",
-                str(board.project_number),
-                "--owner",
-                board.owner,
-                "--limit",
-                "500",
-                "--format",
-                "json",
-            ]
-        )
-        match: dict[str, Any] | None = next(
-            (
-                i
-                for i in data.get("items", [])
-                if (i.get("content") or {}).get("number") == args.issue_number
-            ),
-            None,
-        )
-        if match and match.get("status") == "Done":
-            print(f"OK: closed #{args.issue_number}, board auto-moved to Done")
-            return 0
-        time.sleep(_CLOSE_VERIFY_SLEEP_SECS)
+    match = _poll_for_project_item(
+        board,
+        args.issue_number,
+        predicate=lambda item: item.get("status") == "Done",
+        attempts=_CLOSE_VERIFY_ATTEMPTS,
+        sleep_secs=_CLOSE_VERIFY_SLEEP_SECS,
+    )
+    if match is not None:
+        print(f"OK: closed #{args.issue_number}, board auto-moved to Done")
+        return 0
 
     args.field_name = "Status"
     args.value = "Done"
@@ -328,33 +363,27 @@ def _cmd_file(args: argparse.Namespace) -> int:
             ]
         )
 
-    # 4. Verification: re-read the item and assert it's on the project with Status set.
-    # This is the post-create invariant from the level-up feedback.
-    verify = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
-    seen = next(
-        (
-            i
-            for i in verify.get("items", [])
-            if (i.get("content") or {}).get("number") == issue_number
-        ),
-        None,
+    # 4. Verification: poll until the item appears on the project. The retry
+    # handles eventual-consistency lag between item-add and the next item-list
+    # read. After the helper returns, check Status separately with its own
+    # error message — null Status is a genuine regression (the level-up
+    # atomicity guarantee), not propagation lag, so it deserves a distinct
+    # alarm that names the regression rather than being quietly folded into
+    # the "could not confirm" path.
+    seen = _poll_for_project_item(
+        board,
+        issue_number,
+        predicate=lambda item: True,
+        attempts=_FILE_VERIFY_ATTEMPTS,
+        sleep_secs=_FILE_VERIFY_SLEEP_SECS,
     )
     if seen is None:
+        total_wait = _FILE_VERIFY_SLEEP_SECS * (_FILE_VERIFY_ATTEMPTS - 1)
         print(
-            f"error: filed issue #{issue_number} but post-create verification "
-            f"could not find it on project {board.project_number}",
+            f"error: filed issue #{issue_number}; post-create verification could "
+            f"not confirm it on project {board.project_number} within {total_wait:g}s. "
+            f"The issue may still be on the board — inspect manually with "
+            f"`jared get-item {issue_number}`.",
             file=sys.stderr,
         )
         return 2
