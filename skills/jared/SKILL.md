@@ -215,7 +215,7 @@ See `references/new-board.md` for the full bootstrap flow and `assets/project-bo
 - **"It's in a comment on the current issue."** Comments don't drive planning. New scope = new issue.
 - **"The plan doc covers it."** The plan serves the issue, not vice versa. If it's not on the issue, it's not tracked.
 - **Using labels for priority or status.** Labels describe *kind*. Priority and Status are fields.
-- **Writing a next-session prompt.** Use `/jared-wrap` instead.
+- **Hand-rolling a next-session prompt outside `/jared-wrap`.** If you want one, ask `/jared-wrap` for it — the wrap-time prompt is derived from durable records (Session notes, board, memory) and stays ephemeral; a hand-rolled tmp file becomes a parallel source of truth and rots. See `references/session-continuity.md` § "Optional handoff prompt".
 - **In Progress > WIP limit.** Focus is scattered. Finish or move out.
 - **High-priority Backlog items >14 days old without review.** Promote, downgrade, or close.
 - **Closing an issue without verifying board auto-moved to Done.**

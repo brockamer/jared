@@ -439,9 +439,7 @@ def test_git_remote_inference_returns_none_on_failure(
     from skills.jared.scripts.lib.board import _infer_repo_from_git
     from tests.conftest import FakeGhResult
 
-    failed = FakeGhResult(
-        stdout="", returncode=128, stderr="fatal: No such remote 'origin'"
-    )
+    failed = FakeGhResult(stdout="", returncode=128, stderr="fatal: No such remote 'origin'")
     monkeypatch.setattr(
         "skills.jared.scripts.lib.board.subprocess.run",
         lambda *a, **kw: failed,
@@ -453,3 +451,112 @@ def test_git_remote_inference_returns_none_on_failure(
 
     monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", _raise_fnf)
     assert _infer_repo_from_git(tmp_path) is None
+
+
+def test_board_parses_jared_config_section(tmp_path: Path) -> None:
+    """Board surfaces session-handoff-prompt and session-start-checks from the
+    optional sections in docs/project-board.md.
+
+    The Jared config bullets are name: value pairs; the Session start checks
+    are fenced bash blocks. Boards without these sections leave both fields
+    at their defaults.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+
+        - session-handoff-prompt: always
+
+        ## Session start checks
+
+        ```bash
+        ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary
+        ```
+
+        ```bash
+        ssh docker.lan 'sudo -u lad docker compose ps'
+        ```
+        """)
+    )
+
+    board = Board.from_path(board_md)
+    assert board.session_handoff_prompt == "always"
+    assert board.session_start_checks == [
+        "${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary",
+        "ssh docker.lan 'sudo -u lad docker compose ps'",
+    ]
+
+
+def test_board_defaults_when_jared_config_absent(tmp_path: Path) -> None:
+    """A board doc with no Jared config / Session start checks sections
+    leaves both fields at their defaults — empty list, ask mode."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.session_handoff_prompt == "ask"
+    assert board.session_start_checks == []
+
+
+def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) -> None:
+    """A `### Status` field block following `## Jared config` must not leak
+    its option bullets (e.g. `- Backlog: <id>`) into the config dict.
+
+    Without the `### ` boundary in the lookahead, the section regex would
+    consume across `### Status`, and the bullet matcher would happily eat
+    `Backlog`, `Done`, etc. as config keys — silently shadowing any future
+    config key whose name collides with an option name.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+
+        - session-handoff-prompt: always
+
+        ### Status
+
+        - Field ID: PVTSSF_status
+        - Backlog: 0369b485
+        - Done: 727e952b
+
+        ## Further conventions
+        """)
+    )
+    board = Board.from_path(board_md)
+    # Only the real config bullet should land in the parsed config; the
+    # option bullets from `### Status` must NOT leak in.
+    assert board.session_handoff_prompt == "always"
+    # The `### Status` block should still parse as a field block — its
+    # option IDs land in `_field_options`, not the config dict.
+    assert board._field_options.get("Status", {}).get("Backlog") == "0369b485"
+    assert board._field_options.get("Status", {}).get("Done") == "727e952b"

@@ -39,6 +39,8 @@ class Board:
     project_url: str
     _field_ids: dict[str, str] = field(default_factory=dict)
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
+    session_handoff_prompt: str = "ask"
+    session_start_checks: list[str] = field(default_factory=list)
 
     @classmethod
     def from_path(cls, path: Path) -> Board:
@@ -84,9 +86,7 @@ class Board:
         if project_number_val is None and url_match is not None:
             project_number_val = int(url_match.group(2))
 
-        owner = find_optional(r"Owner:\s*(\S+)") or (
-            url_match.group(1) if url_match else None
-        )
+        owner = find_optional(r"Owner:\s*(\S+)") or (url_match.group(1) if url_match else None)
 
         repo = find_optional(r"Repo:\s*(\S+)") or repo_fallback
 
@@ -114,6 +114,8 @@ class Board:
         assert repo is not None
 
         field_ids, field_options = cls._parse_field_blocks(text)
+        session_handoff_prompt = cls._parse_jared_config(text).get("session-handoff-prompt", "ask")
+        session_start_checks = cls._parse_session_start_checks(text)
 
         return cls(
             project_number=project_number_val,
@@ -123,6 +125,8 @@ class Board:
             project_url=project_url,
             _field_ids=field_ids,
             _field_options=field_options,
+            session_handoff_prompt=session_handoff_prompt,
+            session_start_checks=session_start_checks,
         )
 
     @staticmethod
@@ -163,6 +167,56 @@ class Board:
             field_options[field_name] = options
 
         return field_ids, field_options
+
+    @staticmethod
+    def _parse_jared_config(text: str) -> dict[str, str]:
+        """Parse the optional `## Jared config` section's bullets.
+
+        Bullets are `- name: value` pairs. Anything that doesn't match the
+        bullet form is skipped. Section ends at the next `##` or `###`
+        heading or end-of-file — stopping at `###` is what keeps a
+        following `### Status` field block (whose option bullets like
+        `- Backlog: <id>` would otherwise look like config bullets) from
+        leaking into the config dict. Returns an empty dict if the
+        section is absent.
+        """
+        m = re.search(
+            r"^## Jared config\s*\n(.*?)(?=^#{2,3}\s|\Z)",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+        if not m:
+            return {}
+        result: dict[str, str] = {}
+        for line in m.group(1).splitlines():
+            bullet = re.match(r"^\s*-\s*([\w-]+):\s*(.+?)\s*$", line)
+            if bullet:
+                result[bullet.group(1)] = bullet.group(2)
+        return result
+
+    @staticmethod
+    def _parse_session_start_checks(text: str) -> list[str]:
+        """Parse the optional `## Session start checks` section's fenced bash blocks.
+
+        Each ```bash ... ``` (or just ``` ... ```) becomes one entry, joined
+        by newlines if the block has multiple lines. Section ends at the
+        next `##` or `###` heading or end-of-file. Returns [] if section
+        is absent.
+        """
+        m = re.search(
+            r"^## Session start checks\s*\n(.*?)(?=^#{2,3}\s|\Z)",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+        if not m:
+            return []
+        section = m.group(1)
+        checks: list[str] = []
+        for fenced in re.finditer(r"```(?:bash)?\s*\n(.*?)```", section, re.DOTALL):
+            body = fenced.group(1).strip()
+            if body:
+                checks.append(body)
+        return checks
 
     def field_id(self, name: str) -> str:
         if name not in self._field_ids:
