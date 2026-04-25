@@ -38,7 +38,7 @@ mypy                            # strict type-check (config in pyproject.toml)
 
 `pyproject.toml` sets `addopts = "-m 'not integration'"` — integration tests are opt-in only; they hit a real `brockamer/jared-testbed` GitHub project and need `tests/testbed.env` (see `tests/testbed-setup.md`).
 
-Several legacy batch scripts (`sweep.py`, `bootstrap-project.py`, `archive-plan.py`, `capture-context.py`, `dependency-graph.py`) are excluded from ruff via `extend-exclude` — Phase 3 will migrate them onto the new `Board` helper. Don't reintroduce lint coverage over them piecemeal without doing the migration.
+The batch scripts (`sweep.py`, `bootstrap-project.py`, `archive-plan.py`, `capture-context.py`, `dependency-graph.py`) all route their `gh` calls through `lib/board.py`'s `run_gh` / `run_gh_raw` / `run_graphql` (imported as `board_run_gh*`). They pass `ruff` and `mypy --strict` cleanly alongside the rest of the tree — no lint or type-check excludes.
 
 ## Architecture — the three-tier operations model
 
@@ -94,7 +94,7 @@ skills/jared/
     jared                 Unified CLI (argparse entry point)
     lib/board.py          Shared Board helper — parse + gh wrapper + lookups
     sweep.py, bootstrap-project.py, dependency-graph.py, capture-context.py, archive-plan.py
-                          Batch scripts — legacy, pre-Board, ruff-excluded
+                          Batch scripts — go through lib/board.py wrappers; pytest + ruff + mypy clean
   assets/                 Templates: issue-body, session-note, project-board.md, plan-conventions
 tests/                    pytest unit + integration suite; conftest has import helpers
 docs/superpowers/         Specs and plans governing this plugin's own work (2026-04-22-jared-levelup)
