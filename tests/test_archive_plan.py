@@ -47,6 +47,44 @@ def test_parse_referenced_issues_extracts_refs_regardless_of_ref_type() -> None:
     assert ap.parse_referenced_issues(text) == [42, 98]
 
 
+def test_parse_referenced_issues_heading_only() -> None:
+    text = "# Plan\n\n## Issue\n\n- #7\n\n## Body\n"
+    assert ap.parse_referenced_issues(text) == [7]
+
+
+def test_parse_referenced_issues_bold_line_issue() -> None:
+    text = "# Design\n\n**Issue:** brockamer/jared#35\n**Status:** Spec\n"
+    assert ap.parse_referenced_issues(text) == [35]
+
+
+def test_parse_referenced_issues_bold_line_tracking_issue() -> None:
+    text = "# Plan\n\n**Goal:** ship X.\n\n**Tracking issue:** brockamer/jared#35.\n"
+    assert ap.parse_referenced_issues(text) == [35]
+
+
+def test_parse_referenced_issues_bold_line_plural_with_multiple_refs() -> None:
+    text = "# Plan\n\n**Issues:** #12, owner/repo#13, https://github.com/o/r/issues/14\n"
+    assert ap.parse_referenced_issues(text) == [12, 13, 14]
+
+
+def test_parse_referenced_issues_heading_wins_over_bold_line() -> None:
+    text = (
+        "# Plan\n\n**Issue:** #99\n\n## Issues\n\n- #1\n- #2\n\n## Body\n"
+    )
+    assert ap.parse_referenced_issues(text) == [1, 2]
+
+
+def test_parse_referenced_issues_neither_form_returns_empty() -> None:
+    text = "# Plan\n\nNo issue references at all.\n\n## Body\n"
+    assert ap.parse_referenced_issues(text) == []
+
+
+def test_parse_referenced_issues_bold_line_only_scanned_near_top() -> None:
+    filler = "\n".join(f"line {i}" for i in range(40))
+    text = f"# Plan\n\n{filler}\n\n**Issue:** #99\n"
+    assert ap.parse_referenced_issues(text) == []
+
+
 def test_archive_one_accepts_merged_pr_as_shipped(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

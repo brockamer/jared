@@ -79,16 +79,41 @@ def write_issue_body(repo: str, number: int, body: str) -> None:
 # ---------- Plan parsing ----------
 
 
+_BOLD_ISSUE_LINE_LOOKAHEAD = 15
+_BOLD_ISSUE_LINE_RE = re.compile(
+    r"^\*\*(?:Tracking\s+)?Issues?:\*\*\s+(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_ISSUE_REF_RE = re.compile(
+    r"(?:https?://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/(\d+)"
+    r"|(?:[\w.-]+/[\w.-]+)?#(\d+))"
+)
+
+
 def parse_referenced_issues(plan_text: str) -> list[int]:
-    """Extract issue numbers from ## Issue / ## Issues / ## Issue(s) section."""
+    """Extract issue numbers from a plan/spec.
+
+    Primary: a `## Issue` / `## Issues` / `## Issue(s)` section heading.
+    Fallback: a `**Issue:**` / `**Issues:**` / `**Tracking issue:**` bold
+    line near the top of the file (scanned across the first
+    `_BOLD_ISSUE_LINE_LOOKAHEAD` non-empty lines).
+
+    Refs are recognized in `#N`, `owner/repo#N`, and full GitHub URL forms.
+    Heading wins when both forms are present.
+    """
     m = re.search(
         r"^#{1,3}\s+Issue[s()]*\s*$([\s\S]+?)(?=^#{1,3}\s|\Z)",
         plan_text,
         re.MULTILINE,
     )
-    if not m:
+    if m:
+        return [int(n) for n in re.findall(r"#(\d+)", m.group(1))]
+
+    head = "\n".join(plan_text.splitlines()[:_BOLD_ISSUE_LINE_LOOKAHEAD])
+    bold = _BOLD_ISSUE_LINE_RE.search(head)
+    if not bold:
         return []
-    return [int(n) for n in re.findall(r"#(\d+)", m.group(1))]
+    return [int(n) for ref in _ISSUE_REF_RE.findall(bold.group(1)) for n in ref if n]
 
 
 def already_archived(path: Path) -> bool:
