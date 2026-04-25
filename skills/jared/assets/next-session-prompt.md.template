@@ -7,7 +7,10 @@
 
 <1–3 sentence narrative synthesized by /jared-wrap from the prior session's
 conversation: release context, what shipped, what's load-bearing right now.
-Falls back to a board-derived bullet list when no synthesis is available.>
+The release-context portion is grounded in the CLI's `## Recently closed
+(last 7 days)` block (produced by `jared next-session-prompt`), which the
+slash command consumes as input to this synthesis. Falls back to a
+board-derived bullet list when no synthesis is available.>
 
 ## What's likely to want attention this session
 
