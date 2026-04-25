@@ -73,3 +73,31 @@ def test_next_session_prompt_renders_basic_sections(
     assert "#251" in out and "v0.4 release" in out
     # Footer warning
     assert "Regenerated each wrap" in out
+    # Section ordering — the slash command depends on this contract
+    in_flight_at = out.find("## In flight")
+    up_next_at = out.find("## Top of Up Next")
+    closed_at = out.find("## Recently closed")
+    to_start_at = out.find("## To start")
+    assert in_flight_at < up_next_at < closed_at < to_start_at, (
+        "Section ordering regressed; slash command depends on this contract."
+    )
+    # Priority bracket appears in In Progress and Up Next bullets
+    assert "[High]" in out
+    assert "[Medium]" in out
+
+
+def test_extract_next_action_handles_empty_body() -> None:
+    """When the **Next action:** field has empty/whitespace body and is
+    followed by another bold paragraph, the extractor returns None rather
+    than slurping the next paragraph as the answer."""
+    mod = import_cli()
+    body = "## Session 2026-04-24\n\n**Next action:**\n\n**Decisions:** none."
+    assert mod._extract_next_action(body) is None
+
+
+def test_extract_next_action_returns_normal_one_liner() -> None:
+    """Sanity check the happy path: a single sentence after **Next action:**
+    returns as a stripped, whitespace-collapsed one-liner."""
+    mod = import_cli()
+    body = "## Session 2026-04-24\n\n**Next action:** decide the   YAML ordering   question."
+    assert mod._extract_next_action(body) == "decide the YAML ordering question."
