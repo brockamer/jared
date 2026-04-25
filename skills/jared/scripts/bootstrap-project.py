@@ -25,6 +25,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -63,12 +64,15 @@ def parse_url(url: str) -> tuple[str, str, str]:
 
 
 def fetch_project(owner: str, number: str) -> dict:
-    return board_run_gh(["project", "view", number, "--owner", owner, "--format", "json"])
+    return cast(
+        dict[Any, Any],
+        board_run_gh(["project", "view", number, "--owner", owner, "--format", "json"]),
+    )
 
 
 def fetch_fields(owner: str, number: str) -> list[dict]:
     data = board_run_gh(["project", "field-list", number, "--owner", owner, "--format", "json"])
-    return data.get("fields", [])
+    return cast(list[dict[Any, Any]], data.get("fields", []))
 
 
 def fetch_workflows(owner_type: str, owner: str, number: str) -> list[dict]:
@@ -237,7 +241,7 @@ def create_single_select_field(project_id: str, name: str, options: list[str]) -
     field = result.get("data", {}).get("createProjectV2Field", {}).get("projectV2Field", {})
     if not field:
         raise RuntimeError(f"Field creation for {name!r} returned no data: {result}")
-    return field
+    return cast(dict[Any, Any], field)
 
 
 # ---------- Doc generation ----------
@@ -581,7 +585,7 @@ def option_id(field: dict | None, name: str) -> str:
         return "<unset>"
     for opt in field.get("options", []):
         if opt["name"].lower() == name.lower():
-            return opt["id"]
+            return cast(str, opt["id"])
     return "<unset>"
 
 

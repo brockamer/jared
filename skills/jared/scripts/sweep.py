@@ -45,7 +45,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 # mypy can't follow the sys.path manipulation; types are still enforced inside lib.board.
@@ -114,7 +114,7 @@ def fetch_items(owner: str, project: str) -> list[dict]:
             "json",
         ]
     )
-    return data.get("items", [])
+    return cast(list[dict[Any, Any]], data.get("items", []))
 
 
 def fetch_open_issues_bulk(repo: str) -> list[dict]:
@@ -203,7 +203,7 @@ def field(item: dict, *keys: str) -> str | None:
     for k in keys:
         v = item.get(k)
         if v:
-            return v
+            return cast(str, v)
     return None
 
 
@@ -212,7 +212,7 @@ def guess_repo_from_items(items: list[dict]) -> str | None:
         content = i.get("content") or {}
         repo = content.get("repository")
         if repo:
-            return repo.replace("https://github.com/", "")
+            return cast(str, repo.replace("https://github.com/", ""))
     return None
 
 
