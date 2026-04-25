@@ -104,4 +104,3 @@ A successful implementation:
 - Reframes SKILL.md line 218 and adds the new section to `session-continuity.md`
 - Adds the two new config keys to the project-board template (`session-handoff-prompt`, `session-start-checks`)
 - Verifies on the jared project itself by running `/jared-wrap` end-to-end and producing a usable prompt
-- Verifies on at least one queue-heavy project (findajob recommended) that a wrap-generated prompt matches the quality of the hand-asked prompts the user has been getting
