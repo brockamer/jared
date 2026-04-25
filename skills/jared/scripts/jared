@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 import time
@@ -35,6 +36,7 @@ ALL_SUBCOMMANDS = [
     "comment",
     "file",
     "blocked-by",
+    "next-session-prompt",
 ]
 
 
@@ -124,6 +126,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dep.set_defaults(func=_cmd_blocked_by)
 
+    nsp = sub.add_parser(
+        "next-session-prompt",
+        help="Emit a board-derived session handoff skeleton (markdown to stdout).",
+    )
+    nsp.set_defaults(func=_cmd_next_session_prompt)
+
     return parser
 
 
@@ -199,9 +207,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
 """
 
 
-def _extract_item_for_project(
-    data: Any, *, project_number: int
-) -> dict[str, Any] | None:
+def _extract_item_for_project(data: Any, *, project_number: int) -> dict[str, Any] | None:
     """Pick the projectItems node belonging to `project_number` and flatten
     its fieldValues into {"id", "status", ...}. Status comes from the
     single-select field literally named "Status"."""
@@ -544,6 +550,198 @@ def _cmd_summary(args: argparse.Namespace) -> int:
         print(f"Blocked ({len(blocked)}):")
         for it in blocked:
             print(render_item(it, with_priority=False))
+    return 0
+
+
+_NEXT_ACTION_RE = re.compile(
+    r"\*\*Next action:\*\*\s*(.+?)(?:\n\n|\n\*\*|\Z)",
+    re.DOTALL,
+)
+
+
+def _extract_next_action(session_note_body: str) -> str | None:
+    """Pull the **Next action:** body from a Session note. Returns None if not found.
+
+    Stops at the next bold-label paragraph or end of body. Whitespace
+    collapsed so the one-liner fits on a single line.
+    """
+    m = _NEXT_ACTION_RE.search(session_note_body)
+    if not m:
+        return None
+    text = m.group(1).strip()
+    return " ".join(text.split())
+
+
+def _date_n_days_ago(days: int) -> str:
+    """ISO date (YYYY-MM-DD) `days` days ago in local time."""
+    from datetime import datetime, timedelta
+
+    return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _now_local_iso() -> str:
+    """Local timezone-naive ISO timestamp to the minute, for prompt headers."""
+    from datetime import datetime
+
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
+    """Mirror of _cmd_summary's item-list call.
+
+    Kept inline rather than refactored into Board to keep this phase's
+    diff narrow; if a third caller appears, lift to Board.list_items().
+    """
+    data = board.run_gh(
+        [
+            "project",
+            "item-list",
+            str(board.project_number),
+            "--owner",
+            board.owner,
+            "--limit",
+            "500",
+            "--format",
+            "json",
+        ]
+    )
+    items: list[dict[str, Any]] = data.get("items", [])
+    return items
+
+
+def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
+    """Use `gh issue list --state closed --search "closed:>YYYY-MM-DD"`.
+
+    Returns a list of {"number", "title", "closedAt"} dicts, sorted by
+    closedAt desc (newest first). Empty list if none.
+    """
+    cutoff = _date_n_days_ago(days)
+    data = board.run_gh(
+        [
+            "issue",
+            "list",
+            "--repo",
+            board.repo,
+            "--state",
+            "closed",
+            "--search",
+            f"closed:>={cutoff}",
+            "--limit",
+            "50",
+            "--json",
+            "number,title,closedAt",
+        ]
+    )
+    # gh returns a top-level list, not an object — run_gh hands back whatever
+    # JSON it parsed. Accept both shapes defensively.
+    items: list[dict[str, Any]]
+    if isinstance(data, list):
+        items = data
+    else:
+        items = data.get("issues", [])
+    items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
+    return items
+
+
+def _latest_session_note_oneliner(board: Board, issue_number: int) -> str | None:
+    """Pull the most recent comment whose body starts with `## Session ` and
+    extract the **Next action:** sentence. Returns None if no Session note
+    exists or no Next action line is found.
+
+    The `## Session ` prefix is the discipline laid out in
+    `references/session-continuity.md` — comments that don't match are
+    ordinary discussion and are skipped.
+    """
+    data = board.run_gh(
+        [
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            board.repo,
+            "--json",
+            "comments",
+        ]
+    )
+    comments = data.get("comments", []) if isinstance(data, dict) else []
+    session_notes = [c for c in comments if (c.get("body") or "").startswith("## Session ")]
+    if not session_notes:
+        return None
+    # gh returns comments in chronological order; the latest is the last one.
+    latest = session_notes[-1]
+    body = latest.get("body", "")
+    return _extract_next_action(body)
+
+
+def _render_in_flight(board: Board, item: dict[str, Any]) -> None:
+    """Print one bullet for an In Progress item with last Session-note one-liner."""
+    content = item.get("content") or {}
+    num = content.get("number")
+    prio = item.get("priority") or "-"
+    title = content.get("title", "")
+    print(f"- #{num} [{prio}] {title}")
+    note_one_liner = _latest_session_note_oneliner(board, num) if isinstance(num, int) else None
+    if note_one_liner is not None:
+        print(f'  Last session: "{note_one_liner}"')
+
+
+def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
+    """Emit a board-derived session handoff skeleton.
+
+    Pure read: lists In Progress (with last Session-note one-liners), top 3
+    Up Next, recently closed (last 7 days), plus a kickoff footer. No
+    GitHub side effects; no synthesis. The /jared-wrap slash command calls
+    this and layers conversation-context synthesis (frame, anti-targets) on
+    top before writing to tmp/next-session-prompt-<TIMESTAMP>.md.
+
+    The output's structural contract is what the slash command depends on,
+    so changes here are user-visible.
+    """
+    board = Board.from_path(Path(args.board))
+    items = _fetch_board_items(board)
+    in_progress = [i for i in items if i.get("status") == "In Progress"]
+    up_next = [i for i in items if i.get("status") == "Up Next"][:3]
+    closed = _fetch_recently_closed(board, days=7)
+
+    print(f"# Session handoff — {board.repo} — {_now_local_iso()}")
+    print()
+    print("## In flight")
+    print()
+    if in_progress:
+        for item in in_progress:
+            _render_in_flight(board, item)
+    else:
+        print("(nothing in progress)")
+    print()
+    print("## Top of Up Next")
+    print()
+    if up_next:
+        for item in up_next:
+            content = item.get("content") or {}
+            prio = item.get("priority") or "-"
+            print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+    else:
+        print("(empty queue)")
+    print()
+    print("## Recently closed (last 7 days)")
+    print()
+    if closed:
+        for c in closed:
+            date = (c.get("closedAt") or "")[:10]
+            print(f"- #{c['number']} {c['title']}  ({date})")
+    else:
+        print("(none)")
+    print()
+    print("## To start")
+    print()
+    print("Read the sections above, decide which issue to pull, then:")
+    print()
+    print("```")
+    print("/jared-start <#N>")
+    print("```")
+    print()
+    print("---")
+    print("Regenerated each wrap; do not edit. Source of truth is the issues, plans, and memory.")
     return 0
 
 
