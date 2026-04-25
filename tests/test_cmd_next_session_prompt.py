@@ -189,3 +189,99 @@ def test_session_note_without_next_action_field_skips_one_liner(
     assert "#9" in out and "Half-noted issue" in out
     # The Next-action extractor returned None; no Last session line
     assert "Last session" not in out
+
+
+def test_include_session_checks_emits_health_check_section(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When the board has Session start checks defined and --include-session-checks
+    is passed, the prompt includes a Quick health check section with the
+    fenced commands. Without the flag, the section is omitted."""
+    from textwrap import dedent
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Session start checks
+
+        ```bash
+        echo health-check-one
+        ```
+
+        ```bash
+        echo health-check-two
+        ```
+        """)
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "item-list": '{"items": []}',
+            "issue list": "[]",
+        },
+    )
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "next-session-prompt",
+            "--include-session-checks",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "## Quick health check on session start" in out
+    assert "echo health-check-one" in out
+    assert "echo health-check-two" in out
+
+
+def test_session_checks_omitted_without_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Even with checks defined, omitting the flag leaves the section out."""
+    from textwrap import dedent
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Session start checks
+
+        ```bash
+        echo should-not-appear
+        ```
+        """)
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "item-list": '{"items": []}',
+            "issue list": "[]",
+        },
+    )
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Quick health check" not in out
+    assert "echo should-not-appear" not in out
