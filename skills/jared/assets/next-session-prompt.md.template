@@ -1,0 +1,43 @@
+# Session handoff — <PROJECT_REPO> — <YYYY-MM-DD HH:MM>
+
+> Regenerated each `/jared-wrap`; do not edit. Source of truth is the
+> issues, plans, and memory.
+
+## Frame
+
+<1–3 sentence narrative synthesized by /jared-wrap from the prior session's
+conversation: release context, what shipped, what's load-bearing right now.
+Falls back to a board-derived bullet list when no synthesis is available.>
+
+## What's likely to want attention this session
+
+<Ordered list with reasoning. Pulls from In Progress + Up Next; the slash
+command layers strategic framing on top — why #N first, what binds the
+sequence. Falls back to plain priority order on a low-context wrap.>
+
+## What NOT to do
+
+<Anti-targets with rationale. Synthesized from: scheduled-agent reminders
+firing in the future, memory entries flagged as session-applicable, and
+explicit user statements during wrap. Empty if no anti-targets surfaced.>
+
+## Context you'll need
+
+- `CLAUDE.md` and any `CLAUDE.local.md` for project + collaborator context
+- `docs/project-board.md` — board conventions
+- Plan/spec files referenced in the active issues' `## Planning` sections
+- Saved memory entries cited in the prior session
+
+## Quick health check on session start
+
+<Only emitted when the board defines `## Session start checks`. The
+slash command runs `jared next-session-prompt --include-session-checks`
+to get this rendered.>
+
+## To start
+
+Read the sections above, decide which issue to pull, then:
+
+```
+/jared-start <#N>
+```

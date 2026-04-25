@@ -96,3 +96,25 @@ This file covers the board itself. See the Jared skill's references for:
 - `references/board-sweep.md` — grooming checklist
 - `references/plan-spec-integration.md` — if this project uses plan/spec artifacts
 - `references/session-continuity.md` — Session note format
+
+## Jared config
+
+Project-level knobs that change Jared's behavior on this board. Each bullet is `name: value`. Omit any line to use its default.
+
+- `session-handoff-prompt: ask` — when `/jared-wrap` finishes, ask whether to draft a session handoff prompt for the next session. Values: `ask` (default), `always`, `never`. Used by `/jared-wrap`. The prompt is written to `tmp/next-session-prompt-<TIMESTAMP>.md` and is `.gitignore`d — ephemeral by design.
+
+## Session start checks
+
+Operational commands that the session handoff prompt should embed in its "Quick health check on session start" section. Each fenced ```bash block is one check command; the slash command runs `jared next-session-prompt --include-session-checks` to render them. Omit the section if you don't want any.
+
+Example for a project with a Docker-hosted operator and a sqlite pipeline:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary
+```
+
+```bash
+ssh docker.lan 'sudo -u lad docker compose -f /opt/stacks/<project>/compose.yaml ps'
+```
+
+These commands are user-authored and user-maintained. Jared does not infer them; if they rot, that's your signal to refresh them.
