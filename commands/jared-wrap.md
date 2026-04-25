@@ -88,4 +88,4 @@ Flow:
 
    **Important contract.** The prompt is **derived**, not authoritative. Session notes on issues, plans, specs, and memory entries are the durable records. The prompt is a one-shot bridge between sessions and is regenerated next wrap. **Do not edit the prompt to record decisions** — capture them on issues, in plans, or as memory entries. The prompt's footer reminds the reader of this; honor it.
 
-The next session's `/jared` or auto-orientation reads these Session notes directly. The handoff prompt is an additional convenience for queue-heavy projects — Session notes remain the durable record.
+The next session's `/jared` or auto-orientation reads these Session notes directly; the handoff prompt is an optional convenience layered on top.
