@@ -516,3 +516,47 @@ def test_board_defaults_when_jared_config_absent(tmp_path: Path) -> None:
     board = Board.from_path(board_md)
     assert board.session_handoff_prompt == "ask"
     assert board.session_start_checks == []
+
+
+def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) -> None:
+    """A `### Status` field block following `## Jared config` must not leak
+    its option bullets (e.g. `- Backlog: <id>`) into the config dict.
+
+    Without the `### ` boundary in the lookahead, the section regex would
+    consume across `### Status`, and the bullet matcher would happily eat
+    `Backlog`, `Done`, etc. as config keys — silently shadowing any future
+    config key whose name collides with an option name.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+
+        - session-handoff-prompt: always
+
+        ### Status
+
+        - Field ID: PVTSSF_status
+        - Backlog: 0369b485
+        - Done: 727e952b
+
+        ## Further conventions
+        """)
+    )
+    board = Board.from_path(board_md)
+    # Only the real config bullet should land in the parsed config; the
+    # option bullets from `### Status` must NOT leak in.
+    assert board.session_handoff_prompt == "always"
+    # The `### Status` block should still parse as a field block — its
+    # option IDs land in `_field_options`, not the config dict.
+    assert board._field_options.get("Status", {}).get("Backlog") == "0369b485"
+    assert board._field_options.get("Status", {}).get("Done") == "727e952b"
