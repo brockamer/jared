@@ -101,3 +101,91 @@ def test_extract_next_action_returns_normal_one_liner() -> None:
     mod = import_cli()
     body = "## Session 2026-04-24\n\n**Next action:** decide the   YAML ordering   question."
     assert mod._extract_next_action(body) == "decide the YAML ordering question."
+
+
+def test_empty_board_renders_placeholders(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "item-list": '{"items": []}',
+            "issue list": "[]",
+        },
+    )
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "(nothing in progress)" in out
+    assert "(empty queue)" in out
+    assert "(none)" in out
+
+
+def test_in_progress_without_session_notes_skips_one_liner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    board_md = write_minimal_board(tmp_path)
+    item_list = (
+        '{"items": ['
+        '{"id": "a", "content": {"number": 7, "title": "Cold issue"}, '
+        '"status": "In Progress", "priority": "Medium"}'
+        "]}"
+    )
+    # No comments at all
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "item-list": item_list,
+            "issue view 7": '{"comments": []}',
+            "issue list": "[]",
+        },
+    )
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "#7" in out and "Cold issue" in out
+    # No Last session line should be emitted when no Session note exists
+    assert "Last session" not in out
+
+
+def test_session_note_without_next_action_field_skips_one_liner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    board_md = write_minimal_board(tmp_path)
+    item_list = (
+        '{"items": ['
+        '{"id": "a", "content": {"number": 9, "title": "Half-noted issue"}, '
+        '"status": "In Progress", "priority": "Medium"}'
+        "]}"
+    )
+    # Comment matches Session prefix but lacks **Next action:**
+    issue_comments = (
+        '{"comments": [{"body": "## Session 2026-04-24\\n\\n**Progress:** stuff happened.\\n"}]}'
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "item-list": item_list,
+            "issue view 9": issue_comments,
+            "issue list": "[]",
+        },
+    )
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "#9" in out and "Half-noted issue" in out
+    # The Next-action extractor returned None; no Last session line
+    assert "Last session" not in out
