@@ -173,11 +173,15 @@ class Board:
         """Parse the optional `## Jared config` section's bullets.
 
         Bullets are `- name: value` pairs. Anything that doesn't match the
-        bullet form is skipped. Section ends at the next `##` heading or
-        end-of-file. Returns an empty dict if the section is absent.
+        bullet form is skipped. Section ends at the next `##` or `###`
+        heading or end-of-file — stopping at `###` is what keeps a
+        following `### Status` field block (whose option bullets like
+        `- Backlog: <id>` would otherwise look like config bullets) from
+        leaking into the config dict. Returns an empty dict if the
+        section is absent.
         """
         m = re.search(
-            r"^## Jared config\s*\n(.*?)(?=^##\s|\Z)",
+            r"^## Jared config\s*\n(.*?)(?=^#{2,3}\s|\Z)",
             text,
             re.MULTILINE | re.DOTALL,
         )
@@ -195,11 +199,12 @@ class Board:
         """Parse the optional `## Session start checks` section's fenced bash blocks.
 
         Each ```bash ... ``` (or just ``` ... ```) becomes one entry, joined
-        by newlines if the block has multiple lines. Section ends at the next
-        `##` heading or end-of-file. Returns [] if section is absent.
+        by newlines if the block has multiple lines. Section ends at the
+        next `##` or `###` heading or end-of-file. Returns [] if section
+        is absent.
         """
         m = re.search(
-            r"^## Session start checks\s*\n(.*?)(?=^##\s|\Z)",
+            r"^## Session start checks\s*\n(.*?)(?=^#{2,3}\s|\Z)",
             text,
             re.MULTILINE | re.DOTALL,
         )
