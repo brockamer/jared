@@ -131,6 +131,14 @@ def build_parser() -> argparse.ArgumentParser:
         "next-session-prompt",
         help="Emit a board-derived session handoff skeleton (markdown to stdout).",
     )
+    nsp.add_argument(
+        "--include-session-checks",
+        action="store_true",
+        help=(
+            "Include the Quick health check section using "
+            "`## Session start checks` from docs/project-board.md."
+        ),
+    )
     nsp.set_defaults(func=_cmd_next_session_prompt)
 
     return parser
@@ -737,6 +745,14 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     else:
         print("(none)")
     print()
+    if args.include_session_checks and board.session_start_checks:
+        print("## Quick health check on session start")
+        print()
+        for check in board.session_start_checks:
+            print("```bash")
+            print(check)
+            print("```")
+            print()
     print("## To start")
     print()
     print("Read the sections above, decide which issue to pull, then:")
