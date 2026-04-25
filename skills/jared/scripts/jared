@@ -9,8 +9,9 @@ import re
 import sys
 import tempfile
 import time
-from pathlib import Path
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 # Make sibling lib/ importable regardless of cwd. mypy can't follow the
@@ -563,26 +564,31 @@ def _extract_next_action(session_note_body: str) -> str | None:
     """Pull the **Next action:** body from a Session note. Returns None if not found.
 
     Stops at the next bold-label paragraph or end of body. Whitespace
-    collapsed so the one-liner fits on a single line.
+    collapsed so the one-liner fits on a single line. Also returns None
+    when the Next-action field is empty (the regex would otherwise slurp
+    the following bold paragraph through the blank line).
     """
     m = _NEXT_ACTION_RE.search(session_note_body)
     if not m:
         return None
     text = m.group(1).strip()
+    if not text or text.startswith("**"):
+        return None
     return " ".join(text.split())
 
 
 def _date_n_days_ago(days: int) -> str:
-    """ISO date (YYYY-MM-DD) `days` days ago in local time."""
-    from datetime import datetime, timedelta
+    """ISO date (YYYY-MM-DD) `days` days ago in UTC.
 
-    return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    Used for `gh issue list --search closed:>=DATE`, which interprets
+    the date in UTC. Local-time math would create off-by-one errors
+    at day boundaries.
+    """
+    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _now_local_iso() -> str:
     """Local timezone-naive ISO timestamp to the minute, for prompt headers."""
-    from datetime import datetime
-
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
@@ -634,11 +640,7 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
     )
     # gh returns a top-level list, not an object — run_gh hands back whatever
     # JSON it parsed. Accept both shapes defensively.
-    items: list[dict[str, Any]]
-    if isinstance(data, list):
-        items = data
-    else:
-        items = data.get("issues", [])
+    items = data if isinstance(data, list) else data.get("issues", [])
     items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
     return items
 
@@ -673,14 +675,13 @@ def _latest_session_note_oneliner(board: Board, issue_number: int) -> str | None
     return _extract_next_action(body)
 
 
-def _render_in_flight(board: Board, item: dict[str, Any]) -> None:
-    """Print one bullet for an In Progress item with last Session-note one-liner."""
+def _render_in_flight(item: dict[str, Any], note_one_liner: str | None) -> None:
+    """Print one bullet for an In Progress item with optional last Session-note one-liner."""
     content = item.get("content") or {}
     num = content.get("number")
     prio = item.get("priority") or "-"
     title = content.get("title", "")
     print(f"- #{num} [{prio}] {title}")
-    note_one_liner = _latest_session_note_oneliner(board, num) if isinstance(num, int) else None
     if note_one_liner is not None:
         print(f'  Last session: "{note_one_liner}"')
 
@@ -709,7 +710,11 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print()
     if in_progress:
         for item in in_progress:
-            _render_in_flight(board, item)
+            num = (item.get("content") or {}).get("number")
+            note_one_liner = (
+                _latest_session_note_oneliner(board, num) if isinstance(num, int) else None
+            )
+            _render_in_flight(item, note_one_liner)
     else:
         print("(nothing in progress)")
     print()
