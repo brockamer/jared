@@ -43,7 +43,7 @@ from lib.board import (
 # ---------- gh helpers ----------
 
 
-def fetch_open_issues(repo: str, milestone: str | None) -> list[dict]:
+def fetch_open_issues(repo: str, milestone: str | None) -> list[dict[str, Any]]:
     cmd = [
         "issue",
         "list",
@@ -127,11 +127,11 @@ def parse_section_refs(body: str, section: str) -> list[int]:
     return [int(n) for n in re.findall(r"#(\d+)", m.group(1))]
 
 
-def body_dependencies(issue: dict) -> list[int]:
+def body_dependencies(issue: dict[str, Any]) -> list[int]:
     return parse_section_refs(issue.get("body", "") or "", "Depends on")
 
 
-def issue_priority(issue: dict) -> str | None:
+def issue_priority(issue: dict[str, Any]) -> str | None:
     for label in issue.get("labels", []):
         name: str = label.get("name", "").lower()
         if name.startswith("priority:"):

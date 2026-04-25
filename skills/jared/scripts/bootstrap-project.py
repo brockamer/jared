@@ -63,19 +63,19 @@ def parse_url(url: str) -> tuple[str, str, str]:
 # ---------- Introspection ----------
 
 
-def fetch_project(owner: str, number: str) -> dict:
+def fetch_project(owner: str, number: str) -> dict[str, Any]:
     return cast(
         dict[Any, Any],
         board_run_gh(["project", "view", number, "--owner", owner, "--format", "json"]),
     )
 
 
-def fetch_fields(owner: str, number: str) -> list[dict]:
+def fetch_fields(owner: str, number: str) -> list[dict[str, Any]]:
     data = board_run_gh(["project", "field-list", number, "--owner", owner, "--format", "json"])
     return cast(list[dict[Any, Any]], data.get("fields", []))
 
 
-def fetch_workflows(owner_type: str, owner: str, number: str) -> list[dict]:
+def fetch_workflows(owner_type: str, owner: str, number: str) -> list[dict[str, Any]]:
     """Return [{name, enabled, number}, ...] for the project's built-in workflows.
 
     Returns an empty list (not an error) if the response shape is unexpected
@@ -155,7 +155,7 @@ def link_project_to_repo(project_id: str, repo_slug: str) -> tuple[bool, str]:
     return True, f"linked project to {repo_slug}"
 
 
-def find_single_select_field(fields: list[dict], name: str) -> dict | None:
+def find_single_select_field(fields: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
     """Case-insensitive, space-insensitive match on field name."""
     target = name.lower().replace(" ", "")
     for f in fields:
@@ -191,7 +191,7 @@ def prompt_work_streams() -> list[str]:
     return streams
 
 
-def create_single_select_field(project_id: str, name: str, options: list[str]) -> dict:
+def create_single_select_field(project_id: str, name: str, options: list[str]) -> dict[str, Any]:
     """
     Create a single-select field with the given options via GraphQL.
     Returns the created field's details.
@@ -456,7 +456,7 @@ def patch_legacy_doc(existing: str, header_block: str) -> str:
 # ---------- Full-doc template rendering ----------
 
 
-def options_block(field: dict | None) -> str:
+def options_block(field: dict[str, Any] | None) -> str:
     if not field:
         return "  (field not present)\n"
     lines = []
@@ -465,7 +465,7 @@ def options_block(field: dict | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def options_kv_block(field: dict | None) -> str:
+def options_kv_block(field: dict[str, Any] | None) -> str:
     """Render a field's options as `- <name>: <id>` lines, one per option.
 
     This is the machine-readable form Board._parse_field_blocks consumes:
@@ -478,7 +478,7 @@ def options_kv_block(field: dict | None) -> str:
     return "\n".join(lines) if lines else "- (no options defined)"
 
 
-def status_table(field: dict | None) -> str:
+def status_table(field: dict[str, Any] | None) -> str:
     if not field:
         return "_(Status field not present — see bootstrap output.)_"
     rows = ["| Column | Meaning |", "|---|---|"]
@@ -499,7 +499,7 @@ def status_table(field: dict | None) -> str:
     return "\n".join(rows)
 
 
-def priority_table(field: dict | None) -> str:
+def priority_table(field: dict[str, Any] | None) -> str:
     if not field:
         return "_(Priority field not present.)_"
     rows = ["| Value | Meaning |", "|---|---|"]
@@ -514,7 +514,7 @@ def priority_table(field: dict | None) -> str:
     return "\n".join(rows)
 
 
-def work_stream_table(field: dict | None) -> str:
+def work_stream_table(field: dict[str, Any] | None) -> str:
     if not field or not field.get("options"):
         return (
             "_(Work Stream field has no options defined yet. Add options describing "
@@ -527,7 +527,7 @@ def work_stream_table(field: dict | None) -> str:
     return "\n".join(rows)
 
 
-def work_stream_section(field: dict | None) -> str:
+def work_stream_section(field: dict[str, Any] | None) -> str:
     """Render the body of the `## Work Stream field` section.
 
     When no Work Stream field exists on the board, jared treats the concept as
@@ -580,7 +580,7 @@ def triage_disappears(has_work_stream: bool) -> str:
     return f"An issue without {required} sorts to the bottom and disappears."
 
 
-def option_id(field: dict | None, name: str) -> str:
+def option_id(field: dict[str, Any] | None, name: str) -> str:
     if not field:
         return "<unset>"
     for opt in field.get("options", []):
@@ -599,9 +599,9 @@ def render_doc(
     repo: str,
     bootstrap_date: str,
     wip_limit: int,
-    status: dict | None,
-    priority: dict | None,
-    work_stream: dict | None,
+    status: dict[str, Any] | None,
+    priority: dict[str, Any] | None,
+    work_stream: dict[str, Any] | None,
 ) -> str:
     """Render the full project-board.md convention doc from introspected fields.
 
