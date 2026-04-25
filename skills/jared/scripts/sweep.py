@@ -337,6 +337,8 @@ def check_stale_high_backlog(
         if field(i, "priority") != "High":
             continue
         n = content.get("number")
+        if n is None:
+            continue
         issue = issues_by_number.get(n)
         if not issue:
             continue
@@ -360,6 +362,8 @@ def check_in_progress_staleness(
         if i.get("status") != "In Progress":
             continue
         n = content.get("number")
+        if n is None:
+            continue
         issue = issues_by_number.get(n)
         if not issue:
             continue
@@ -663,6 +667,8 @@ def main() -> int:
     existing_plan_dirs = [p for p in plan_dirs if p.exists()]
     if not existing_plan_dirs:
         print("  (no plan/spec directories found — skipping)")
+    elif not repo:
+        print("  (skipped — repo not determined)")
     else:
         findings = check_plan_spec_drift(existing_plan_dirs, repo)
         for f in findings or ["  None"]:

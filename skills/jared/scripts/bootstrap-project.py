@@ -725,7 +725,7 @@ def main() -> int:
     priority = find_single_select_field(fields, "Priority")
     work_stream = find_single_select_field(fields, "Work Stream")
 
-    missing = []
+    missing: list[tuple[str, list[str] | None]] = []
     if not status:
         missing.append(("Status", STANDARD_FIELDS["Status"]))
     if not priority:
