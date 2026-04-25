@@ -28,6 +28,7 @@ import re
 import sys
 from collections import defaultdict, deque
 from pathlib import Path
+from typing import Any, cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -42,7 +43,7 @@ from lib.board import (
 # ---------- gh helpers ----------
 
 
-def fetch_open_issues(repo: str, milestone: str | None) -> list[dict]:
+def fetch_open_issues(repo: str, milestone: str | None) -> list[dict[str, Any]]:
     cmd = [
         "issue",
         "list",
@@ -57,13 +58,13 @@ def fetch_open_issues(repo: str, milestone: str | None) -> list[dict]:
     ]
     if milestone:
         cmd += ["--milestone", milestone]
-    return board_run_gh(cmd)
+    return cast(list[dict[Any, Any]], board_run_gh(cmd))
 
 
 def fetch_issue_state(repo: str, number: int) -> str:
     try:
         data = board_run_gh(["issue", "view", str(number), "--repo", repo, "--json", "state"])
-        return data.get("state", "UNKNOWN")
+        return cast(str, data.get("state", "UNKNOWN"))
     except GhInvocationError:
         return "UNKNOWN"
 
@@ -126,13 +127,13 @@ def parse_section_refs(body: str, section: str) -> list[int]:
     return [int(n) for n in re.findall(r"#(\d+)", m.group(1))]
 
 
-def body_dependencies(issue: dict) -> list[int]:
+def body_dependencies(issue: dict[str, Any]) -> list[int]:
     return parse_section_refs(issue.get("body", "") or "", "Depends on")
 
 
-def issue_priority(issue: dict) -> str | None:
+def issue_priority(issue: dict[str, Any]) -> str | None:
     for label in issue.get("labels", []):
-        name = label.get("name", "").lower()
+        name: str = label.get("name", "").lower()
         if name.startswith("priority:"):
             return name.split(":", 1)[1].strip()
     return None

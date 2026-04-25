@@ -45,7 +45,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 # mypy can't follow the sys.path manipulation; types are still enforced inside lib.board.
@@ -100,7 +100,7 @@ def find_config() -> Path | None:
 # response, not field IDs from the convention doc.
 
 
-def fetch_items(owner: str, project: str) -> list[dict]:
+def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
     data = board_run_gh(
         [
             "project",
@@ -114,10 +114,10 @@ def fetch_items(owner: str, project: str) -> list[dict]:
             "json",
         ]
     )
-    return data.get("items", [])
+    return cast(list[dict[Any, Any]], data.get("items", []))
 
 
-def fetch_open_issues_bulk(repo: str) -> list[dict]:
+def fetch_open_issues_bulk(repo: str) -> list[dict[str, Any]]:
     """One API call to get all open issues with the data we need."""
     stdout = board_run_gh_raw(
         [
@@ -136,7 +136,7 @@ def fetch_open_issues_bulk(repo: str) -> list[dict]:
     return json.loads(stdout) if stdout else []
 
 
-def fetch_native_blocked_by(repo: str) -> dict[int, list[dict]]:
+def fetch_native_blocked_by(repo: str) -> dict[int, list[dict[str, Any]]]:
     """One GraphQL call to get blockedBy for all open issues. Returns {number: [{number, state}]}.
 
     Tries 'blockedBy' first; falls back to 'issueDependencies' on schema error.
@@ -148,7 +148,7 @@ def fetch_native_blocked_by(repo: str) -> dict[int, list[dict]]:
             f"issues(first:100,after:$c,states:OPEN){{pageInfo{{hasNextPage endCursor}}"
             f"nodes{{number {field_name}(first:20){{nodes{{number state}}}}}}}}}}}}"
         )
-        result: dict[int, list[dict]] = {}
+        result: dict[int, list[dict[str, Any]]] = {}
         cursor: str | None = None
         try:
             while True:
@@ -170,7 +170,7 @@ def fetch_native_blocked_by(repo: str) -> dict[int, list[dict]]:
     raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
 
 
-def fetch_recent_comments(repo: str, number: int, limit: int = 5) -> list[dict]:
+def fetch_recent_comments(repo: str, number: int, limit: int = 5) -> list[dict[str, Any]]:
     """Get recent comments on an issue (for session-note freshness)."""
     try:
         stdout = board_run_gh_raw(
@@ -198,28 +198,28 @@ def fetch_recent_comments(repo: str, number: int, limit: int = 5) -> list[dict]:
 # ---------- Item helpers ----------
 
 
-def field(item: dict, *keys: str) -> str | None:
+def field(item: dict[str, Any], *keys: str) -> str | None:
     """Look up a field value across the variant key names gh returns."""
     for k in keys:
         v = item.get(k)
         if v:
-            return v
+            return cast(str, v)
     return None
 
 
-def guess_repo_from_items(items: list[dict]) -> str | None:
+def guess_repo_from_items(items: list[dict[str, Any]]) -> str | None:
     for i in items:
         content = i.get("content") or {}
         repo = content.get("repository")
         if repo:
-            return repo.replace("https://github.com/", "")
+            return cast(str, repo.replace("https://github.com/", ""))
     return None
 
 
 # ---------- Checks ----------
 
 
-def check_metadata(items: list[dict]) -> list[str]:
+def check_metadata(items: list[dict[str, Any]]) -> list[str]:
     # Detect whether Work Stream is in use on this board. If no open item
     # has Work Stream set, assume the project doesn't define the field and
     # skip the Work Stream check. Projects without a Work Stream field (a
@@ -252,7 +252,7 @@ def check_metadata(items: list[dict]) -> list[str]:
     return missing
 
 
-def check_closed_not_done(items: list[dict]) -> list[dict]:
+def check_closed_not_done(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Closed issues should auto-move to Done. If they don't, return them.
 
     Detection-only. Each entry is {number, title, current_status} — callers
@@ -299,7 +299,7 @@ def format_closed_not_done_line(entry: dict[str, Any]) -> str:
     )
 
 
-def check_wip(items: list[dict], limit: int) -> list[str]:
+def check_wip(items: list[dict[str, Any]], limit: int) -> list[str]:
     in_progress = [i for i in items if i.get("status") == "In Progress"]
     findings = []
     if len(in_progress) > limit:
@@ -313,7 +313,7 @@ def check_wip(items: list[dict], limit: int) -> list[str]:
     return findings
 
 
-def check_up_next_size(items: list[dict], limit: int = 3) -> list[str]:
+def check_up_next_size(items: list[dict[str, Any]], limit: int = 3) -> list[str]:
     up_next = [i for i in items if i.get("status") == "Up Next"]
     if len(up_next) > limit:
         return [
@@ -324,7 +324,7 @@ def check_up_next_size(items: list[dict], limit: int = 3) -> list[str]:
 
 
 def check_stale_high_backlog(
-    items: list[dict], issues_by_number: dict[int, dict], days: int
+    items: list[dict[str, Any]], issues_by_number: dict[int, dict[str, Any]], days: int
 ) -> list[str]:
     cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
     stale = []
@@ -337,6 +337,8 @@ def check_stale_high_backlog(
         if field(i, "priority") != "High":
             continue
         n = content.get("number")
+        if n is None:
+            continue
         issue = issues_by_number.get(n)
         if not issue:
             continue
@@ -349,7 +351,7 @@ def check_stale_high_backlog(
 
 
 def check_in_progress_staleness(
-    items: list[dict], issues_by_number: dict[int, dict], days: int = 7
+    items: list[dict[str, Any]], issues_by_number: dict[int, dict[str, Any]], days: int = 7
 ) -> list[str]:
     cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
     stale = []
@@ -360,6 +362,8 @@ def check_in_progress_staleness(
         if i.get("status") != "In Progress":
             continue
         n = content.get("number")
+        if n is None:
+            continue
         issue = issues_by_number.get(n)
         if not issue:
             continue
@@ -372,8 +376,8 @@ def check_in_progress_staleness(
 
 
 def check_blocked_status_hygiene(
-    items: list[dict],
-    issues_by_number: dict[int, dict],
+    items: list[dict[str, Any]],
+    issues_by_number: dict[int, dict[str, Any]],
     blocked_aging_days: int,
 ) -> list[str]:
     """Items in Blocked Status must have ## Blocked by; flag ones stuck >N days."""
@@ -400,8 +404,8 @@ def check_blocked_status_hygiene(
 
 
 def check_native_dependencies(
-    blocked_by: dict[int, list[dict]],
-    issues_by_number: dict[int, dict],
+    blocked_by: dict[int, list[dict[str, Any]]],
+    issues_by_number: dict[int, dict[str, Any]],
 ) -> list[str]:
     """Flag native blockedBy edges pointing at closed issues — propose removing."""
     findings: list[str] = []
@@ -416,7 +420,7 @@ def check_native_dependencies(
     return findings
 
 
-def check_legacy_priority_labels(issues_by_number: dict[int, dict]) -> list[str]:
+def check_legacy_priority_labels(issues_by_number: dict[int, dict[str, Any]]) -> list[str]:
     findings = []
     for n, issue in issues_by_number.items():
         labels = [lbl["name"] for lbl in issue.get("labels", [])]
@@ -483,7 +487,9 @@ def check_plan_spec_drift(plan_dirs: list[Path], repo: str) -> list[str]:
     return findings
 
 
-def check_session_note_freshness(items: list[dict], repo: str | None, days: int = 3) -> list[str]:
+def check_session_note_freshness(
+    items: list[dict[str, Any]], repo: str | None, days: int = 3
+) -> list[str]:
     """Look for In Progress issues without a recent Session note comment."""
     if not repo:
         return ["(skipping session-note check — repo not determined)"]
@@ -663,6 +669,8 @@ def main() -> int:
     existing_plan_dirs = [p for p in plan_dirs if p.exists()]
     if not existing_plan_dirs:
         print("  (no plan/spec directories found — skipping)")
+    elif not repo:
+        print("  (skipped — repo not determined)")
     else:
         findings = check_plan_spec_drift(existing_plan_dirs, repo)
         for f in findings or ["  None"]:
