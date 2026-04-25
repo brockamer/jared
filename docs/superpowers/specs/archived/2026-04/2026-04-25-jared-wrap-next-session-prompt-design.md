@@ -1,3 +1,7 @@
+---
+**Shipped in #35 on 2026-04-25. Final decisions captured in issue body.**
+---
+
 # Design: `/jared-wrap` produces an optional session handoff prompt
 
 **Issue:** brockamer/jared#35
