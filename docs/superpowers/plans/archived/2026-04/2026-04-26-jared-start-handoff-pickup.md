@@ -1,3 +1,7 @@
+---
+**Shipped in #44, #44 on 2026-04-26. Final decisions captured in issue body.**
+---
+
 # /jared-start handoff-prompt pickup — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
