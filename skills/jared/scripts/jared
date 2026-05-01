@@ -26,6 +26,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
     ItemNotFound,
     OptionNotFound,
+    fetch_recent_comments_batch,
 )
 
 ALL_SUBCOMMANDS = [
@@ -640,31 +641,23 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
     return items
 
 
-def _latest_session_note_oneliner(board: Board, issue_number: int) -> str | None:
-    """Pull the most recent comment whose body starts with `## Session ` and
-    extract the **Next action:** sentence. Returns None if no Session note
-    exists or no Next action line is found.
+def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
+    """From a pre-fetched list of comments (chronological order, oldest →
+    newest), pull the most recent one whose body starts with `## Session `
+    and extract the **Next action:** sentence. Returns None if no Session
+    note exists or no Next action line is found.
 
     The `## Session ` prefix is the discipline laid out in
     `references/session-continuity.md` — comments that don't match are
     ordinary discussion and are skipped.
+
+    Comments are passed in pre-fetched (rather than fetched here per
+    issue) so the caller can batch all in-flight issues into one
+    GraphQL round-trip via `fetch_recent_comments_batch`.
     """
-    data = board.run_gh(
-        [
-            "issue",
-            "view",
-            str(issue_number),
-            "--repo",
-            board.repo,
-            "--json",
-            "comments",
-        ]
-    )
-    comments = data.get("comments", []) if isinstance(data, dict) else []
     session_notes = [c for c in comments if (c.get("body") or "").startswith("## Session ")]
     if not session_notes:
         return None
-    # gh returns comments in chronological order; the latest is the last one.
     latest = session_notes[-1]
     body = latest.get("body", "")
     return _extract_next_action(body)
@@ -704,10 +697,22 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print("## In flight")
     print()
     if in_progress:
+        # One aliased GraphQL call covers every in-flight issue's comments,
+        # replacing the per-issue `gh issue view --json comments` fan-out.
+        in_flight_numbers = [
+            n
+            for item in in_progress
+            if isinstance((n := (item.get("content") or {}).get("number")), int)
+        ]
+        comments_by_number = fetch_recent_comments_batch(
+            board.repo, in_flight_numbers, limit=10, cache="60s"
+        )
         for item in in_progress:
             num = (item.get("content") or {}).get("number")
             note_one_liner = (
-                _latest_session_note_oneliner(board, num) if isinstance(num, int) else None
+                _latest_session_note_oneliner(comments_by_number.get(num, []))
+                if isinstance(num, int)
+                else None
             )
             _render_in_flight(item, note_one_liner)
     else:

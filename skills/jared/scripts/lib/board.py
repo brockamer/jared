@@ -413,6 +413,49 @@ def fetch_blocked_by_edges(
     raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
 
 
+def fetch_recent_comments_batch(
+    repo: str,
+    issue_numbers: list[int],
+    *,
+    limit: int = 10,
+    cache: str | None = None,
+) -> dict[int, list[dict[str, Any]]]:
+    """One aliased GraphQL call → `{issue_number: [{body, createdAt}, ...]}`
+    for the given numbers. Returns the most recent `limit` comments per
+    issue, in chronological order (oldest → newest), matching what gh's
+    REST `/comments` endpoint and `gh issue view --json comments` both
+    return.
+
+    Replaces the per-issue N+1 in `sweep.py:fetch_recent_comments` and
+    the per-issue `gh issue view --json comments` in
+    `jared:_latest_session_note_oneliner`. Aliased query — one alias per
+    requested number — keeps it a single round trip; cap callers at a
+    reasonable N (≤10 typical, the WIP cap is the natural ceiling).
+
+    Empty input → empty dict, no gh call.
+    """
+    if not issue_numbers:
+        return {}
+    owner, name = repo.split("/", 1)
+    aliases = "\n".join(
+        f"  i{n}: issue(number: {n}) {{ comments(last: {limit}) {{ nodes {{ body createdAt }} }} }}"
+        for n in issue_numbers
+    )
+    query = (
+        f"query($o:String!,$r:String!) {{\n  repository(owner:$o, name:$r) {{\n{aliases}\n  }}\n}}"
+    )
+    data = run_graphql(query, cache=cache, o=owner, r=name)["data"]["repository"]
+    result: dict[int, list[dict[str, Any]]] = {}
+    for n in issue_numbers:
+        issue_data = data.get(f"i{n}")
+        if not issue_data:
+            result[n] = []
+            continue
+        nodes = issue_data.get("comments", {}).get("nodes", []) or []
+        result[n] = nodes
+    return result
+
+
 def graphql_budget() -> tuple[int, int, int]:
     """Return `(remaining, limit, reset_unix)` from `gh api rate_limit`.
 
