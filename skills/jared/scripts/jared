@@ -26,6 +26,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
     ItemNotFound,
     OptionNotFound,
+    check_closed_not_done,
     fetch_recent_comments_batch,
 )
 
@@ -528,7 +529,20 @@ def _cmd_summary(args: argparse.Namespace) -> int:
             return f"  #{num} [{prio}] {title}"
         return f"  #{num} {title}"
 
-    in_progress = by_status("In Progress")
+    # Stuck-closed items: closed issues whose Status never auto-moved to
+    # Done (typical drift path: PR-merge auto-close on a project where
+    # the built-in "Item closed → Done" workflow is off). They look like
+    # In Progress to a naive `status == "In Progress"` filter and would
+    # silently inflate the WIP count that /jared-start uses to enforce
+    # the cap. Detect them here, list separately, and exclude from the
+    # In Progress total. Detector lives in lib.board so sweep and summary
+    # share one source of truth.
+    stuck_closed = check_closed_not_done(items)
+    stuck_numbers = {entry["number"] for entry in stuck_closed}
+    in_progress_raw = by_status("In Progress")
+    in_progress = [
+        i for i in in_progress_raw if (i.get("content") or {}).get("number") not in stuck_numbers
+    ]
     up_next_all = by_status("Up Next")
     up_next = up_next_all[:3]
     blocked = by_status("Blocked")
@@ -538,6 +552,16 @@ def _cmd_summary(args: argparse.Namespace) -> int:
     print(f"In Progress ({len(in_progress)}):")
     for it in in_progress:
         print(render_item(it))
+    if stuck_closed:
+        print()
+        print(f"Stuck closed ({len(stuck_closed)}) — closed issues not on Done:")
+        for entry in stuck_closed:
+            cur = entry.get("current_status") or "no Status"
+            print(f"  #{entry['number']} [{cur}] {entry['title']}")
+        print(
+            "  Fix: jared set <N> Status Done   "
+            "(or enable the project's auto-archive workflow)"
+        )
     print()
     print(f"Up Next (top 3 of {len(up_next_all)}):")
     for it in up_next:

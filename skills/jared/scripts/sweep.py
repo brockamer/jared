@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
+    check_closed_not_done,
 )
 from lib.board import (
     check_graphql_budget as board_check_graphql_budget,
@@ -213,39 +214,6 @@ def check_metadata(items: list[dict[str, Any]]) -> list[str]:
         if issues:
             missing.append(f"#{n}: {', '.join(issues)}")
     return missing
-
-
-def check_closed_not_done(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Closed issues should auto-move to Done. If they don't, return them.
-
-    Detection-only. Each entry is {number, title, current_status} — callers
-    decide the rendering (e.g. sweep's main() adds the `Propose: jared set
-    <N> Status Done` remediation suffix in its render loop). Keeping
-    format out of the detector means the next sweep-check that needs a
-    Propose-style remediation can follow the same pattern at its own
-    render site without reinventing the formatter here.
-
-    The drift usually comes from projects whose built-in "Item closed →
-    Done" workflow is disabled — paths like `gh issue close` and PR-merge
-    auto-close rely on it entirely (only `jared close` has its own
-    explicit-Status fallback).
-    """
-    stuck = []
-    for i in items:
-        content = i.get("content") or {}
-        if content.get("state") != "CLOSED":
-            continue
-        status = i.get("status") or ""
-        if status == "Done":
-            continue
-        stuck.append(
-            {
-                "number": content.get("number"),
-                "title": (content.get("title") or i.get("title") or "")[:60],
-                "current_status": status or "no Status",
-            }
-        )
-    return stuck
 
 
 def format_closed_not_done_line(entry: dict[str, Any]) -> str:
