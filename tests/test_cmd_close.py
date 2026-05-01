@@ -28,9 +28,7 @@ def _write_board_with_status(tmp_path: Path) -> Path:
     return board_md
 
 
-def _graphql_item_response(
-    *, project_number: int, status: str, item_id: str = "PVTI_aaa"
-) -> str:
+def _graphql_item_response(*, project_number: int, status: str, item_id: str = "PVTI_aaa") -> str:
     """Build a repository.issue(number).projectItems graphql payload."""
     return json.dumps(
         {
@@ -102,8 +100,7 @@ def test_close_falls_back_to_explicit_move_when_auto_move_lags(
             "issue close": "",
             "api graphql": _graphql_item_response(project_number=7, status="Backlog"),
             "item-list": (
-                '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}, '
-                '"status": "Backlog"}]}'
+                '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}, "status": "Backlog"}]}'
             ),
             "item-edit": "{}",
         },
@@ -179,8 +176,7 @@ def test_close_filters_graphql_to_current_project(
             "issue close": "",
             "api graphql": multi_project_response,
             "item-list": (
-                '{"items": [{"id": "PVTI_ours", "content": {"number": 42}, '
-                '"status": "Backlog"}]}'
+                '{"items": [{"id": "PVTI_ours", "content": {"number": 42}, "status": "Backlog"}]}'
             ),
             "item-edit": "{}",
         },

@@ -49,9 +49,7 @@ def test_check_closed_not_done_handles_no_status() -> None:
     current_status renders as 'no Status' so the downstream format is
     still readable."""
     mod = import_sweep()
-    items = [
-        {"content": {"number": 99, "state": "CLOSED", "title": "No status at all"}}
-    ]
+    items = [{"content": {"number": 99, "state": "CLOSED", "title": "No status at all"}}]
     [entry] = mod.check_closed_not_done(items)
     assert entry["number"] == 99
     assert entry["current_status"] == "no Status"
