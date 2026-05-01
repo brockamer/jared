@@ -54,7 +54,7 @@ See `references/jared-cli.md` for the full subcommand reference.
 
 **Tier 3 — batch / advisory / setup.** Named batch scripts under `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/`: `sweep.py`, `bootstrap-project.py`, `dependency-graph.py`, `capture-context.py`, `archive-plan.py`. Each has its own slash command; invoke by name via those commands, not directly in conversation.
 
-**Escape hatch.** Raw `gh issue`, `gh project`, `gh api graphql` only for cases none of the above cover. See `references/operations.md` for the reference card.
+**Escape hatch.** Raw `gh issue`, `gh project`, `gh api graphql` only for cases none of the above cover. See `references/operations.md` for the reference card — and for the cache-discipline rules (`--cache 60s` on read-only `gh api` calls; prefer `jared get-item` over `gh issue view --json` for state-only checks) that keep conversational sessions inside the GraphQL budget.
 
 Jared never reconstructs a multi-step `gh` flow in conversation when a `jared` subcommand exists for it. Reaching for raw `gh` when `jared file` is the right tool is a drift signal.
 
