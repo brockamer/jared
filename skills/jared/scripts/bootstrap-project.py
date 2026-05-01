@@ -689,9 +689,7 @@ def main() -> int:
     # correct either way, but users running on this board with the workflow
     # off will accumulate the drift silently. Warn early.
     workflows = fetch_workflows(owner_type, owner, number)
-    item_closed = next(
-        (w for w in workflows if w.get("name") == "Item closed"), None
-    )
+    item_closed = next((w for w in workflows if w.get("name") == "Item closed"), None)
     if item_closed is not None and not item_closed.get("enabled"):
         print(
             "\nWARNING: the 'Item closed' workflow is DISABLED on this project.\n"
@@ -800,10 +798,7 @@ def main() -> int:
                 repo=args.repo,
             )
             patched = patch_legacy_doc(existing, header)
-            print(
-                f"\n{output} is missing the jared header block "
-                f"({', '.join(missing_bullets)})."
-            )
+            print(f"\n{output} is missing the jared header block ({', '.join(missing_bullets)}).")
             print("Proposed patch — insert five machine-readable bullets near the top:\n")
             for line in difflib.unified_diff(
                 existing.splitlines(keepends=True),

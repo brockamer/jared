@@ -199,9 +199,7 @@ def test_file_makes_no_item_list_calls(
     # Nothing in the call stream should scan the project via `item-list`.
     for c in calls:
         joined = " ".join(c)
-        assert "item-list" not in joined, (
-            f"`jared file` should not call item-list; got: {joined!r}"
-        )
+        assert "item-list" not in joined, f"`jared file` should not call item-list; got: {joined!r}"
     # Expected call ceiling: issue create + item-add + item-edit × 2 (Status,
     # Priority) = 4. Gives AC headroom of 1 for an extra --field if present.
     # Allow the test to flex by asserting an upper bound rather than equality,

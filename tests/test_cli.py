@@ -71,9 +71,7 @@ def test_cli_unknown_subcommand_exits_nonzero() -> None:
 def _assert_clean_error(out: str, err: str, expected_in_stderr: str) -> None:
     assert out == "", f"stdout should be empty on error, got: {out!r}"
     assert "Traceback" not in err, f"stderr leaked a traceback:\n{err}"
-    assert expected_in_stderr in err, (
-        f"expected {expected_in_stderr!r} in stderr, got:\n{err}"
-    )
+    assert expected_in_stderr in err, f"expected {expected_in_stderr!r} in stderr, got:\n{err}"
     # Every typed-exception error goes through main()'s uniform prefix.
     assert "jared:" in err, (
         f"expected 'jared:' prefix in stderr (uniform error format), got:\n{err}"
