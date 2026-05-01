@@ -41,6 +41,9 @@ class Board:
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
     session_handoff_prompt: str = "ask"
     session_start_checks: list[str] = field(default_factory=list)
+    # Cached `gh project item-list` result, populated on first board_items()
+    # call and reused for the lifetime of this instance. None means uncached.
+    _items: list[dict[str, Any]] | None = field(default=None, repr=False)
 
     @classmethod
     def from_path(cls, path: Path) -> Board:
@@ -241,22 +244,43 @@ class Board:
     def run_gh_raw(self, args: list[str]) -> str:
         return run_gh_raw(args)
 
+    def board_items(self) -> list[dict[str, Any]]:
+        """Cached `gh project item-list` result for this Board instance.
+
+        Refreshes on first call; subsequent calls reuse the in-memory copy
+        for the rest of the process. Callers that mutate the board within
+        the same process must call `invalidate_items()` before reading
+        again, or stale entries will leak through.
+
+        `gh project item-list` is GraphQL-billed, so reusing the snapshot
+        is what saves the points — not just the wall-clock time.
+        """
+        if self._items is None:
+            data = self.run_gh(
+                [
+                    "project",
+                    "item-list",
+                    str(self.project_number),
+                    "--owner",
+                    self.owner,
+                    "--limit",
+                    "500",
+                    "--format",
+                    "json",
+                ]
+            )
+            self._items = data.get("items", [])
+        # Narrow Optional after the populate-if-None branch above.
+        assert self._items is not None
+        return self._items
+
+    def invalidate_items(self) -> None:
+        """Drop the cached snapshot. Next `board_items()` call re-fetches."""
+        self._items = None
+
     def find_item_id(self, issue_number: int) -> str:
         """Look up the ProjectV2Item id for a given issue number on this board."""
-        data = self.run_gh(
-            [
-                "project",
-                "item-list",
-                str(self.project_number),
-                "--owner",
-                self.owner,
-                "--limit",
-                "500",
-                "--format",
-                "json",
-            ]
-        )
-        for item in data.get("items", []):
+        for item in self.board_items():
             content = item.get("content") or {}
             if content.get("number") == issue_number:
                 return str(item["id"])

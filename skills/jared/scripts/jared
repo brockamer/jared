@@ -148,24 +148,11 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
     item_id = board.find_item_id(args.issue_number)
 
-    data = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
     empty: dict[str, Any] = {}
     match: dict[str, Any] = next(
         (
             item
-            for item in data.get("items", [])
+            for item in board.board_items()
             if (item.get("content") or {}).get("number") == args.issue_number
         ),
         empty,
