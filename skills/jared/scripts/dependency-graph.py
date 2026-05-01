@@ -37,6 +37,12 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
 )
 from lib.board import (
+    check_graphql_budget as board_check_graphql_budget,
+)
+from lib.board import (
+    graphql_budget as board_graphql_budget,
+)
+from lib.board import (
     run_gh as board_run_gh,
 )
 
@@ -307,7 +313,30 @@ def main() -> int:
         action="store_true",
         help="Skip native issue dependency lookups",
     )
+    parser.add_argument(
+        "--min-budget",
+        type=int,
+        default=200,
+        help="Skip if remaining GraphQL budget is below this (default: 200)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run even if GraphQL budget is below --min-budget",
+    )
     args = parser.parse_args()
+
+    # Pre-flight GraphQL budget gate. Building the dep-graph fans out
+    # GraphQL calls; bail out early when budget can't cover the work.
+    try:
+        budget = board_graphql_budget()
+    except (RuntimeError, GhInvocationError) as e:
+        print(f"dependency-graph: budget probe failed ({e}); proceeding anyway", file=sys.stderr)
+    else:
+        warning = board_check_graphql_budget(budget, min_required=args.min_budget, force=args.force)
+        if warning:
+            print(f"dependency-graph: {warning}", file=sys.stderr)
+            return 0
 
     print(
         f"Fetching open issues from {args.repo}"
