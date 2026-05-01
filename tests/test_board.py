@@ -493,6 +493,140 @@ def test_run_gh_cache_flag_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert "--cache" in args and "5m" in args
 
 
+def test_fetch_blocked_by_edges_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One paginated GraphQL call → {number: [{number, state}]} for a small repo."""
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": ['
+            '{"number": 10, "blockedBy": {"nodes": [{"number": 5, "state": "OPEN"}]}},'
+            '{"number": 11, "blockedBy": {"nodes": []}}'
+            "]}}}}"
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    edges = board.fetch_blocked_by_edges("brockamer/findajob")
+    assert edges == {
+        10: [{"number": 5, "state": "OPEN"}],
+        11: [],
+    }
+
+
+def test_fetch_blocked_by_edges_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Helper walks `pageInfo.hasNextPage`; each page reuses the schema field name."""
+    from skills.jared.scripts.lib import board
+
+    page_responses = iter(
+        [
+            (
+                '{"data": {"repository": {"issues": {'
+                '"pageInfo": {"hasNextPage": true, "endCursor": "CUR1"},'
+                '"nodes": [{"number": 1, "blockedBy": {"nodes": []}}]'
+                "}}}}"
+            ),
+            (
+                '{"data": {"repository": {"issues": {'
+                '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+                '"nodes": [{"number": 2, "blockedBy": {"nodes": []}}]'
+                "}}}}"
+            ),
+        ]
+    )
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult(next(page_responses))
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    edges = board.fetch_blocked_by_edges("brockamer/findajob")
+    assert set(edges) == {1, 2}
+    # Two paginated calls, second one carries the cursor.
+    assert len(captured) == 2
+    assert any("c=CUR1" in arg for arg in captured[1])
+
+
+def test_fetch_blocked_by_edges_schema_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If `blockedBy` raises a Field-doesn't-exist error, retry with `issueDependencies`."""
+    from skills.jared.scripts.lib import board
+
+    call_responses = iter(
+        [
+            # First attempt — blockedBy not on this schema.
+            ("", 1, "Field 'blockedBy' doesn't exist on type 'Issue'"),
+            # Second attempt — issueDependencies works.
+            (
+                (
+                    '{"data": {"repository": {"issues": {'
+                    '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+                    '"nodes": [{"number": 7, "issueDependencies": '
+                    '{"nodes": [{"number": 4, "state": "OPEN"}]}}]'
+                    "}}}}"
+                ),
+                0,
+                "",
+            ),
+        ]
+    )
+
+    class FakeResult:
+        def __init__(self, stdout: str, rc: int, stderr: str) -> None:
+            self.stdout = stdout
+            self.returncode = rc
+            self.stderr = stderr
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        return FakeResult(*next(call_responses))
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    edges = board.fetch_blocked_by_edges("brockamer/findajob")
+    assert edges == {7: [{"number": 4, "state": "OPEN"}]}
+
+
+def test_fetch_blocked_by_edges_passes_cache_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cache='60s' threads through to the underlying gh api invocation."""
+    from skills.jared.scripts.lib import board
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": []}}}}'
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    board.fetch_blocked_by_edges("brockamer/findajob", cache="60s")
+    assert "--cache" in captured[0] and "60s" in captured[0]
+
+
 # Legacy board-doc fallbacks: older docs (pre-bootstrap-project.py) lack
 # the machine-readable bullet block, so the parser has to infer the header
 # fields from prose + git remote. These tests pin the fallback behavior
