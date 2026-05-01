@@ -55,6 +55,12 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
 )
 from lib.board import (
+    check_graphql_budget as board_check_graphql_budget,
+)
+from lib.board import (
+    graphql_budget as board_graphql_budget,
+)
+from lib.board import (
     run_gh as board_run_gh,
 )
 from lib.board import (
@@ -294,8 +300,7 @@ def format_closed_not_done_line(entry: dict[str, Any]) -> str:
     """
     n = entry["number"]
     return (
-        f"#{n} [{entry['current_status']}]: {entry['title']} — "
-        f"Propose: jared set {n} Status Done"
+        f"#{n} [{entry['current_status']}]: {entry['title']} — Propose: jared set {n} Status Done"
     )
 
 
@@ -545,7 +550,31 @@ def main() -> int:
         default=7,
         help="Flag Blocked-status items with no activity beyond this (default: 7)",
     )
+    parser.add_argument(
+        "--min-budget",
+        type=int,
+        default=200,
+        help="Skip the sweep if remaining GraphQL budget is below this (default: 200)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run the sweep even if GraphQL budget is below --min-budget",
+    )
     args = parser.parse_args()
+
+    # Pre-flight GraphQL budget gate. The sweep makes many GraphQL-billed
+    # calls; bailing out early with a useful message beats crashing with
+    # `API rate limit exceeded` partway through producing output.
+    try:
+        budget = board_graphql_budget()
+    except (RuntimeError, GhInvocationError) as e:
+        print(f"sweep: budget probe failed ({e}); proceeding anyway", file=sys.stderr)
+    else:
+        warning = board_check_graphql_budget(budget, min_required=args.min_budget, force=args.force)
+        if warning:
+            print(f"sweep: {warning}", file=sys.stderr)
+            return 0
 
     # Resolve owner/project
     if not args.owner or not args.project:

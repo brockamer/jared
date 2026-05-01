@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from textwrap import dedent
 
@@ -291,9 +292,7 @@ def test_board_items_caches_within_instance(
     assert len(first) == 2
 
 
-def test_find_item_id_uses_cached_snapshot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_find_item_id_uses_cached_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Two find_item_id calls on the same Board must share one item-list fetch."""
     from skills.jared.scripts.lib.board import Board
 
@@ -324,9 +323,7 @@ def test_find_item_id_uses_cached_snapshot(
     )
 
 
-def test_invalidate_items_forces_refetch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_invalidate_items_forces_refetch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """invalidate_items() drops the cache so the next read re-fetches."""
     from skills.jared.scripts.lib.board import Board
 
@@ -341,7 +338,7 @@ def test_invalidate_items_forces_refetch(
 
     monkeypatch.setattr(
         "skills.jared.scripts.lib.board.subprocess.run",
-        lambda *a, **kw: (call_count.update(n=call_count["n"] + 1) or FakeResult()),
+        lambda *a, **kw: call_count.update(n=call_count["n"] + 1) or FakeResult(),
     )
 
     b.board_items()
@@ -416,9 +413,62 @@ def test_run_graphql_cache_flag_appends_when_set(
     assert last[cache_idx + 1] == "60s"
 
 
-def test_run_gh_cache_flag_passthrough(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_graphql_budget_parses_rate_limit_response(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """graphql_budget() pulls (remaining, limit, reset) from `gh api rate_limit`.
+
+    The endpoint returns a nested dict — the resource we care about is
+    `resources.graphql`. Numbers come back as ints regardless of how
+    gh's JSON encoded them.
+    """
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"resources": {"core": {"remaining": 4500},'
+            ' "graphql": {"remaining": 142, "limit": 5000, "reset": 1777643200}}}'
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    remaining, limit, reset = board.graphql_budget()
+    assert remaining == 142
+    assert limit == 5000
+    assert reset == 1777643200
+
+
+def test_check_graphql_budget_warns_when_low() -> None:
+    from skills.jared.scripts.lib.board import check_graphql_budget
+
+    msg = check_graphql_budget((50, 5000, int(time.time()) + 600), min_required=200)
+    assert msg is not None
+    assert "50" in msg and "5000" in msg
+    assert "--force" in msg
+
+
+def test_check_graphql_budget_proceeds_when_above_threshold() -> None:
+    from skills.jared.scripts.lib.board import check_graphql_budget
+
+    assert check_graphql_budget((1000, 5000, int(time.time()) + 600), min_required=200) is None
+
+
+def test_check_graphql_budget_force_overrides_low() -> None:
+    """force=True bypasses the gate even when budget is empty."""
+    from skills.jared.scripts.lib.board import check_graphql_budget
+
+    assert (
+        check_graphql_budget((0, 5000, int(time.time()) + 600), min_required=200, force=True)
+        is None
+    )
+
+
+def test_run_gh_cache_flag_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """run_gh(args, cache='5m') appends `--cache 5m` for direct gh api callers
     (e.g. sweep.py's gh api repos/.../comments path)."""
     from skills.jared.scripts.lib.board import Board

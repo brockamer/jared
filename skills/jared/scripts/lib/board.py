@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -294,6 +296,9 @@ class Board:
     ) -> Any:
         return run_graphql(query, cache=cache, **variables)
 
+    def graphql_budget(self) -> tuple[int, int, int]:
+        return graphql_budget()
+
 
 def run_gh(args: list[str], *, cache: str | None = None) -> Any:
     """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
@@ -359,9 +364,57 @@ def _infer_repo_from_git(repo_root: Path) -> str | None:
     return f"{m.group(1)}/{m.group(2)}"
 
 
-def run_graphql(
-    query: str, *, cache: str | None = None, **variables: str | int | bool
-) -> Any:
+def graphql_budget() -> tuple[int, int, int]:
+    """Return `(remaining, limit, reset_unix)` from `gh api rate_limit`.
+
+    Polls a REST endpoint that does NOT draw from the GraphQL bucket,
+    so it remains usable even when the GraphQL budget is exhausted.
+    Used as a pre-flight probe by heavy GraphQL-bound scripts so they
+    can soft-fail with a useful message instead of crashing mid-run.
+    """
+    data = run_gh(["api", "rate_limit"])
+    gql = data.get("resources", {}).get("graphql", {})
+    return (
+        int(gql.get("remaining", 0)),
+        int(gql.get("limit", 5000)),
+        int(gql.get("reset", 0)),
+    )
+
+
+def check_graphql_budget(
+    budget: tuple[int, int, int],
+    *,
+    min_required: int = 200,
+    force: bool = False,
+) -> str | None:
+    """Return a warning string if budget is too low to proceed; else None.
+
+    `budget` is the `(remaining, limit, reset_unix)` tuple from
+    `graphql_budget()`. Heavy scripts call this before doing real work:
+
+        warning = check_graphql_budget(graphql_budget(), min_required=200)
+        if warning:
+            print(warning, file=sys.stderr)
+            return 0
+
+    `force=True` suppresses the gate (returns None even if budget is low),
+    for users who explicitly want to spend the remaining points. The
+    message includes both the absolute reset clock and minutes-from-now
+    so it reads cleanly in interactive output.
+    """
+    remaining, limit, reset = budget
+    if force or remaining >= min_required:
+        return None
+    reset_dt = dt.datetime.fromtimestamp(reset, tz=dt.UTC)
+    minutes = max(0, int((reset - time.time()) / 60))
+    return (
+        f"GraphQL budget low: {remaining}/{limit} remaining; "
+        f"resets at {reset_dt:%H:%M UTC} (~{minutes} min). "
+        f"Run with --force to override."
+    )
+
+
+def run_graphql(query: str, *, cache: str | None = None, **variables: str | int | bool) -> Any:
     """Run a GraphQL query via `gh api graphql` with named variables.
 
     Uses gh's `-F` for bool/int (so gh casts to the right type) and `-f`
