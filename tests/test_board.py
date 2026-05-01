@@ -257,6 +257,100 @@ def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         b.find_item_id(123456)
 
 
+def test_board_items_caches_within_instance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """board_items() fetches once and reuses; second call must not re-shell out."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    call_count = {"n": 0}
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"items": ['
+            '{"id": "PVTI_aaa", "content": {"number": 42}},'
+            '{"id": "PVTI_bbb", "content": {"number": 99}}'
+            "]}"
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        call_count["n"] += 1
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    first = b.board_items()
+    second = b.board_items()
+
+    assert call_count["n"] == 1, "board_items must cache after first call"
+    assert first is second
+    assert len(first) == 2
+
+
+def test_find_item_id_uses_cached_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two find_item_id calls on the same Board must share one item-list fetch."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    call_count = {"n": 0}
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"items": ['
+            '{"id": "PVTI_aaa", "content": {"number": 42}},'
+            '{"id": "PVTI_bbb", "content": {"number": 99}}'
+            "]}"
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        call_count["n"] += 1
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    assert b.find_item_id(42) == "PVTI_aaa"
+    assert b.find_item_id(99) == "PVTI_bbb"
+    assert call_count["n"] == 1, (
+        "find_item_id should reuse the snapshot — saw multiple item-list fetches"
+    )
+
+
+def test_invalidate_items_forces_refetch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """invalidate_items() drops the cache so the next read re-fetches."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    call_count = {"n": 0}
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: (call_count.update(n=call_count["n"] + 1) or FakeResult()),
+    )
+
+    b.board_items()
+    b.invalidate_items()
+    b.board_items()
+
+    assert call_count["n"] == 2
+
+
 def test_run_graphql_passes_query_and_vars(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from skills.jared.scripts.lib.board import Board
 
