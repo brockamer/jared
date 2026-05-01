@@ -229,6 +229,130 @@ def test_run_gh_non_zero_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     with pytest.raises(GhInvocationError) as exc:
         b.run_gh(["api", "user"])
     assert "401" in str(exc.value)
+    # Non-token-scope failures should NOT carry the diagnostic block (jared#66).
+    assert "Token-scope diagnostic" not in str(exc.value)
+
+
+def test_token_scope_error_on_project_mutation_includes_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `Resource not accessible by personal access token` failure on a project-v2
+    mutation should append the four-part diagnostic (token source, scopes-needed,
+    suggested fix). Non-mutation failures with the same stderr should not (jared#66)."""
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = (
+            "GraphQL: Resource not accessible by personal access token "
+            "(addProjectV2ItemById)"
+        )
+
+    # Sequenced fake: first call (the failing mutation) returns the 403; any
+    # subsequent call (the auth-status probe inside the diagnostic) returns no
+    # parseable scopes line so the test doesn't depend on the host's gh state.
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        calls.append(args)
+        if args[:2] == ["gh", "auth"]:
+
+            class AuthResult:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return AuthResult()  # type: ignore[return-value]
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    project_mutation_args = [
+        "api",
+        "graphql",
+        "-f",
+        'query=mutation { addProjectV2ItemById(input: {projectId: "x", contentId: "y"}) '
+        "{ item { id } } }",
+    ]
+    with pytest.raises(GhInvocationError) as exc:
+        b.run_gh(project_mutation_args)
+    msg = str(exc.value)
+    assert "Token-scope diagnostic" in msg
+    assert "Token source used:" in msg
+    assert "Scopes needed: project" in msg
+    assert "gh auth refresh -s project" in msg
+
+
+def test_token_scope_error_on_repo_call_skips_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Same error string on a non-project-mutation call (e.g. `gh api user`) should
+    not append the diagnostic — only project-mutation paths get the four-part block,
+    per the AC bullet about not noising up other failures."""
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "Resource not accessible by personal access token"
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    with pytest.raises(GhInvocationError) as exc:
+        b.run_gh(["api", "user"])
+    assert "Token-scope diagnostic" not in str(exc.value)
+
+
+def test_token_scope_diagnostic_mentions_gh_token_scrub_when_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When operator has GH_TOKEN exported, the diagnostic should mention that jared
+    scrubs it (#65) so the operator isn't misled into thinking GH_TOKEN is the cause."""
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+
+    b = Board.from_path(_minimal_board(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "scopeless-pat")
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "Resource not accessible by personal access token"
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        if args[:2] == ["gh", "auth"]:
+
+            class AuthResult:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return AuthResult()  # type: ignore[return-value]
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    with pytest.raises(GhInvocationError) as exc:
+        b.run_gh(
+            [
+                "project",
+                "item-add",
+                "1",
+                "--owner",
+                "x",
+                "--url",
+                "https://github.com/x/y/issues/1",
+            ]
+        )
+    assert "scrubs GH_TOKEN/GITHUB_TOKEN" in str(exc.value)
+    assert "#65" in str(exc.value)
 
 
 def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
