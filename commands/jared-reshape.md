@@ -18,7 +18,7 @@ Context to load before starting:
 
 1. `docs/project-board.md` — current conventions
 2. Top-level strategic issues (usually 1–3 long-lived issues describing the roadmap)
-3. Milestone inventory: `gh api repos/<owner>/<repo>/milestones --jq '.[] | {title, state, open_issues, closed_issues, due_on}'`
+3. Milestone inventory: `gh api repos/<owner>/<repo>/milestones --cache 5m --jq '.[] | {title, state, open_issues, closed_issues, due_on}'` (milestones rarely change inside a session — long TTL is safe; see cache-discipline rules in `skills/jared/references/operations.md`)
 4. Current git state (branch, uncommitted work — reshape mid-stream is a red flag)
 
 Produce a review proposal:
