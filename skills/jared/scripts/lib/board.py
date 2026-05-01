@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import time
@@ -413,6 +414,21 @@ def run_gh(args: list[str], *, cache: str | None = None) -> Any:
         raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
 
 
+def _child_env() -> dict[str, str]:
+    """Env for `gh` subprocess calls, with GH_TOKEN/GITHUB_TOKEN removed.
+
+    When either var is set, gh prefers it over the OAuth session from
+    `gh auth login`, so a fine-grained PAT without `project` scope shadows
+    an OAuth token that has it — and `gh auth status` doesn't surface the
+    override. Scrubbing here forces project mutations (and every other gh
+    call) onto the OAuth session jared expects to be authoritative.
+    """
+    env = os.environ.copy()
+    env.pop("GH_TOKEN", None)
+    env.pop("GITHUB_TOKEN", None)
+    return env
+
+
 def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
     """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
 
@@ -431,6 +447,7 @@ def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
         capture_output=True,
         text=True,
         check=False,
+        env=_child_env(),
     )
     if result.returncode != 0:
         raise GhInvocationError(

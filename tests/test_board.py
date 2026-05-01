@@ -468,6 +468,42 @@ def test_check_graphql_budget_force_overrides_low() -> None:
     )
 
 
+def test_run_gh_strips_github_token_envs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """gh prefers GH_TOKEN/GITHUB_TOKEN over `gh auth login`'s OAuth session, so a
+    fine-grained PAT without `project` scope shadows an OAuth token that has it.
+    run_gh_raw must scrub both vars from the child env (jared#65)."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    monkeypatch.setenv("GH_TOKEN", "bogus-pat")
+    monkeypatch.setenv("GITHUB_TOKEN", "bogus-pat")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    captured: dict[str, object] = {}
+
+    class FakeResult:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured["env"] = kw.get("env")
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    b.run_gh(["api", "graphql", "-f", "query=mutation{}"])
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "GH_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert env.get("PATH") == "/usr/bin"
+
+
 def test_run_gh_cache_flag_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """run_gh(args, cache='5m') appends `--cache 5m` for direct gh api callers
     (e.g. sweep.py's gh api repos/.../comments path)."""
