@@ -84,7 +84,21 @@ Flow:
 
    3. Write the result to `tmp/next-session-prompt-<YYYY-MM-DD-HHMM>.md` (timestamp = local time). Use `mkdir -p tmp` if `tmp/` doesn't exist. The file is `.gitignore`d (see `.gitignore`) — ephemeral, regenerated each wrap, never authoritative.
 
-   4. End the wrap by telling the user: *"Handoff prompt at `tmp/next-session-prompt-<TIMESTAMP>.md`. Pipe it into your next session and clear when ready."*
+   4. **Archive older handoff prompts.** Only the most recent prompt is consulted by `/jared-start` (lex-sort descending, take first), so prior prompts otherwise pile up indefinitely. After the new file is durably written, move every other top-level `tmp/next-session-prompt-*.md` into `tmp/handoff-archive/`. Archive rather than delete — older prompts are a useful session log for tracing context drift, and disk cost is trivial. Run after the new write so a crash mid-archive can never leave the workspace with no prompt.
+
+      ```bash
+      NEW="tmp/next-session-prompt-<NEW-TIMESTAMP>.md"   # the file just written
+      mkdir -p tmp/handoff-archive
+      for f in tmp/next-session-prompt-*.md; do
+        [ -e "$f" ] || continue          # nothing matched the glob
+        [ "$f" = "$NEW" ] && continue    # leave the just-written file alone
+        mv "$f" tmp/handoff-archive/
+      done
+      ```
+
+      Idempotent: running `/jared-wrap` twice in a row leaves exactly one top-level prompt and the rest under `tmp/handoff-archive/`.
+
+   5. End the wrap by telling the user: *"Handoff prompt at `tmp/next-session-prompt-<TIMESTAMP>.md`. Pipe it into your next session and clear when ready."*
 
    **Important contract.** The prompt is **derived**, not authoritative. Session notes on issues, plans, specs, and memory entries are the durable records. The prompt is a one-shot bridge between sessions and is regenerated next wrap. **Do not edit the prompt to record decisions** — capture them on issues, in plans, or as memory entries. The prompt's footer reminds the reader of this; honor it.
 
