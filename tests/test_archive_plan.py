@@ -68,9 +68,7 @@ def test_parse_referenced_issues_bold_line_plural_with_multiple_refs() -> None:
 
 
 def test_parse_referenced_issues_heading_wins_over_bold_line() -> None:
-    text = (
-        "# Plan\n\n**Issue:** #99\n\n## Issues\n\n- #1\n- #2\n\n## Body\n"
-    )
+    text = "# Plan\n\n**Issue:** #99\n\n## Issues\n\n- #1\n- #2\n\n## Body\n"
     assert ap.parse_referenced_issues(text) == [1, 2]
 
 
