@@ -23,10 +23,13 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <B> <A> --remove
 
 ### Reading dependencies
 
-For ad-hoc inspection, `gh api graphql` is the escape hatch:
+For ad-hoc inspection, `gh api graphql` is the escape hatch. Pass
+`--cache 60s` so repeated lookups in one session don't rebill against the
+GraphQL budget (see the cache-discipline rules in
+`references/operations.md`):
 
 ```bash
-gh api graphql -f query='
+gh api graphql --cache 60s -f query='
   query($owner: String!, $repo: String!, $number: Int!) {
     repository(owner: $owner, name: $repo) {
       issue(number: $number) {

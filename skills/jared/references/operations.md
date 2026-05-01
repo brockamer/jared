@@ -22,12 +22,43 @@ it.
 - `<item-id>` — project item node ID (different from issue node ID; starts
   with `PVTI_`)
 
+## Cache discipline
+
+Almost every `gh` invocation Jared makes is GraphQL-billed against the same
+5000-point/hour bucket — `gh project ...`, `gh issue view --json ...`, `gh
+issue list --json ...`, and `gh api graphql` all draw from it. Two rules
+keep conversational sessions inside that budget:
+
+1. **Pass `--cache 60s` on every read-only `gh api ...` call.** This
+   includes `gh api graphql ...` (the cache key covers the POST body, so
+   identical queries hit it). Use a longer TTL — `5m`, `1h` — for things
+   that genuinely don't change inside a session (e.g., milestone inventory,
+   schema introspection). The cache is a transparent HTTP response cache
+   keyed by request shape, with no smart invalidation: after mutating
+   something, a cached read of that data returns stale until TTL expires.
+   Pass `--cache 0` to force a refresh after a mutation when you need the
+   updated state. Worked example: `gh api graphql -f query='…' --cache 60s`.
+
+2. **Prefer the `jared` CLI for board-shaped queries.** `jared summary` and
+   `jared get-item <N>` share a per-process snapshot of `gh project
+   item-list`, so a session that asks "what's on the board?" then "what's
+   the state of #51?" pays for one `item-list` fetch, not two. Reach for
+   `gh issue view --json …` only when you actually need body / title /
+   labels / milestone — the fields the CLI doesn't expose. For Status /
+   Priority / item-id / field values, `jared get-item` is cheaper and
+   bounded.
+
+The escape-hatch examples below are written with these rules applied.
+
 ## Raw `gh` fallback — the minimum escape-hatch set
 
 ### Inspect the board
 
 ```bash
-# Full item list — item-ids, field values, content snippets for every row
+# Full item list — item-ids, field values, content snippets for every row.
+# Prefer `jared summary` / `jared get-item` in conversational flows; those
+# share one fetch per process. Use this raw form only for ad-hoc inspection
+# of fields the CLI doesn't expose.
 gh project item-list <project-number> --owner <owner> --limit 500 --format json
 
 # Project metadata (title, id, field counts)
@@ -40,12 +71,16 @@ gh project field-list <project-number> --owner <owner> --format json
 ### Inspect an issue
 
 ```bash
-# Body + state + labels + milestone
+# Body + state + labels + milestone.
+# For state-only checks (Status / Priority / item-id), use `jared get-item
+# <N>` instead — it hits the per-process snapshot cache. Use this raw form
+# only when you need the body / labels / milestone fields.
 gh issue view <issue-number> --repo <repo> --json \
   body,state,labels,milestone,closedAt
 
-# Native blocked-by edges (GraphQL — not exposed via `gh issue view`)
-gh api graphql -f query='
+# Native blocked-by edges (GraphQL — not exposed via `gh issue view`).
+# `--cache 60s` deduplicates repeats inside a single session.
+gh api graphql --cache 60s -f query='
 query($o:String!,$r:String!,$n:Int!) {
   repository(owner:$o, name:$r) {
     issue(number:$n) {
@@ -58,8 +93,9 @@ query($o:String!,$r:String!,$n:Int!) {
 ### Introspect the GraphQL schema
 
 ```bash
-# When "is this field available on this GitHub version?" comes up
-gh api graphql -f query='
+# When "is this field available on this GitHub version?" comes up.
+# Schema doesn't change inside a session — long TTL is safe.
+gh api graphql --cache 1h -f query='
 { __type(name: "Issue") { fields { name type { name } } } }'
 ```
 
