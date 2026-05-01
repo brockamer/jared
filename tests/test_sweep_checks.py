@@ -5,7 +5,11 @@ separate from the full sweep flow (which shells out to gh and reads live
 board state) — these only exercise the pure list-processing logic.
 """
 
+from pathlib import Path
+from textwrap import dedent
 from typing import Any
+
+import pytest
 
 from tests.conftest import import_sweep
 
@@ -66,6 +70,97 @@ def test_check_closed_not_done_ignores_missing_content() -> None:
     # Only the well-formed closed item is flagged.
     assert len(stuck) == 1
     assert stuck[0]["number"] == 5
+
+
+def test_check_plan_spec_drift_recognizes_bare_hash_issue_refs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression for #48 — the section-body terminator used `^#` which in
+    MULTILINE mode matched bare `#229`-style issue references at column zero,
+    so the body capture group came back empty and the file got reported
+    as `## Issue section but no #N references`. Fixed by tightening the
+    terminator to `^#{1,3}\\s` (a real heading shape).
+    """
+    mod = import_sweep()
+
+    # Plan whose Issue section uses bare `#N` refs — the broken regex
+    # would terminate the body match at the `#229` line and report the
+    # file as having no refs.
+    plan_dir = tmp_path / "plans"
+    plan_dir.mkdir()
+    bare_form = plan_dir / "metric-layer-c0.md"
+    bare_form.write_text(
+        dedent("""\
+        # Some plan
+
+        ## Issue(s)
+        #229 — Metric Layer C.0
+        #230 — follow-up
+
+        ## Approach
+
+        Words.
+        """)
+    )
+    # Same plan, but with the user's old workaround (- prefix).
+    listed_form = plan_dir / "feature-x.md"
+    listed_form.write_text(
+        dedent("""\
+        # Other plan
+
+        ## Issue
+        - #301 — Feature X
+
+        ## Approach
+
+        Words.
+        """)
+    )
+
+    # Stub gh issue view so we don't hit the network — every referenced
+    # issue is reported open. The check only emits "no #N references" or
+    # "no ## Issue section" findings if the regex breaks; a working regex
+    # produces *no* findings for these well-formed plans.
+    class FakeResult:
+        returncode = 0
+        stdout = '{"state": "OPEN"}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    findings = mod.check_plan_spec_drift([plan_dir], "brockamer/jared")
+
+    # The two false-positives the broken regex used to emit:
+    bug_messages = [f for f in findings if "no #N references" in f or "no ## Issue section" in f]
+    assert bug_messages == [], (
+        f"Plan files with bare #N refs should NOT be reported as missing — got {bug_messages}"
+    )
+
+
+def test_check_plan_spec_drift_still_flags_genuinely_orphaned_plans(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The fix must not silence the legitimate orphan-plan finding: a plan
+    file with no `## Issue` section at all should still be reported."""
+    mod = import_sweep()
+
+    plan_dir = tmp_path / "plans"
+    plan_dir.mkdir()
+    (plan_dir / "no-issue-section.md").write_text(
+        dedent("""\
+        # Plan with no Issue section
+
+        ## Approach
+
+        We just start writing without filing.
+        """)
+    )
+
+    findings = mod.check_plan_spec_drift([plan_dir], "brockamer/jared")
+    assert any("no ## Issue section" in f for f in findings)
 
 
 def test_format_closed_not_done_line_includes_propose_command() -> None:
