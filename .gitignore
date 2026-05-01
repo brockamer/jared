@@ -29,6 +29,12 @@ tests/testbed.env
 # Per-user Claude Code permissions (not versioned)
 .claude/settings.local.json
 
+# Per-user Claude Code project memory (private, not versioned)
+CLAUDE.local.md
+
+# uv lockfile — venv tooling is pip-based per CLAUDE.md; uv usage is incidental
+uv.lock
+
 # Local venv
 .venv/
 
