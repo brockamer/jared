@@ -429,6 +429,83 @@ def _child_env() -> dict[str, str]:
     return env
 
 
+_TOKEN_SCOPE_ERROR_SIGNATURE = "Resource not accessible by personal access token"
+
+
+def _looks_like_project_mutation(args: list[str]) -> bool:
+    """True when args correspond to a project v2 mutation that needs `project` scope.
+
+    Two shapes hit this codepath: `gh project item-add/item-edit/item-archive ...`
+    and `gh api graphql -f query=mutation { ... addProjectV2... | updateProjectV2... }`.
+    """
+    if not args:
+        return False
+    if args[0] == "project" and len(args) > 1 and args[1] in {
+        "item-add",
+        "item-edit",
+        "item-archive",
+        "item-delete",
+        "create",
+        "field-create",
+    }:
+        return True
+    if args[:2] == ["api", "graphql"]:
+        for chunk in args:
+            if "addProjectV2" in chunk or "updateProjectV2" in chunk or "deleteProjectV2" in chunk:
+                return True
+    return False
+
+
+def _format_token_scope_diagnostic() -> str:
+    """Four-part diagnostic block for `Resource not accessible by personal access token`
+    failures from project mutations. Best-effort — silently skips parts that can't be
+    determined.
+
+    Post-#65, jared scrubs GH_TOKEN/GITHUB_TOKEN before invoking gh, so the call
+    that just failed ran on `gh auth login`'s OAuth session. The realistic remaining
+    trigger for this error class is OAuth without `project` scope. Mention the #65
+    scrub explicitly so an operator with GH_TOKEN set isn't misled.
+    """
+    lines: list[str] = ["", "Token-scope diagnostic:"]
+
+    has_gh_token = bool(os.environ.get("GH_TOKEN"))
+    has_gh_token_var = "GITHUB_TOKEN" if os.environ.get("GITHUB_TOKEN") else None
+    if has_gh_token or has_gh_token_var:
+        lines.append(
+            "  Token source used: gh auth login OAuth session "
+            "(jared scrubs GH_TOKEN/GITHUB_TOKEN before invoking gh — see #65)."
+        )
+    else:
+        lines.append("  Token source used: gh auth login OAuth session.")
+
+    scopes = _probe_oauth_scopes()
+    if scopes is not None:
+        lines.append(f"  Scopes present: {scopes or '(none reported)'}")
+
+    lines.append("  Scopes needed: project (write) for project v2 mutations.")
+    lines.append("  Suggested fix: gh auth refresh -s project")
+    return "\n".join(lines)
+
+
+def _probe_oauth_scopes() -> str | None:
+    """Best-effort scopes lookup via `gh auth status`. Returns the scopes line,
+    or None if the probe fails."""
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=_child_env(),
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    blob = (result.stdout or "") + (result.stderr or "")
+    m = re.search(r"Token scopes:\s*(.+)", blob)
+    return m.group(1).strip() if m else None
+
+
 def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
     """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
 
@@ -450,9 +527,15 @@ def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
         env=_child_env(),
     )
     if result.returncode != 0:
-        raise GhInvocationError(
+        message = (
             f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
         )
+        if (
+            _TOKEN_SCOPE_ERROR_SIGNATURE in result.stderr
+            and _looks_like_project_mutation(args)
+        ):
+            message += "\n" + _format_token_scope_diagnostic()
+        raise GhInvocationError(message)
     return result.stdout.strip()
 
 
