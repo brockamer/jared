@@ -380,6 +380,69 @@ def test_run_graphql_passes_query_and_vars(monkeypatch: pytest.MonkeyPatch, tmp_
     assert "-F" in args and "number=7" in args
 
 
+def test_run_graphql_cache_flag_appends_when_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run_graphql(cache='60s') appends `--cache 60s` to gh args; default omits it.
+
+    `gh api --cache <duration>` is GitHub CLI's HTTP-level response cache;
+    a hit avoids the network roundtrip *and* the GraphQL points. Opt-in
+    only (default None) so mutation callers don't accidentally cache.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"data": {"ok": true}}'
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    b.run_graphql("query { ok }")
+    assert "--cache" not in captured[0], "default must not enable caching"
+
+    b.run_graphql("query { ok }", cache="60s")
+    last = captured[-1]
+    assert "--cache" in last and "60s" in last
+    cache_idx = last.index("--cache")
+    assert last[cache_idx + 1] == "60s"
+
+
+def test_run_gh_cache_flag_passthrough(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run_gh(args, cache='5m') appends `--cache 5m` for direct gh api callers
+    (e.g. sweep.py's gh api repos/.../comments path)."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    b.run_gh(["api", "repos/owner/repo/issues/1/comments"], cache="5m")
+    args = captured[-1]
+    assert "--cache" in args and "5m" in args
+
+
 # Legacy board-doc fallbacks: older docs (pre-bootstrap-project.py) lack
 # the machine-readable bullet block, so the parser has to infer the header
 # fields from prose + git remote. These tests pin the fallback behavior

@@ -238,11 +238,11 @@ class Board:
             )
         return options[option]
 
-    def run_gh(self, args: list[str]) -> Any:
-        return run_gh(args)
+    def run_gh(self, args: list[str], *, cache: str | None = None) -> Any:
+        return run_gh(args, cache=cache)
 
-    def run_gh_raw(self, args: list[str]) -> str:
-        return run_gh_raw(args)
+    def run_gh_raw(self, args: list[str], *, cache: str | None = None) -> str:
+        return run_gh_raw(args, cache=cache)
 
     def board_items(self) -> list[dict[str, Any]]:
         """Cached `gh project item-list` result for this Board instance.
@@ -289,13 +289,15 @@ class Board:
             f"{self.project_number}. Is the issue added to the board?"
         )
 
-    def run_graphql(self, query: str, **variables: str | int | bool) -> Any:
-        return run_graphql(query, **variables)
+    def run_graphql(
+        self, query: str, *, cache: str | None = None, **variables: str | int | bool
+    ) -> Any:
+        return run_graphql(query, cache=cache, **variables)
 
 
-def run_gh(args: list[str]) -> Any:
+def run_gh(args: list[str], *, cache: str | None = None) -> Any:
     """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
-    stdout = run_gh_raw(args)
+    stdout = run_gh_raw(args, cache=cache)
     if not stdout:
         return {}
     try:
@@ -304,14 +306,21 @@ def run_gh(args: list[str]) -> Any:
         raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
 
 
-def run_gh_raw(args: list[str]) -> str:
+def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
     """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
 
     Some gh commands return plain text (e.g. `gh issue create` prints a URL).
     Callers that need the raw string use this; JSON responses use run_gh.
+
+    `cache` is passed to gh as `--cache <duration>`. Only meaningful for
+    `gh api ...` calls (including `gh api graphql`); other subcommands
+    will reject the flag. Caller's responsibility to use it appropriately.
     """
+    full_args = ["gh", *args]
+    if cache is not None:
+        full_args.extend(["--cache", cache])
     result = subprocess.run(
-        ["gh", *args],
+        full_args,
         capture_output=True,
         text=True,
         check=False,
@@ -350,14 +359,19 @@ def _infer_repo_from_git(repo_root: Path) -> str | None:
     return f"{m.group(1)}/{m.group(2)}"
 
 
-def run_graphql(query: str, **variables: str | int | bool) -> Any:
+def run_graphql(
+    query: str, *, cache: str | None = None, **variables: str | int | bool
+) -> Any:
     """Run a GraphQL query via `gh api graphql` with named variables.
 
     Uses gh's `-F` for bool/int (so gh casts to the right type) and `-f`
     for strings. Results come back parsed from JSON.
+
+    `cache` enables gh's HTTP-level response cache (`gh api --cache <dur>`).
+    Use only on read-only queries; mutation callers must leave it None.
     """
     args = ["api", "graphql", "-f", f"query={query}"]
     for name, value in variables.items():
         flag = "-F" if isinstance(value, bool | int) and not isinstance(value, str) else "-f"
         args.extend([flag, f"{name}={value}"])
-    return run_gh(args)
+    return run_gh(args, cache=cache)
