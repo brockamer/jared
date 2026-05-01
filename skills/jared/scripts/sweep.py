@@ -383,9 +383,13 @@ def check_plan_spec_drift(plan_dirs: list[Path], repo: str) -> list[str]:
                 continue
             text = p.read_text(errors="replace")
 
-            # Look for ## Issue section — support ## Issue, ## Issue(s), ## Issues
+            # Look for ## Issue section — support ## Issue, ## Issue(s), ## Issues.
+            # The body terminator is `^#{1,3}\s` (a real heading) rather than
+            # `^#`: a bare `#229` issue reference at column zero is a valid
+            # plan-body line, not the start of the next section, so the
+            # terminator must require whitespace after the hashes. (#48)
             issue_section_match = re.search(
-                r"^#{1,3}\s+Issue[s()]*\s*$([\s\S]+?)(?=^#|\Z)",
+                r"^#{1,3}\s+Issue[s()]*\s*$([\s\S]+?)(?=^#{1,3}\s|\Z)",
                 text,
                 re.MULTILINE,
             )
