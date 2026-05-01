@@ -8,6 +8,17 @@ testbed from scratch.
 - `gh` authenticated (`gh auth status` green) with `project` scope.
 - Write access to `brockamer/jared-testbed` (or equivalent — adjust names below).
 
+> **`GH_TOKEN` gotcha.** When `GH_TOKEN` (or `GITHUB_TOKEN`) is exported, `gh`
+> uses it for every API call regardless of `gh auth login`'s OAuth session, and
+> `gh auth status` still reports the OAuth scopes ✓ — misleading, since it's
+> reporting scopes from a source `gh` won't actually use. If a fine-grained PAT
+> without `project` scope is in `GH_TOKEN`, project mutations fail with
+> `Resource not accessible by personal access token`. Jared's `lib/board.py`
+> wrapper scrubs both vars from the child env before invoking `gh`, so the
+> OAuth session is what takes effect — but `gh` invoked directly from the
+> shell still picks up the env. If you hit a token-scope error from a raw
+> `gh` command in this doc, run `unset GH_TOKEN GITHUB_TOKEN` first.
+
 ## One-time setup
 
 1. Create repo:
