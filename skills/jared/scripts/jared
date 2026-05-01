@@ -422,9 +422,16 @@ def _build_add_to_board_command(
     status: str,
     fields: list[tuple[str, str]],
 ) -> str:
-    """Render the literal `jared add-to-board <N> ...` recovery line."""
+    """Render the literal `<jared-path> add-to-board <N> ...` recovery line.
+
+    Uses `__file__` so the line invokes the same binary that emitted it —
+    important because `jared` typically isn't on PATH (it's installed via
+    Claude Code's plugin cache or run from a checkout). Bare `jared` would
+    `command-not-found` on most setups, defeating the paste-and-run UX.
+    """
+    binary = str(Path(__file__).resolve())
     parts = [
-        "jared",
+        binary,
         "add-to-board",
         str(issue_number),
         "--priority",

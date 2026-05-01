@@ -211,14 +211,74 @@ def test_file_emits_recovery_command_on_post_create_failure(
     assert rc != 0, captured.err
 
     # Recovery command must be in stderr, with the right issue number,
-    # priority, status, and any extra --field values the user passed.
-    assert "jared add-to-board" in captured.err, captured.err
+    # priority, status, and any extra --field values the user passed. The
+    # binary path is `Path(__file__).resolve()` of the running CLI so the
+    # paste-and-run line points at *this* jared, not bare `jared` (which
+    # is typically not on PATH).
+    assert "/jared add-to-board" in captured.err, captured.err
     assert str(issue_number) in captured.err, captured.err
     assert "--priority High" in captured.err, captured.err
     assert "'Up Next'" in captured.err, captured.err
     assert "'Work Stream=Planning'" in captured.err, captured.err
     # Underlying gh error context is surfaced too.
     assert "Resource not accessible" in captured.err, captured.err
+
+
+def test_file_emits_recovery_command_on_item_edit_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same recovery contract when failure is *after* item-add succeeds.
+
+    Covers the "network blip mid-loop" failure mode advisor flagged: the
+    issue is on the board with an item-id, but a later `gh project item-edit`
+    fails (Priority set, Status not yet, etc.). Recovery line still works
+    because `jared add-to-board` is idempotent — it'll find the existing
+    item, skip item-add, and finish setting fields.
+    """
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Body content.")
+
+    issue_number = 142
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue create" in joined:
+            return FakeGhResult(
+                stdout=f"https://github.com/brockamer/findajob/issues/{issue_number}\n"
+            )
+        if "item-add" in joined:
+            return FakeGhResult(stdout='{"id": "PVTI_new"}')
+        if "item-edit" in joined:
+            return FakeGhResult(
+                stdout="",
+                returncode=1,
+                stderr="GraphQL: rate limit exceeded (updateProjectV2ItemFieldValue)",
+            )
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "Medium",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc != 0, captured.err
+    assert "/jared add-to-board" in captured.err, captured.err
+    assert str(issue_number) in captured.err, captured.err
+    assert "--priority Medium" in captured.err, captured.err
+    assert "rate limit exceeded" in captured.err, captured.err
 
 
 def test_file_makes_no_item_list_calls(
