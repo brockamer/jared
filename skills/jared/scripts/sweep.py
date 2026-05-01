@@ -61,6 +61,9 @@ from lib.board import (
     fetch_blocked_by_edges as board_fetch_blocked_by_edges,
 )
 from lib.board import (
+    fetch_recent_comments_batch as board_fetch_recent_comments_batch,
+)
+from lib.board import (
     graphql_budget as board_graphql_budget,
 )
 from lib.board import (
@@ -153,31 +156,6 @@ def fetch_native_blocked_by(repo: str) -> dict[int, list[dict[str, Any]]]:
         dict[int, list[dict[str, Any]]],
         board_fetch_blocked_by_edges(repo, cache="60s"),
     )
-
-
-def fetch_recent_comments(repo: str, number: int, limit: int = 5) -> list[dict[str, Any]]:
-    """Get recent comments on an issue (for session-note freshness)."""
-    try:
-        stdout = board_run_gh_raw(
-            [
-                "api",
-                f"repos/{repo}/issues/{number}/comments",
-                "--jq",
-                f".[-{limit}:] | .[] | {{body, created_at}}",
-            ]
-        )
-    except GhInvocationError:
-        return []
-    # jq emits one object per line
-    comments = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if line:
-            try:
-                comments.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return comments
 
 
 # ---------- Item helpers ----------
@@ -478,7 +456,7 @@ def check_session_note_freshness(
     if not repo:
         return ["(skipping session-note check — repo not determined)"]
     cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
-    findings = []
+    in_progress_numbers: list[int] = []
     for i in items:
         content = i.get("content") or {}
         if content.get("state") == "CLOSED":
@@ -486,9 +464,16 @@ def check_session_note_freshness(
         if i.get("status") != "In Progress":
             continue
         n = content.get("number")
-        if not n:
-            continue
-        comments = fetch_recent_comments(repo, n, limit=10)
+        if isinstance(n, int):
+            in_progress_numbers.append(n)
+    # Single GraphQL round-trip for all in-progress issues, replacing the
+    # per-issue REST fan-out that used to live here.
+    comments_by_number = board_fetch_recent_comments_batch(
+        repo, in_progress_numbers, limit=10, cache="60s"
+    )
+    findings = []
+    for n in in_progress_numbers:
+        comments = comments_by_number.get(n, [])
         # A Session note starts with "## Session YYYY-MM-DD"
         session_notes = [
             c
@@ -499,7 +484,7 @@ def check_session_note_freshness(
             findings.append(f"#{n}: In Progress with no Session note comment ever")
             continue
         latest = max(
-            dt.datetime.fromisoformat(c["created_at"].replace("Z", "+00:00")) for c in session_notes
+            dt.datetime.fromisoformat(c["createdAt"].replace("Z", "+00:00")) for c in session_notes
         )
         if latest < cutoff:
             age = (dt.datetime.now(dt.UTC) - latest).days
