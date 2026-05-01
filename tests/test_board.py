@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from textwrap import dedent
 
@@ -257,6 +258,96 @@ def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         b.find_item_id(123456)
 
 
+def test_board_items_caches_within_instance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """board_items() fetches once and reuses; second call must not re-shell out."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    call_count = {"n": 0}
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"items": ['
+            '{"id": "PVTI_aaa", "content": {"number": 42}},'
+            '{"id": "PVTI_bbb", "content": {"number": 99}}'
+            "]}"
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        call_count["n"] += 1
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    first = b.board_items()
+    second = b.board_items()
+
+    assert call_count["n"] == 1, "board_items must cache after first call"
+    assert first is second
+    assert len(first) == 2
+
+
+def test_find_item_id_uses_cached_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Two find_item_id calls on the same Board must share one item-list fetch."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    call_count = {"n": 0}
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"items": ['
+            '{"id": "PVTI_aaa", "content": {"number": 42}},'
+            '{"id": "PVTI_bbb", "content": {"number": 99}}'
+            "]}"
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        call_count["n"] += 1
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    assert b.find_item_id(42) == "PVTI_aaa"
+    assert b.find_item_id(99) == "PVTI_bbb"
+    assert call_count["n"] == 1, (
+        "find_item_id should reuse the snapshot — saw multiple item-list fetches"
+    )
+
+
+def test_invalidate_items_forces_refetch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """invalidate_items() drops the cache so the next read re-fetches."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    call_count = {"n": 0}
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: call_count.update(n=call_count["n"] + 1) or FakeResult(),
+    )
+
+    b.board_items()
+    b.invalidate_items()
+    b.board_items()
+
+    assert call_count["n"] == 2
+
+
 def test_run_graphql_passes_query_and_vars(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from skills.jared.scripts.lib.board import Board
 
@@ -284,6 +375,256 @@ def test_run_graphql_passes_query_and_vars(monkeypatch: pytest.MonkeyPatch, tmp_
     # Strings use -f; ints use -F so gh infers numeric type.
     assert "-f" in args and "owner=brockamer" in args
     assert "-F" in args and "number=7" in args
+
+
+def test_run_graphql_cache_flag_appends_when_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run_graphql(cache='60s') appends `--cache 60s` to gh args; default omits it.
+
+    `gh api --cache <duration>` is GitHub CLI's HTTP-level response cache;
+    a hit avoids the network roundtrip *and* the GraphQL points. Opt-in
+    only (default None) so mutation callers don't accidentally cache.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"data": {"ok": true}}'
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    b.run_graphql("query { ok }")
+    assert "--cache" not in captured[0], "default must not enable caching"
+
+    b.run_graphql("query { ok }", cache="60s")
+    last = captured[-1]
+    assert "--cache" in last and "60s" in last
+    cache_idx = last.index("--cache")
+    assert last[cache_idx + 1] == "60s"
+
+
+def test_graphql_budget_parses_rate_limit_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """graphql_budget() pulls (remaining, limit, reset) from `gh api rate_limit`.
+
+    The endpoint returns a nested dict — the resource we care about is
+    `resources.graphql`. Numbers come back as ints regardless of how
+    gh's JSON encoded them.
+    """
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"resources": {"core": {"remaining": 4500},'
+            ' "graphql": {"remaining": 142, "limit": 5000, "reset": 1777643200}}}'
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    remaining, limit, reset = board.graphql_budget()
+    assert remaining == 142
+    assert limit == 5000
+    assert reset == 1777643200
+
+
+def test_check_graphql_budget_warns_when_low() -> None:
+    from skills.jared.scripts.lib.board import check_graphql_budget
+
+    msg = check_graphql_budget((50, 5000, int(time.time()) + 600), min_required=200)
+    assert msg is not None
+    assert "50" in msg and "5000" in msg
+    assert "--force" in msg
+
+
+def test_check_graphql_budget_proceeds_when_above_threshold() -> None:
+    from skills.jared.scripts.lib.board import check_graphql_budget
+
+    assert check_graphql_budget((1000, 5000, int(time.time()) + 600), min_required=200) is None
+
+
+def test_check_graphql_budget_force_overrides_low() -> None:
+    """force=True bypasses the gate even when budget is empty."""
+    from skills.jared.scripts.lib.board import check_graphql_budget
+
+    assert (
+        check_graphql_budget((0, 5000, int(time.time()) + 600), min_required=200, force=True)
+        is None
+    )
+
+
+def test_run_gh_cache_flag_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """run_gh(args, cache='5m') appends `--cache 5m` for direct gh api callers
+    (e.g. sweep.py's gh api repos/.../comments path)."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    b.run_gh(["api", "repos/owner/repo/issues/1/comments"], cache="5m")
+    args = captured[-1]
+    assert "--cache" in args and "5m" in args
+
+
+def test_fetch_blocked_by_edges_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One paginated GraphQL call → {number: [{number, state}]} for a small repo."""
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": ['
+            '{"number": 10, "blockedBy": {"nodes": [{"number": 5, "state": "OPEN"}]}},'
+            '{"number": 11, "blockedBy": {"nodes": []}}'
+            "]}}}}"
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    edges = board.fetch_blocked_by_edges("brockamer/findajob")
+    assert edges == {
+        10: [{"number": 5, "state": "OPEN"}],
+        11: [],
+    }
+
+
+def test_fetch_blocked_by_edges_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Helper walks `pageInfo.hasNextPage`; each page reuses the schema field name."""
+    from skills.jared.scripts.lib import board
+
+    page_responses = iter(
+        [
+            (
+                '{"data": {"repository": {"issues": {'
+                '"pageInfo": {"hasNextPage": true, "endCursor": "CUR1"},'
+                '"nodes": [{"number": 1, "blockedBy": {"nodes": []}}]'
+                "}}}}"
+            ),
+            (
+                '{"data": {"repository": {"issues": {'
+                '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+                '"nodes": [{"number": 2, "blockedBy": {"nodes": []}}]'
+                "}}}}"
+            ),
+        ]
+    )
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult(next(page_responses))
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    edges = board.fetch_blocked_by_edges("brockamer/findajob")
+    assert set(edges) == {1, 2}
+    # Two paginated calls, second one carries the cursor.
+    assert len(captured) == 2
+    assert any("c=CUR1" in arg for arg in captured[1])
+
+
+def test_fetch_blocked_by_edges_schema_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If `blockedBy` raises a Field-doesn't-exist error, retry with `issueDependencies`."""
+    from skills.jared.scripts.lib import board
+
+    call_responses = iter(
+        [
+            # First attempt — blockedBy not on this schema.
+            ("", 1, "Field 'blockedBy' doesn't exist on type 'Issue'"),
+            # Second attempt — issueDependencies works.
+            (
+                (
+                    '{"data": {"repository": {"issues": {'
+                    '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+                    '"nodes": [{"number": 7, "issueDependencies": '
+                    '{"nodes": [{"number": 4, "state": "OPEN"}]}}]'
+                    "}}}}"
+                ),
+                0,
+                "",
+            ),
+        ]
+    )
+
+    class FakeResult:
+        def __init__(self, stdout: str, rc: int, stderr: str) -> None:
+            self.stdout = stdout
+            self.returncode = rc
+            self.stderr = stderr
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        return FakeResult(*next(call_responses))
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    edges = board.fetch_blocked_by_edges("brockamer/findajob")
+    assert edges == {7: [{"number": 4, "state": "OPEN"}]}
+
+
+def test_fetch_blocked_by_edges_passes_cache_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cache='60s' threads through to the underlying gh api invocation."""
+    from skills.jared.scripts.lib import board
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": []}}}}'
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    board.fetch_blocked_by_edges("brockamer/findajob", cache="60s")
+    assert "--cache" in captured[0] and "60s" in captured[0]
 
 
 # Legacy board-doc fallbacks: older docs (pre-bootstrap-project.py) lack

@@ -37,6 +37,15 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
 )
 from lib.board import (
+    check_graphql_budget as board_check_graphql_budget,
+)
+from lib.board import (
+    fetch_blocked_by_edges as board_fetch_blocked_by_edges,
+)
+from lib.board import (
+    graphql_budget as board_graphql_budget,
+)
+from lib.board import (
     run_gh as board_run_gh,
 )
 
@@ -69,48 +78,27 @@ def fetch_issue_state(repo: str, number: int) -> str:
         return "UNKNOWN"
 
 
-def fetch_native_dependencies(repo: str, number: int) -> list[int] | None:
-    """Fetch native blockedBy edges (what this issue is blocked by).
+def fetch_all_native_dependencies(repo: str) -> dict[int, list[int]] | None:
+    """Fetch native blockedBy edges for ALL open issues in one paginated call.
 
-    Returns a list of OPEN dependency numbers on success, or None if the
-    GraphQL call fails (e.g. the repo doesn't have native dependencies
-    enabled). Callers should treat None as "no native data — fall back to
-    body conventions" and an empty list as "native says no dependencies."
+    Returns `{issue_number: [open_blocker_numbers]}` (closed-state blockers
+    are filtered out — the dep-graph only cares about live edges). Returns
+    None if the underlying GraphQL call fails entirely (e.g. the repo
+    doesn't have native dependencies enabled). Callers treat None as
+    "fall back to body-text parsing" and missing-key as "no native data
+    for this issue."
+
+    Replaces the old per-issue call (which made one GraphQL request per
+    open issue — O(N) instead of O(pages)).
     """
-    query = """
-    query($owner: String!, $repo: String!, $number: Int!) {
-      repository(owner: $owner, name: $repo) {
-        issue(number: $number) {
-          blockedBy(first: 50) {
-            nodes { number state }
-          }
-        }
-      }
-    }
-    """
-    owner, name = repo.split("/", 1)
     try:
-        result = board_run_gh(
-            [
-                "api",
-                "graphql",
-                "-f",
-                f"query={query}",
-                "-F",
-                f"owner={owner}",
-                "-F",
-                f"repo={name}",
-                "-F",
-                f"number={number}",
-            ]
-        )
-    except GhInvocationError:
+        edges = board_fetch_blocked_by_edges(repo, cache="60s")
+    except (GhInvocationError, RuntimeError):
         return None
-    issue = result.get("data", {}).get("repository", {}).get("issue")
-    if issue is None:
-        return None
-    deps = (issue.get("blockedBy") or {}).get("nodes", [])
-    return [d["number"] for d in deps if d.get("state") == "OPEN"]
+    return {
+        issue_n: [d["number"] for d in deps if d.get("state") == "OPEN"]
+        for issue_n, deps in edges.items()
+    }
 
 
 # ---------- Body parsing ----------
@@ -307,7 +295,30 @@ def main() -> int:
         action="store_true",
         help="Skip native issue dependency lookups",
     )
+    parser.add_argument(
+        "--min-budget",
+        type=int,
+        default=200,
+        help="Skip if remaining GraphQL budget is below this (default: 200)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run even if GraphQL budget is below --min-budget",
+    )
     args = parser.parse_args()
+
+    # Pre-flight GraphQL budget gate. Building the dep-graph fans out
+    # GraphQL calls; bail out early when budget can't cover the work.
+    try:
+        budget = board_graphql_budget()
+    except (RuntimeError, GhInvocationError) as e:
+        print(f"dependency-graph: budget probe failed ({e}); proceeding anyway", file=sys.stderr)
+    else:
+        warning = board_check_graphql_budget(budget, min_required=args.min_budget, force=args.force)
+        if warning:
+            print(f"dependency-graph: {warning}", file=sys.stderr)
+            return 0
 
     print(
         f"Fetching open issues from {args.repo}"
@@ -324,6 +335,14 @@ def main() -> int:
     issues_by_number = {i["number"]: i for i in issues}
     open_numbers = set(issues_by_number.keys())
 
+    # Pre-fetch ALL native dependency edges for the repo in one paginated
+    # GraphQL call instead of one per issue. None means the GraphQL call
+    # failed entirely; any per-issue lookup miss means no native data for
+    # that issue (treat as fall-back-to-body, same as before).
+    all_native: dict[int, list[int]] | None = None
+    if not args.no_native:
+        all_native = fetch_all_native_dependencies(args.repo)
+
     # Build graph: N → set of issues N depends on
     graph: dict[int, set[int]] = defaultdict(set)
     priorities: dict[int, str] = {}
@@ -334,12 +353,12 @@ def main() -> int:
         # may contain narrative prose ("#10 — shipped, #12 — critical path"),
         # so treat them as a fallback only when native has nothing for this
         # issue — either the API call failed (None) or returned no edges ([]).
-        native = None
-        if not args.no_native:
-            try:
-                native = fetch_native_dependencies(args.repo, n)
-            except Exception:
-                native = None
+        # Missing key in all_native means no native data for this issue
+        # (e.g. milestone-filtered out, or issue isn't in the open-issues
+        # state set). Treat as None — body-text fallback may still find edges.
+        native: list[int] | None = (
+            None if args.no_native or all_native is None else all_native.get(n)
+        )
 
         if native:
             for dep in native:

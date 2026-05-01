@@ -55,13 +55,19 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
 )
 from lib.board import (
+    check_graphql_budget as board_check_graphql_budget,
+)
+from lib.board import (
+    fetch_blocked_by_edges as board_fetch_blocked_by_edges,
+)
+from lib.board import (
+    graphql_budget as board_graphql_budget,
+)
+from lib.board import (
     run_gh as board_run_gh,
 )
 from lib.board import (
     run_gh_raw as board_run_gh_raw,
-)
-from lib.board import (
-    run_graphql as board_run_graphql,
 )
 
 # ---------- Config discovery ----------
@@ -92,12 +98,12 @@ def find_config() -> Path | None:
 
 # ---------- gh wrappers ----------
 #
-# Uses module-level helpers from lib/board.py (board_run_gh / board_run_gh_raw /
-# board_run_graphql). These handle subprocess invocation, error raising, and
-# JSON parsing uniformly across every jared script — sweep.py doesn't need a
-# full Board instance because it only extracts owner + project-number from the
-# convention doc (see parse_config). It reads field values from the gh JSON
-# response, not field IDs from the convention doc.
+# Uses module-level helpers from lib/board.py (board_run_gh / board_run_gh_raw).
+# Higher-level GraphQL calls (paginated blockedBy lookup) live in lib.board so
+# dependency-graph.py can share them. sweep.py doesn't need a full Board
+# instance — it only extracts owner + project-number from the convention doc
+# (see parse_config) and reads field values from gh JSON, not field IDs from
+# the convention doc.
 
 
 def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
@@ -137,37 +143,16 @@ def fetch_open_issues_bulk(repo: str) -> list[dict[str, Any]]:
 
 
 def fetch_native_blocked_by(repo: str) -> dict[int, list[dict[str, Any]]]:
-    """One GraphQL call to get blockedBy for all open issues. Returns {number: [{number, state}]}.
+    """Thin wrapper around lib.board.fetch_blocked_by_edges with a 60s cache.
 
-    Tries 'blockedBy' first; falls back to 'issueDependencies' on schema error.
+    Kept as a free function so existing sweep tests / callers don't need to
+    rewire imports — the real implementation lives in lib/board.py and is
+    shared with dependency-graph.py.
     """
-    owner, name = repo.split("/", 1)
-    for field_name in ("blockedBy", "issueDependencies"):
-        q = (
-            "query($o:String!,$r:String!,$c:String){repository(owner:$o,name:$r){"
-            f"issues(first:100,after:$c,states:OPEN){{pageInfo{{hasNextPage endCursor}}"
-            f"nodes{{number {field_name}(first:20){{nodes{{number state}}}}}}}}}}}}"
-        )
-        result: dict[int, list[dict[str, Any]]] = {}
-        cursor: str | None = None
-        try:
-            while True:
-                kwargs: dict[str, str] = {"o": owner, "r": name}
-                if cursor:
-                    kwargs["c"] = cursor
-                data = board_run_graphql(q, **kwargs)["data"]["repository"]["issues"]
-                for node in data["nodes"]:
-                    result[node["number"]] = node[field_name]["nodes"]
-                if not data["pageInfo"]["hasNextPage"]:
-                    break
-                cursor = data["pageInfo"]["endCursor"]
-            return result
-        except GhInvocationError as e:
-            # Schema may expose issueDependencies instead of blockedBy.
-            if "Field" in str(e) and "doesn" in str(e):
-                continue
-            raise
-    raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
+    return cast(
+        dict[int, list[dict[str, Any]]],
+        board_fetch_blocked_by_edges(repo, cache="60s"),
+    )
 
 
 def fetch_recent_comments(repo: str, number: int, limit: int = 5) -> list[dict[str, Any]]:
@@ -294,8 +279,7 @@ def format_closed_not_done_line(entry: dict[str, Any]) -> str:
     """
     n = entry["number"]
     return (
-        f"#{n} [{entry['current_status']}]: {entry['title']} — "
-        f"Propose: jared set {n} Status Done"
+        f"#{n} [{entry['current_status']}]: {entry['title']} — Propose: jared set {n} Status Done"
     )
 
 
@@ -545,7 +529,31 @@ def main() -> int:
         default=7,
         help="Flag Blocked-status items with no activity beyond this (default: 7)",
     )
+    parser.add_argument(
+        "--min-budget",
+        type=int,
+        default=200,
+        help="Skip the sweep if remaining GraphQL budget is below this (default: 200)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run the sweep even if GraphQL budget is below --min-budget",
+    )
     args = parser.parse_args()
+
+    # Pre-flight GraphQL budget gate. The sweep makes many GraphQL-billed
+    # calls; bailing out early with a useful message beats crashing with
+    # `API rate limit exceeded` partway through producing output.
+    try:
+        budget = board_graphql_budget()
+    except (RuntimeError, GhInvocationError) as e:
+        print(f"sweep: budget probe failed ({e}); proceeding anyway", file=sys.stderr)
+    else:
+        warning = board_check_graphql_budget(budget, min_required=args.min_budget, force=args.force)
+        if warning:
+            print(f"sweep: {warning}", file=sys.stderr)
+            return 0
 
     # Resolve owner/project
     if not args.owner or not args.project:

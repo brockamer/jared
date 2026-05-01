@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,9 @@ class Board:
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
     session_handoff_prompt: str = "ask"
     session_start_checks: list[str] = field(default_factory=list)
+    # Cached `gh project item-list` result, populated on first board_items()
+    # call and reused for the lifetime of this instance. None means uncached.
+    _items: list[dict[str, Any]] | None = field(default=None, repr=False)
 
     @classmethod
     def from_path(cls, path: Path) -> Board:
@@ -235,28 +240,49 @@ class Board:
             )
         return options[option]
 
-    def run_gh(self, args: list[str]) -> Any:
-        return run_gh(args)
+    def run_gh(self, args: list[str], *, cache: str | None = None) -> Any:
+        return run_gh(args, cache=cache)
 
-    def run_gh_raw(self, args: list[str]) -> str:
-        return run_gh_raw(args)
+    def run_gh_raw(self, args: list[str], *, cache: str | None = None) -> str:
+        return run_gh_raw(args, cache=cache)
+
+    def board_items(self) -> list[dict[str, Any]]:
+        """Cached `gh project item-list` result for this Board instance.
+
+        Refreshes on first call; subsequent calls reuse the in-memory copy
+        for the rest of the process. Callers that mutate the board within
+        the same process must call `invalidate_items()` before reading
+        again, or stale entries will leak through.
+
+        `gh project item-list` is GraphQL-billed, so reusing the snapshot
+        is what saves the points — not just the wall-clock time.
+        """
+        if self._items is None:
+            data = self.run_gh(
+                [
+                    "project",
+                    "item-list",
+                    str(self.project_number),
+                    "--owner",
+                    self.owner,
+                    "--limit",
+                    "500",
+                    "--format",
+                    "json",
+                ]
+            )
+            self._items = data.get("items", [])
+        # Narrow Optional after the populate-if-None branch above.
+        assert self._items is not None
+        return self._items
+
+    def invalidate_items(self) -> None:
+        """Drop the cached snapshot. Next `board_items()` call re-fetches."""
+        self._items = None
 
     def find_item_id(self, issue_number: int) -> str:
         """Look up the ProjectV2Item id for a given issue number on this board."""
-        data = self.run_gh(
-            [
-                "project",
-                "item-list",
-                str(self.project_number),
-                "--owner",
-                self.owner,
-                "--limit",
-                "500",
-                "--format",
-                "json",
-            ]
-        )
-        for item in data.get("items", []):
+        for item in self.board_items():
             content = item.get("content") or {}
             if content.get("number") == issue_number:
                 return str(item["id"])
@@ -265,13 +291,18 @@ class Board:
             f"{self.project_number}. Is the issue added to the board?"
         )
 
-    def run_graphql(self, query: str, **variables: str | int | bool) -> Any:
-        return run_graphql(query, **variables)
+    def run_graphql(
+        self, query: str, *, cache: str | None = None, **variables: str | int | bool
+    ) -> Any:
+        return run_graphql(query, cache=cache, **variables)
+
+    def graphql_budget(self) -> tuple[int, int, int]:
+        return graphql_budget()
 
 
-def run_gh(args: list[str]) -> Any:
+def run_gh(args: list[str], *, cache: str | None = None) -> Any:
     """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
-    stdout = run_gh_raw(args)
+    stdout = run_gh_raw(args, cache=cache)
     if not stdout:
         return {}
     try:
@@ -280,14 +311,21 @@ def run_gh(args: list[str]) -> Any:
         raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
 
 
-def run_gh_raw(args: list[str]) -> str:
+def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
     """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
 
     Some gh commands return plain text (e.g. `gh issue create` prints a URL).
     Callers that need the raw string use this; JSON responses use run_gh.
+
+    `cache` is passed to gh as `--cache <duration>`. Only meaningful for
+    `gh api ...` calls (including `gh api graphql`); other subcommands
+    will reject the flag. Caller's responsibility to use it appropriately.
     """
+    full_args = ["gh", *args]
+    if cache is not None:
+        full_args.extend(["--cache", cache])
     result = subprocess.run(
-        ["gh", *args],
+        full_args,
         capture_output=True,
         text=True,
         check=False,
@@ -326,14 +364,116 @@ def _infer_repo_from_git(repo_root: Path) -> str | None:
     return f"{m.group(1)}/{m.group(2)}"
 
 
-def run_graphql(query: str, **variables: str | int | bool) -> Any:
+def fetch_blocked_by_edges(
+    repo: str,
+    *,
+    cache: str | None = None,
+) -> dict[int, list[dict[str, Any]]]:
+    """One paginated GraphQL call → `{issue_number: [{number, state}]}` for all
+    open issues in `repo`. Replaces the per-issue N+1 pattern that
+    `dependency-graph.py` used to use.
+
+    Tries the `blockedBy` field first; on a schema error (older repos
+    expose `issueDependencies` under a different name) falls back to
+    `issueDependencies`. Raises if neither is available.
+
+    `cache` is forwarded to gh as `--cache <duration>` — pass "60s" for
+    advisory uses (sweep, dependency-graph) so re-runs within a minute
+    skip the network and the GraphQL points entirely.
+    """
+    owner, name = repo.split("/", 1)
+    for field_name in ("blockedBy", "issueDependencies"):
+        q = (
+            "query($o:String!,$r:String!,$c:String){repository(owner:$o,name:$r){"
+            f"issues(first:100,after:$c,states:OPEN){{pageInfo{{hasNextPage endCursor}}"
+            f"nodes{{number {field_name}(first:20){{nodes{{number state}}}}}}}}}}}}"
+        )
+        result: dict[int, list[dict[str, Any]]] = {}
+        cursor: str | None = None
+        try:
+            while True:
+                kwargs: dict[str, str] = {"o": owner, "r": name}
+                if cursor:
+                    kwargs["c"] = cursor
+                data = run_graphql(q, cache=cache, **kwargs)["data"]["repository"]["issues"]
+                for node in data["nodes"]:
+                    result[node["number"]] = node[field_name]["nodes"]
+                if not data["pageInfo"]["hasNextPage"]:
+                    break
+                cursor = data["pageInfo"]["endCursor"]
+            return result
+        except GhInvocationError as e:
+            # Schema may expose `issueDependencies` instead of `blockedBy`.
+            # Match the gh error verbiage loosely so future GraphQL phrasing
+            # changes don't silently bypass the fallback.
+            msg = str(e)
+            if "Field" in msg and ("doesn" in msg or "isn't" in msg):
+                continue
+            raise
+    raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
+
+
+def graphql_budget() -> tuple[int, int, int]:
+    """Return `(remaining, limit, reset_unix)` from `gh api rate_limit`.
+
+    Polls a REST endpoint that does NOT draw from the GraphQL bucket,
+    so it remains usable even when the GraphQL budget is exhausted.
+    Used as a pre-flight probe by heavy GraphQL-bound scripts so they
+    can soft-fail with a useful message instead of crashing mid-run.
+    """
+    data = run_gh(["api", "rate_limit"])
+    gql = data.get("resources", {}).get("graphql", {})
+    return (
+        int(gql.get("remaining", 0)),
+        int(gql.get("limit", 5000)),
+        int(gql.get("reset", 0)),
+    )
+
+
+def check_graphql_budget(
+    budget: tuple[int, int, int],
+    *,
+    min_required: int = 200,
+    force: bool = False,
+) -> str | None:
+    """Return a warning string if budget is too low to proceed; else None.
+
+    `budget` is the `(remaining, limit, reset_unix)` tuple from
+    `graphql_budget()`. Heavy scripts call this before doing real work:
+
+        warning = check_graphql_budget(graphql_budget(), min_required=200)
+        if warning:
+            print(warning, file=sys.stderr)
+            return 0
+
+    `force=True` suppresses the gate (returns None even if budget is low),
+    for users who explicitly want to spend the remaining points. The
+    message includes both the absolute reset clock and minutes-from-now
+    so it reads cleanly in interactive output.
+    """
+    remaining, limit, reset = budget
+    if force or remaining >= min_required:
+        return None
+    reset_dt = dt.datetime.fromtimestamp(reset, tz=dt.UTC)
+    minutes = max(0, int((reset - time.time()) / 60))
+    return (
+        f"GraphQL budget low: {remaining}/{limit} remaining; "
+        f"resets at {reset_dt:%H:%M UTC} (~{minutes} min). "
+        f"Run with --force to override."
+    )
+
+
+def run_graphql(query: str, *, cache: str | None = None, **variables: str | int | bool) -> Any:
     """Run a GraphQL query via `gh api graphql` with named variables.
 
     Uses gh's `-F` for bool/int (so gh casts to the right type) and `-f`
     for strings. Results come back parsed from JSON.
+
+    `cache` enables gh's HTTP-level response cache (`gh api --cache <dur>`).
+    Use only on read-only queries; mutation callers must leave it None.
     """
     args = ["api", "graphql", "-f", f"query={query}"]
     for name, value in variables.items():
         flag = "-F" if isinstance(value, bool | int) and not isinstance(value, str) else "-f"
         args.extend([flag, f"{name}={value}"])
-    return run_gh(args)
+    return run_gh(args, cache=cache)
