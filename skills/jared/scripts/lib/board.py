@@ -297,6 +297,11 @@ class Board:
 
         Invalidates the cached item-list snapshot so subsequent `find_item_id`
         calls in the same process see the addition.
+
+        Empirically idempotent (jared#71, 2026-05-01): calling item-add on an
+        already-on-board issue exits 0 and returns the existing item-id, so
+        the `assume_new=True` short-circuit in `add_existing_to_board` and
+        the recovery flow from #64 are safe to re-run.
         """
         url = f"https://github.com/{self.repo}/issues/{issue_number}"
         data = self.run_gh(
