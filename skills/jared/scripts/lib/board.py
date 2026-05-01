@@ -291,6 +291,108 @@ class Board:
             f"{self.project_number}. Is the issue added to the board?"
         )
 
+    def _add_to_board(self, issue_number: int) -> str:
+        """Call `gh project item-add` for `issue_number` and return the new item-id.
+
+        Invalidates the cached item-list snapshot so subsequent `find_item_id`
+        calls in the same process see the addition.
+        """
+        url = f"https://github.com/{self.repo}/issues/{issue_number}"
+        data = self.run_gh(
+            [
+                "project",
+                "item-add",
+                str(self.project_number),
+                "--owner",
+                self.owner,
+                "--url",
+                url,
+                "--format",
+                "json",
+            ]
+        )
+        self.invalidate_items()
+        return str(data["id"])
+
+    def add_existing_to_board(
+        self,
+        issue_number: int,
+        *,
+        priority: str,
+        status: str,
+        labels: list[str] | None = None,
+        fields: list[tuple[str, str]] | None = None,
+        assume_new: bool = False,
+    ) -> str:
+        """Add an issue to the board (if needed), apply labels, set Priority/Status/extras.
+
+        Idempotent: re-running on a fully-configured item is a no-op at the
+        GitHub API level — `gh project item-edit` exits 0 when the field
+        already holds the requested option, and `gh issue edit --add-label`
+        is a no-op for labels already present.
+
+        `assume_new=True` skips the `find_item_id` membership check and goes
+        straight to `gh project item-add`. Used by `_cmd_file` after a fresh
+        `gh issue create` to preserve the perf fix from #4 (no `item-list`
+        scan in the filing hot path). Recovery callers leave it False so a
+        re-run on an already-added item finds the existing item-id.
+
+        Returns the item_id. Pre-resolves all field/option IDs before any
+        GitHub call so misconfiguration raises before side effects. On any
+        gh failure raises GhInvocationError; the caller may catch and
+        synthesize a paste-and-run recovery command.
+        """
+        # Pre-resolve everything up front. FieldNotFound / OptionNotFound
+        # raise here, before we touch GitHub.
+        prio_field_id = self.field_id("Priority")
+        prio_option_id = self.option_id("Priority", priority)
+        status_field_id = self.field_id("Status")
+        status_option_id = self.option_id("Status", status)
+        extras: list[tuple[str, str]] = []
+        for name, value in fields or []:
+            extras.append((self.field_id(name), self.option_id(name, value)))
+
+        # Resolve item-id. assume_new short-circuits the membership scan.
+        item_id: str
+        if assume_new:
+            item_id = self._add_to_board(issue_number)
+        else:
+            try:
+                item_id = self.find_item_id(issue_number)
+            except ItemNotFound:
+                item_id = self._add_to_board(issue_number)
+
+        # Labels are issue-scoped, not item-scoped; gh issue edit handles it.
+        if labels:
+            label_args = ["issue", "edit", str(issue_number), "--repo", self.repo]
+            for label in labels:
+                label_args.extend(["--add-label", label])
+            self.run_gh(label_args)
+
+        # Priority → Status → extras, in that order. Failures here leave the
+        # item partially configured; recovery is `jared add-to-board <N> ...`.
+        for field_id_, option_id_ in [
+            (prio_field_id, prio_option_id),
+            (status_field_id, status_option_id),
+            *extras,
+        ]:
+            self.run_gh(
+                [
+                    "project",
+                    "item-edit",
+                    "--project-id",
+                    self.project_id,
+                    "--id",
+                    item_id,
+                    "--field-id",
+                    field_id_,
+                    "--single-select-option-id",
+                    option_id_,
+                ]
+            )
+
+        return item_id
+
     def run_graphql(
         self, query: str, *, cache: str | None = None, **variables: str | int | bool
     ) -> Any:

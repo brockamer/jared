@@ -38,6 +38,7 @@ ALL_SUBCOMMANDS = [
     "close",
     "comment",
     "file",
+    "add-to-board",
     "blocked-by",
     "next-session-prompt",
 ]
@@ -115,6 +116,29 @@ def build_parser() -> argparse.ArgumentParser:
         '(e.g. "Work Stream=Planning"). Repeatable.',
     )
     file_p.set_defaults(func=_cmd_file)
+
+    add_p = sub.add_parser(
+        "add-to-board",
+        help=(
+            "Add an existing issue to the board, set Priority + Status + fields. "
+            "Idempotent — safe to re-run. Used as the recovery path when "
+            "`jared file` fails after issue create, and standalone for issues "
+            "created outside `jared file`."
+        ),
+    )
+    add_p.add_argument("issue_number", type=int)
+    add_p.add_argument(
+        "--priority", required=True, choices=["High", "Medium", "Low"]
+    )
+    add_p.add_argument("--status", help="Status column (default: Backlog)")
+    add_p.add_argument("--label", action="append", help="Issue label (repeatable)")
+    add_p.add_argument(
+        "--field",
+        action="append",
+        help="NAME=VALUE for additional single-select fields "
+        '(e.g. "Work Stream=Planning"). Repeatable.',
+    )
+    add_p.set_defaults(func=_cmd_add_to_board)
 
     dep = sub.add_parser(
         "blocked-by",
@@ -296,24 +320,26 @@ def _cmd_close(args: argparse.Namespace) -> int:
 
 
 def _cmd_file(args: argparse.Namespace) -> int:
-    """Atomic: create issue, add to project, set Priority + Status + extras, verify.
+    """Atomic: create issue, add to project, set Priority + Status + extras.
 
     Implements the 'new issue must land on board with Status set' invariant
-    (see memory: jared file must guarantee project membership + status).
-    Any failure halts before the user's workflow moves on.
+    (see memory: jared file must guarantee project membership + status). On
+    any post-create failure (board-add, field-set), prints a literal
+    `jared add-to-board <N> ...` recovery command to stderr so the user can
+    finish the filing without retyping the body — see #64.
     """
     board = Board.from_path(Path(args.board))
     status = args.status or "Backlog"
 
-    # Pre-resolve all field/option IDs before we touch GitHub. Fails fast on
-    # misconfigured board without creating an orphan issue. FieldNotFound /
-    # OptionNotFound propagate to main()'s top-level catch for uniform
-    # `jared:`-prefixed output.
-    prio_field = board.field_id("Priority")
-    prio_option = board.option_id("Priority", args.priority)
-    status_field = board.field_id("Status")
-    status_option = board.option_id("Status", status)
-    extra_edits: list[tuple[str, str, str]] = []
+    # Pre-resolve before we touch GitHub: a misconfigured board fails fast
+    # without creating an orphan issue. add_existing_to_board re-resolves
+    # the same names — the duplication is intentional, since this catches
+    # bad config *before* `gh issue create` is called.
+    board.field_id("Priority")
+    board.option_id("Priority", args.priority)
+    board.field_id("Status")
+    board.option_id("Status", status)
+    extra_specs: list[tuple[str, str]] = []
     for spec in args.field or []:
         if "=" not in spec:
             print(
@@ -322,9 +348,11 @@ def _cmd_file(args: argparse.Namespace) -> int:
             )
             return 1
         name, value = spec.split("=", 1)
-        extra_edits.append((name, board.field_id(name), board.option_id(name, value)))
+        board.field_id(name)
+        board.option_id(name, value)
+        extra_specs.append((name, value))
 
-    # 1. Create the issue. gh prints the URL on stdout.
+    # Create the issue. gh prints the URL on stdout.
     create_args = [
         "issue",
         "create",
@@ -347,60 +375,108 @@ def _cmd_file(args: argparse.Namespace) -> int:
         return 2
     issue_number = int(issue_url.rsplit("/", 1)[-1])
 
-    # 2. Add to the project board.
+    # assume_new=True skips the find_item_id membership scan that #4's perf
+    # fix removed from the filing hot path. On failure the issue exists on
+    # the repo but isn't fully configured on the board; the recovery line
+    # below tells the user the exact command to finish the job.
     try:
-        add_data = board.run_gh(
-            [
-                "project",
-                "item-add",
-                str(board.project_number),
-                "--owner",
-                board.owner,
-                "--url",
-                issue_url,
-                "--format",
-                "json",
-            ]
+        board.add_existing_to_board(
+            issue_number,
+            priority=args.priority,
+            status=status,
+            fields=extra_specs,
+            assume_new=True,
         )
-    except GhInvocationError as e:
+    except (
+        GhInvocationError,
+        FieldNotFound,
+        OptionNotFound,
+        ItemNotFound,
+    ) as e:
+        recovery = _build_add_to_board_command(
+            issue_number, args.priority, status, extra_specs
+        )
         print(
-            f"error: filed issue #{issue_number} but failed to add to project: {e}",
+            f"error: filed issue #{issue_number} ({issue_url}) but failed to "
+            f"finish board setup: {e}",
             file=sys.stderr,
         )
+        print(f"  recover with: {recovery}", file=sys.stderr)
         return 2
-    item_id = add_data["id"]
 
-    # 3. Set Priority + Status + extras in order.
-    for field_id, option_id in [
-        (prio_field, prio_option),
-        (status_field, status_option),
-        *[(f, o) for _, f, o in extra_edits],
-    ]:
-        board.run_gh(
-            [
-                "project",
-                "item-edit",
-                "--project-id",
-                board.project_id,
-                "--id",
-                item_id,
-                "--field-id",
-                field_id,
-                "--single-select-option-id",
-                option_id,
-            ]
-        )
-
-    # No post-create verification: `gh project item-add` returned the item-id
-    # without error (caught above as GhInvocationError), and each item-edit
-    # mutation either returned exit 0 (write landed server-side) or raised.
-    # Re-reading via `item-list --limit 500` to confirm was the hot path that
-    # drained the GraphQL budget and rate-limited ~11 issues into any batch
-    # filing (#4). If a real write-path regression ever surfaces, a single
-    # `node(id: <item-id>)` GraphQL query would be the cheap verify shape —
-    # one call, not a list-all scan.
     print(f"OK: filed #{issue_number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
+    return 0
+
+
+def _shell_quote(s: str) -> str:
+    """Quote a string for safe shell pasting (POSIX single-quote form)."""
+    if s and not any(c in s for c in " \t\n\"'\\$`"):
+        return s
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _build_add_to_board_command(
+    issue_number: int,
+    priority: str,
+    status: str,
+    fields: list[tuple[str, str]],
+) -> str:
+    """Render the literal `<jared-path> add-to-board <N> ...` recovery line.
+
+    Uses `__file__` so the line invokes the same binary that emitted it —
+    important because `jared` typically isn't on PATH (it's installed via
+    Claude Code's plugin cache or run from a checkout). Bare `jared` would
+    `command-not-found` on most setups, defeating the paste-and-run UX.
+    """
+    binary = str(Path(__file__).resolve())
+    parts = [
+        binary,
+        "add-to-board",
+        str(issue_number),
+        "--priority",
+        priority,
+        "--status",
+        _shell_quote(status),
+    ]
+    for name, value in fields:
+        parts.extend(["--field", _shell_quote(f"{name}={value}")])
+    return " ".join(parts)
+
+
+def _cmd_add_to_board(args: argparse.Namespace) -> int:
+    """Add an existing issue to the board, apply labels and fields.
+
+    Idempotent — safe to re-run. Two intended uses:
+      1. Recovery from `jared file` failing partway through post-create.
+         The error message in `_cmd_file` prints the exact invocation.
+      2. Putting an issue on the board that was created outside `jared file`
+         (GitHub UI, raw `gh issue create`, etc.).
+    """
+    board = Board.from_path(Path(args.board))
+    status = args.status or "Backlog"
+
+    fields: list[tuple[str, str]] = []
+    for spec in args.field or []:
+        if "=" not in spec:
+            print(
+                f"error: --field expects NAME=VALUE, got {spec!r}",
+                file=sys.stderr,
+            )
+            return 1
+        name, value = spec.split("=", 1)
+        fields.append((name, value))
+
+    board.add_existing_to_board(
+        args.issue_number,
+        priority=args.priority,
+        status=status,
+        labels=args.label or None,
+        fields=fields,
+    )
+    print(
+        f"OK: #{args.issue_number} on board → {status}, Priority={args.priority}"
+    )
     return 0
 
 

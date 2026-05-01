@@ -151,6 +151,136 @@ def test_file_with_custom_status_and_extra_field(
     assert "PVTSSF_ws" in joined_edits and "OPTION_plan" in joined_edits
 
 
+def test_file_emits_recovery_command_on_post_create_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression test for #64: when post-create fails, `jared file` must
+    print the literal `jared add-to-board <N> ...` recovery command to
+    stderr instead of leaving the user to reverse-engineer gh project calls.
+
+    Simulates `gh project item-add` failing (the real-world trigger was a
+    GH_TOKEN-without-project-scope env override, but any failure in the
+    post-create chain should surface the same recovery path).
+    """
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Body content.")
+
+    issue_number = 142
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue create" in joined:
+            return FakeGhResult(
+                stdout=f"https://github.com/brockamer/findajob/issues/{issue_number}\n"
+            )
+        if "item-add" in joined:
+            return FakeGhResult(
+                stdout="",
+                returncode=1,
+                stderr=(
+                    "GraphQL: Resource not accessible by personal "
+                    "access token (addProjectV2ItemById)"
+                ),
+            )
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "High",
+            "--status",
+            "Up Next",
+            "--field",
+            "Work Stream=Planning",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    # Non-zero exit so the calling shell knows the filing did not complete.
+    assert rc != 0, captured.err
+
+    # Recovery command must be in stderr, with the right issue number,
+    # priority, status, and any extra --field values the user passed. The
+    # binary path is `Path(__file__).resolve()` of the running CLI so the
+    # paste-and-run line points at *this* jared, not bare `jared` (which
+    # is typically not on PATH).
+    assert "/jared add-to-board" in captured.err, captured.err
+    assert str(issue_number) in captured.err, captured.err
+    assert "--priority High" in captured.err, captured.err
+    assert "'Up Next'" in captured.err, captured.err
+    assert "'Work Stream=Planning'" in captured.err, captured.err
+    # Underlying gh error context is surfaced too.
+    assert "Resource not accessible" in captured.err, captured.err
+
+
+def test_file_emits_recovery_command_on_item_edit_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same recovery contract when failure is *after* item-add succeeds.
+
+    Covers the "network blip mid-loop" failure mode advisor flagged: the
+    issue is on the board with an item-id, but a later `gh project item-edit`
+    fails (Priority set, Status not yet, etc.). Recovery line still works
+    because `jared add-to-board` is idempotent — it'll find the existing
+    item, skip item-add, and finish setting fields.
+    """
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Body content.")
+
+    issue_number = 142
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue create" in joined:
+            return FakeGhResult(
+                stdout=f"https://github.com/brockamer/findajob/issues/{issue_number}\n"
+            )
+        if "item-add" in joined:
+            return FakeGhResult(stdout='{"id": "PVTI_new"}')
+        if "item-edit" in joined:
+            return FakeGhResult(
+                stdout="",
+                returncode=1,
+                stderr="GraphQL: rate limit exceeded (updateProjectV2ItemFieldValue)",
+            )
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "Medium",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc != 0, captured.err
+    assert "/jared add-to-board" in captured.err, captured.err
+    assert str(issue_number) in captured.err, captured.err
+    assert "--priority Medium" in captured.err, captured.err
+    assert "rate limit exceeded" in captured.err, captured.err
+
+
 def test_file_makes_no_item_list_calls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
