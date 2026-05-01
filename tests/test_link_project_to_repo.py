@@ -35,9 +35,7 @@ def test_link_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _patch_graphql_responses(
         monkeypatch,
         {
-            "repository(owner:": json.dumps(
-                {"data": {"repository": {"id": "R_kgDOabc"}}}
-            ),
+            "repository(owner:": json.dumps({"data": {"repository": {"id": "R_kgDOabc"}}}),
             "linkProjectV2ToRepository": json.dumps(
                 {"data": {"linkProjectV2ToRepository": {"repository": {"id": "R_kgDOabc"}}}}
             ),
