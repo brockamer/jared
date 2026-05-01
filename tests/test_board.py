@@ -627,6 +627,99 @@ def test_fetch_blocked_by_edges_passes_cache_flag(monkeypatch: pytest.MonkeyPatc
     assert "--cache" in captured[0] and "60s" in captured[0]
 
 
+def test_fetch_recent_comments_batch_single_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One aliased GraphQL call covers many issues; returns {number: [comments]}."""
+    from skills.jared.scripts.lib import board
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+        stdout = (
+            '{"data": {"repository": {'
+            '"i10": {"comments": {"nodes": ['
+            '  {"body": "## Session 2026-04-30", "createdAt": "2026-04-30T12:00:00Z"},'
+            '  {"body": "regular reply", "createdAt": "2026-04-30T13:00:00Z"}'
+            "]}},"
+            '"i11": {"comments": {"nodes": ['
+            '  {"body": "## Session 2026-05-01", "createdAt": "2026-05-01T09:00:00Z"}'
+            "]}},"
+            '"i12": {"comments": {"nodes": []}}'
+            "}}}"
+        )
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    result = board.fetch_recent_comments_batch("brockamer/findajob", [10, 11, 12])
+    assert len(captured) == 1, "should make exactly one gh call for any number of issues"
+    assert result == {
+        10: [
+            {"body": "## Session 2026-04-30", "createdAt": "2026-04-30T12:00:00Z"},
+            {"body": "regular reply", "createdAt": "2026-04-30T13:00:00Z"},
+        ],
+        11: [{"body": "## Session 2026-05-01", "createdAt": "2026-05-01T09:00:00Z"}],
+        12: [],
+    }
+    # Aliases for each requested number land in the query.
+    joined = " ".join(captured[0])
+    assert "i10:" in joined and "i11:" in joined and "i12:" in joined
+
+
+def test_fetch_recent_comments_batch_empty_input_skips_gh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty issue list short-circuits — no gh invocation, no GraphQL points."""
+    from skills.jared.scripts.lib import board
+
+    def fake_run(args: list[str], **kw: object) -> object:
+        raise AssertionError("gh should not be called for empty input")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    assert board.fetch_recent_comments_batch("brockamer/findajob", []) == {}
+
+
+def test_fetch_recent_comments_batch_passes_cache_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cache='60s' threads through to the underlying gh api invocation."""
+    from skills.jared.scripts.lib import board
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+        stdout = '{"data": {"repository": {"i7": {"comments": {"nodes": []}}}}}'
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    board.fetch_recent_comments_batch("brockamer/findajob", [7], cache="60s")
+    assert "--cache" in captured[0] and "60s" in captured[0]
+
+
+def test_fetch_recent_comments_batch_handles_null_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If GraphQL returns a null alias (e.g., issue not found), we get [] for it."""
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+        stdout = '{"data": {"repository": {"i99": null}}}'
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    assert board.fetch_recent_comments_batch("brockamer/findajob", [99]) == {99: []}
+
+
 # Legacy board-doc fallbacks: older docs (pre-bootstrap-project.py) lack
 # the machine-readable bullet block, so the parser has to infer the header
 # fields from prose + git remote. These tests pin the fallback behavior

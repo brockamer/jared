@@ -31,14 +31,14 @@ def test_next_session_prompt_renders_basic_sections(
         '"status": "Up Next", "priority": "Medium"}'
         "]}"
     )
-    # gh issue view <N> --json comments returns the latest Session note
+    # gh api graphql aliased batch returns comments for every in-flight number
     issue_comments = (
-        '{"comments": ['
+        '{"data": {"repository": {"i65": {"comments": {"nodes": ['
         '{"createdAt": "2026-04-24T10:00:00Z", "body": "## Session 2026-04-24\\n\\n'
         "**Progress:** wired prefilter\\n\\n"
         "**Next action:** decide YAML ordering question and unblock the third test."
         '"}'
-        "]}"
+        "]}}}}}"
     )
     # gh issue list for recently closed (state=closed, closed within 7d)
     closed_list = '[{"number": 251, "title": "v0.4 release", "closedAt": "2026-04-23T15:00:00Z"}]'
@@ -47,7 +47,7 @@ def test_next_session_prompt_renders_basic_sections(
         monkeypatch,
         responses={
             "item-list": item_list,
-            "issue view 65": issue_comments,
+            "graphql": issue_comments,
             "issue list": closed_list,
         },
     )
@@ -138,12 +138,12 @@ def test_in_progress_without_session_notes_skips_one_liner(
         '"status": "In Progress", "priority": "Medium"}'
         "]}"
     )
-    # No comments at all
+    # No comments at all — graphql returns an empty nodes list under the alias
     patch_gh_by_arg(
         monkeypatch,
         responses={
             "item-list": item_list,
-            "issue view 7": '{"comments": []}',
+            "graphql": '{"data": {"repository": {"i7": {"comments": {"nodes": []}}}}}',
             "issue list": "[]",
         },
     )
@@ -171,13 +171,16 @@ def test_session_note_without_next_action_field_skips_one_liner(
     )
     # Comment matches Session prefix but lacks **Next action:**
     issue_comments = (
-        '{"comments": [{"body": "## Session 2026-04-24\\n\\n**Progress:** stuff happened.\\n"}]}'
+        '{"data": {"repository": {"i9": {"comments": {"nodes": [{'
+        '"createdAt": "2026-04-24T10:00:00Z",'
+        '"body": "## Session 2026-04-24\\n\\n**Progress:** stuff happened.\\n"'
+        "}]}}}}}"
     )
     patch_gh_by_arg(
         monkeypatch,
         responses={
             "item-list": item_list,
-            "issue view 9": issue_comments,
+            "graphql": issue_comments,
             "issue list": "[]",
         },
     )
