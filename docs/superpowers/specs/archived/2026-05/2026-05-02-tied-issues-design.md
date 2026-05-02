@@ -1,3 +1,7 @@
+---
+**Shipped in #77, #77 on 2026-05-02. Final decisions captured in issue body.**
+---
+
 # Tied-issues pre-pull analysis — Design
 
 **Issue:** [#77 — feat(jared-start): tied-issues pre-pull analysis](https://github.com/brockamer/jared/issues/77)
