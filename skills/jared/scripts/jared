@@ -175,12 +175,12 @@ def build_parser() -> argparse.ArgumentParser:
     ties_p.add_argument("issue_number", type=int)
     ties_p.add_argument(
         "--threshold",
-        choices=("weak", "medium", "strong"),
+        choices=["weak", "medium", "strong"],
         default="medium",
     )
     ties_p.add_argument(
         "--format",
-        choices=("human", "json"),
+        choices=["human", "json"],
         default="human",
     )
     ties_p.set_defaults(func=_cmd_ties)
@@ -895,7 +895,9 @@ def _cmd_ties(args: argparse.Namespace) -> int:
 
     board = Board.from_path(Path(args.board))
     target = board.get_issue(args.issue_number)
-    if target is None or getattr(target, "status", None) == "Done":
+    if target is None:
+        # fetch_open_issues_for_ties already excludes Done; if get_issue returned
+        # None, the target is either closed, archived, or doesn't exist.
         print(
             f"jared: target #{args.issue_number} not found or closed",
             file=sys.stderr,
