@@ -1,5 +1,9 @@
 """Sanity tests for the ties module's dataclasses."""
 
+import dataclasses
+
+import pytest
+
 from skills.jared.scripts.lib.ties import OpenIssueForTies, SignalHit, Tie
 
 
@@ -54,13 +58,8 @@ def test_open_issue_for_ties_constructs() -> None:
 
 def test_dataclasses_are_frozen() -> None:
     """Tie / SignalHit / OpenIssueForTies must be immutable for hashing / sets."""
-    import dataclasses
-
     hit = SignalHit(
         related_n=1, name="cross_ref", confidence="strong", evidence=""
     )
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         hit.related_n = 2  # type: ignore[misc]
-        raise AssertionError("expected FrozenInstanceError")
-    except dataclasses.FrozenInstanceError:
-        pass

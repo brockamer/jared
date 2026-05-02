@@ -22,7 +22,10 @@ SignalName = Literal[
     "file_paths",
 ]
 Confidence = Literal["strong", "medium", "weak"]
-Threshold = Literal["weak", "medium", "strong"]
+# Threshold and Confidence model different roles (filter cutoff vs. signal
+# strength) but share the same domain — Literal members are unordered, so
+# they are the same type. Aliasing makes the relationship explicit.
+Threshold = Confidence
 
 # Default stop-words for label-intersection signal. Project-board.md may override.
 DEFAULT_LABEL_STOP_WORDS: frozenset[str] = frozenset(
