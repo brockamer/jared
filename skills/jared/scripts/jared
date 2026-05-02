@@ -894,16 +894,9 @@ def _cmd_ties(args: argparse.Namespace) -> int:
     )
 
     board = Board.from_path(Path(args.board))
-    target = board.get_issue(args.issue_number)
-    if target is None:
-        # fetch_open_issues_for_ties already excludes Done; if get_issue returned
-        # None, the target is either closed, archived, or doesn't exist.
-        print(
-            f"jared: target #{args.issue_number} not found or closed",
-            file=sys.stderr,
-        )
-        return 1
 
+    # Budget pre-flight before any fetch — partial mode is meant to skip
+    # body bytes, so we must decide full vs partial *before* fetching.
     remaining, _, _ = board.graphql_budget()
     if remaining < 50:
         print("(GraphQL budget exhausted — ties analysis skipped)")
@@ -919,7 +912,22 @@ def _cmd_ties(args: argparse.Namespace) -> int:
         )
     )
 
+    # Single batched fetch, then resolve target by walking the result.
+    # Replaces the older Board.get_issue + fetch_open_issues_for_ties pair
+    # which paid for body bytes even in partial mode (#81).
     open_issues = board.fetch_open_issues_for_ties(include_bodies=full_mode)
+    target = next(
+        (i for i in open_issues if i.number == args.issue_number), None
+    )
+    if target is None:
+        # fetch_open_issues_for_ties excludes Done; missing → closed,
+        # archived, or doesn't exist on this repo.
+        print(
+            f"jared: target #{args.issue_number} not found or closed",
+            file=sys.stderr,
+        )
+        return 1
+
     stop_words = board.tie_stop_words()
 
     hits = []
