@@ -1,3 +1,7 @@
+---
+**Shipped in #77, #77 on 2026-05-02. Final decisions captured in issue body.**
+---
+
 # Tied-Issues Pre-Pull Analysis Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
