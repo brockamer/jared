@@ -153,3 +153,26 @@ def test_fetch_uses_5m_cache(tmp_path: Path) -> None:
         board.fetch_open_issues_for_ties()
 
     assert captured_cache == ["5m"]
+
+
+def test_get_issue_returns_match(tmp_path: Path) -> None:
+    board = _board(tmp_path)
+    with patch.object(
+        Board,
+        "run_graphql",
+        lambda self, query, **kw: _GRAPHQL_RESPONSE_FULL,
+    ):
+        issue = board.get_issue(10)
+    assert issue is not None
+    assert issue.number == 10
+
+
+def test_get_issue_returns_none_for_missing(tmp_path: Path) -> None:
+    board = _board(tmp_path)
+    with patch.object(
+        Board,
+        "run_graphql",
+        lambda self, query, **kw: _GRAPHQL_RESPONSE_FULL,
+    ):
+        issue = board.get_issue(999)
+    assert issue is None
