@@ -517,6 +517,14 @@ class Board:
         # Filter Done if any leaked in (defensive — `states: OPEN` should already exclude).
         return [r for r in all_records if r.status != "Done"]
 
+    def get_issue(self, number: int) -> OpenIssueForTies | None:
+        """Return one issue's tie-relevant record, or None if it's not open
+        on this repo. Used by _cmd_ties to confirm target is pullable."""
+        matching = [
+            i for i in self.fetch_open_issues_for_ties(include_bodies=True) if i.number == number
+        ]
+        return matching[0] if matching else None
+
     def run_graphql(
         self, query: str, *, cache: str | None = None, **variables: str | int | bool
     ) -> Any:

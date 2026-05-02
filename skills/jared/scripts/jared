@@ -41,6 +41,7 @@ ALL_SUBCOMMANDS = [
     "add-to-board",
     "blocked-by",
     "next-session-prompt",
+    "ties",
 ]
 
 
@@ -166,6 +167,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     nsp.set_defaults(func=_cmd_next_session_prompt)
+
+    ties_p = sub.add_parser(
+        "ties",
+        help="Surface board-level ties between target issue and other open issues.",
+    )
+    ties_p.add_argument("issue_number", type=int)
+    ties_p.add_argument(
+        "--threshold",
+        choices=("weak", "medium", "strong"),
+        default="medium",
+    )
+    ties_p.add_argument(
+        "--format",
+        choices=("human", "json"),
+        default="human",
+    )
+    ties_p.set_defaults(func=_cmd_ties)
 
     return parser
 
@@ -855,6 +873,87 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print()
     print("---")
     print("Regenerated each wrap; do not edit. Source of truth is the issues, plans, and memory.")
+    return 0
+
+
+def _cmd_ties(args: argparse.Namespace) -> int:
+    """Surface board-level ties between target issue and other open issues."""
+    import json as _json
+    from dataclasses import asdict
+
+    # Imports kept local to avoid pulling ties module into every other command.
+    from lib.ties import (  # type: ignore[import-not-found]
+        analyze_blocked_by,
+        analyze_cross_references,
+        analyze_file_paths,
+        analyze_labels,
+        analyze_milestone_overlap,
+        analyze_title_tokens,
+        combine,
+        format_ties_block,
+    )
+
+    board = Board.from_path(Path(args.board))
+    target = board.get_issue(args.issue_number)
+    if target is None or getattr(target, "status", None) == "Done":
+        print(
+            f"jared: target #{args.issue_number} not found or closed",
+            file=sys.stderr,
+        )
+        return 1
+
+    remaining, _, _ = board.graphql_budget()
+    if remaining < 50:
+        print("(GraphQL budget exhausted — ties analysis skipped)")
+        return 0
+
+    full_mode = remaining >= 200
+    diagnostic: str | None = (
+        None
+        if full_mode
+        else (
+            "(low GraphQL budget — body-aware signals deferred, "
+            "run jared ties <N> later for full pass)"
+        )
+    )
+
+    open_issues = board.fetch_open_issues_for_ties(include_bodies=full_mode)
+    stop_words = board.tie_stop_words()
+
+    hits = []
+    analyzer_specs: list[tuple[str, Any]] = [
+        (
+            "cross_ref",
+            lambda t, o: analyze_cross_references(
+                t, o, direction="both" if full_mode else "forward"
+            ),
+        ),
+        ("blocked_by", analyze_blocked_by),
+        ("milestone", analyze_milestone_overlap),
+        ("title_tokens", analyze_title_tokens),
+        ("labels", lambda t, o: analyze_labels(t, o, stop_words=stop_words)),
+    ]
+    if full_mode:
+        analyzer_specs.append(("file_paths", analyze_file_paths))
+
+    for name, analyze in analyzer_specs:
+        try:
+            hits.extend(analyze(target, open_issues))
+        except Exception as e:  # noqa: BLE001 - never let analyzer crash the start
+            piece = f"(analyzer {name} failed: {e})"
+            diagnostic = f"{diagnostic} {piece}".strip() if diagnostic else piece
+
+    ties = combine(hits, args.threshold, target, open_issues)
+
+    if args.format == "human":
+        output = format_ties_block(
+            ties, degraded=not full_mode, diagnostic=diagnostic
+        )
+    else:
+        output = _json.dumps([asdict(t) for t in ties], indent=2)
+
+    if output:
+        print(output)
     return 0
 
 
