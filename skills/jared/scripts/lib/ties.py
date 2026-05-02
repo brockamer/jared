@@ -392,13 +392,11 @@ def _suggested_action(
     """Heuristic suggested-action mapping. Heuristic, not gospel — the
     output block carries a header note saying so."""
     if primary == "blocked_by":
-        # Direction matters: did target block related, or related block target?
-        for h in hits:
-            if h.name == "blocked_by":
-                if related_n in target.blocked_by:
-                    return f"blocking — sequence #{related_n} first"
-                return "unblocked by target — flag in PR"
-        return "blocking — sequence first"
+        # Direction discriminator: target.blocked_by membership tells us
+        # whether target depends on related, or related depends on target.
+        if related_n in target.blocked_by:
+            return f"blocking — sequence #{related_n} first"
+        return "unblocked by target — flag in PR"
     if primary == "cross_ref":
         return "review for bundling vs separate"
     if primary == "milestone":

@@ -164,3 +164,21 @@ class TestSuggestedAction:
         hits = [_hit(2, "file_paths", "medium")]
         ties = combine(hits, "weak", _target(), _open_issues((2, "B")))
         assert "fold" in ties[0].suggested_action.lower()
+
+    def test_blocked_by_target_unblocks_related(self) -> None:
+        """Related is blocked by target — different action than target-blocked-by-related."""
+        target = _target()  # target.blocked_by == ()
+        hits = [
+            _hit(2, "blocked_by", "strong", evidence="#2 is blocked by target #1"),
+        ]
+        ties = combine(hits, "medium", target, _open_issues((2, "B")))
+        assert "unblocked" in ties[0].suggested_action.lower()
+        assert "flag in PR" in ties[0].suggested_action
+
+
+class TestCombineEdgeCases:
+    def test_hit_referencing_unknown_related_n_is_dropped(self) -> None:
+        """Race: hit references related_n that's not in open_issues — silently drop."""
+        hits = [_hit(99, "milestone", "strong")]
+        ties = combine(hits, "weak", _target(), _open_issues())
+        assert ties == []
