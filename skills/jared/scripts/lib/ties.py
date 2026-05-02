@@ -307,3 +307,59 @@ def analyze_title_tokens(
                 )
             )
     return hits
+
+
+# Path-like token: at least one '/' or a recognized file extension, with
+# common code/doc extensions. Generic single-word names like README are
+# excluded by requiring either a slash or an extension.
+_FILE_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+\.[a-z]+|"
+    r"[A-Za-z0-9_.\-]+\.(?:py|md|ts|tsx|js|jsx|go|rs|java|sh|toml|yaml|yml|json))"
+    r"(?:[:#]\d+)?"
+    r"(?![A-Za-z0-9])"
+)
+
+# Filenames that are too generic to count as tie-relevant.
+_GENERIC_FILES: frozenset[str] = frozenset(
+    {"README.md", "CHANGELOG.md", "LICENSE", "TODO.md", "NOTES.md"}
+)
+
+
+def _file_paths_in_body(body: str) -> frozenset[str]:
+    """Extract path-like tokens from body. Generic filenames excluded."""
+    if not body:
+        return frozenset()
+    paths = {m.group(1) for m in _FILE_PATH_RE.finditer(body)}
+    return frozenset(p for p in paths if p not in _GENERIC_FILES)
+
+
+def analyze_file_paths(
+    target: OpenIssueForTies, open_issues: list[OpenIssueForTies]
+) -> list[SignalHit]:
+    """Medium signal: target and related body both mention the same file path.
+
+    Path-like tokens require a slash OR a code/doc file extension. Generic
+    filenames (README, CHANGELOG, etc.) are excluded. Requires bodies on
+    both sides — caller skips this analyzer in low-budget partial mode.
+    """
+    target_paths = _file_paths_in_body(target.body)
+    if not target_paths:
+        return []
+    hits: list[SignalHit] = []
+    for related in open_issues:
+        if related.number == target.number:
+            continue
+        related_paths = _file_paths_in_body(related.body)
+        shared = target_paths & related_paths
+        if shared:
+            shared_list = sorted(shared)
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="file_paths",
+                    confidence="medium",
+                    evidence=f"both bodies mention: {', '.join(shared_list)}",
+                )
+            )
+    return hits

@@ -5,6 +5,7 @@ from skills.jared.scripts.lib.ties import (
     SignalHit,
     analyze_blocked_by,
     analyze_cross_references,
+    analyze_file_paths,
     analyze_labels,
     analyze_milestone_overlap,
     analyze_title_tokens,
@@ -241,4 +242,46 @@ class TestAnalyzeTitleTokens:
         target = _make_issue(1, title="perf(file): batched mutations")
         others = [_make_issue(1, title="perf(file): batched mutations")]
         hits = analyze_title_tokens(target, others)
+        assert hits == []
+
+
+class TestAnalyzeFilePaths:
+    def test_shared_python_file_fires(self) -> None:
+        target = _make_issue(1, body="Touches `lib/board.py:380`.")
+        others = [_make_issue(2, body="Polish for `lib/board.py`.")]
+        hits = analyze_file_paths(target, others)
+        assert len(hits) == 1
+        assert hits[0].related_n == 2
+        assert hits[0].confidence == "medium"
+        assert "lib/board.py" in hits[0].evidence
+
+    def test_shared_markdown_file_fires(self) -> None:
+        target = _make_issue(1, body="See `docs/superpowers/specs/foo.md`.")
+        others = [_make_issue(2, body="Update `docs/superpowers/specs/foo.md`.")]
+        hits = analyze_file_paths(target, others)
+        assert len(hits) == 1
+
+    def test_generic_filename_excluded(self) -> None:
+        """README, CHANGELOG, etc. are too generic to be tie-relevant."""
+        target = _make_issue(1, body="Update README and CHANGELOG.")
+        others = [_make_issue(2, body="Touch README.")]
+        hits = analyze_file_paths(target, others)
+        assert hits == []
+
+    def test_no_overlap_no_hit(self) -> None:
+        target = _make_issue(1, body="Touches `lib/board.py`.")
+        others = [_make_issue(2, body="Touches `lib/ties.py`.")]
+        hits = analyze_file_paths(target, others)
+        assert hits == []
+
+    def test_target_no_paths_no_hit(self) -> None:
+        target = _make_issue(1, body="No file mentions here.")
+        others = [_make_issue(2, body="Touches `lib/board.py`.")]
+        hits = analyze_file_paths(target, others)
+        assert hits == []
+
+    def test_self_is_never_a_hit(self) -> None:
+        target = _make_issue(1, body="Touches `lib/board.py`.")
+        others = [_make_issue(1, body="Touches `lib/board.py`.")]
+        hits = analyze_file_paths(target, others)
         assert hits == []
