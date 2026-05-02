@@ -4,6 +4,7 @@ from skills.jared.scripts.lib.ties import (
     OpenIssueForTies,
     SignalHit,
     analyze_blocked_by,
+    analyze_cross_references,
     analyze_milestone_overlap,
 )
 
@@ -110,3 +111,60 @@ class TestAnalyzeMilestoneOverlap:
         others = [_make_issue(1, milestone="v0.9")]
         hits = analyze_milestone_overlap(target, others)
         assert hits == []
+
+
+class TestAnalyzeCrossReferences:
+    def test_target_body_mentions_other_fires_forward(self) -> None:
+        target = _make_issue(1, body="See #42 for context.")
+        others = [_make_issue(42)]
+        hits = analyze_cross_references(target, others, direction="forward")
+        assert len(hits) == 1
+        assert hits[0].related_n == 42
+        assert hits[0].confidence == "strong"
+
+    def test_other_body_mentions_target_fires_both(self) -> None:
+        target = _make_issue(1)
+        others = [_make_issue(42, body="Follow-up to #1 — see there.")]
+        hits = analyze_cross_references(target, others, direction="both")
+        assert len(hits) == 1
+        assert hits[0].related_n == 42
+
+    def test_other_body_mentions_target_does_not_fire_forward_only(self) -> None:
+        target = _make_issue(1)
+        others = [_make_issue(42, body="Follow-up to #1.")]
+        hits = analyze_cross_references(target, others, direction="forward")
+        assert hits == []
+
+    def test_default_direction_is_both(self) -> None:
+        target = _make_issue(1)
+        others = [_make_issue(42, body="See #1.")]
+        hits = analyze_cross_references(target, others)
+        assert len(hits) == 1
+
+    def test_ignores_references_in_fenced_code_blocks(self) -> None:
+        target = _make_issue(
+            1,
+            body="```\ndef foo():\n    return #42  # not a real ref\n```\n",
+        )
+        others = [_make_issue(42)]
+        hits = analyze_cross_references(target, others, direction="forward")
+        assert hits == []
+
+    def test_word_boundary_required(self) -> None:
+        """`v1.0` should not match as `#0`; `1#42` should not match."""
+        target = _make_issue(1, body="version v1.0 ships and item123#42 is unrelated")
+        others = [_make_issue(42)]
+        hits = analyze_cross_references(target, others, direction="forward")
+        assert hits == []
+
+    def test_self_is_never_a_hit(self) -> None:
+        target = _make_issue(1, body="see #1")
+        others = [_make_issue(1)]
+        hits = analyze_cross_references(target, others)
+        assert hits == []
+
+    def test_dedupe_multiple_mentions_of_same_issue(self) -> None:
+        target = _make_issue(1, body="See #42, again #42, also #42.")
+        others = [_make_issue(42)]
+        hits = analyze_cross_references(target, others, direction="forward")
+        assert len(hits) == 1  # one hit per related, not per mention
