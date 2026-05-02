@@ -58,8 +58,6 @@ def test_open_issue_for_ties_constructs() -> None:
 
 def test_dataclasses_are_frozen() -> None:
     """Tie / SignalHit / OpenIssueForTies must be immutable for hashing / sets."""
-    hit = SignalHit(
-        related_n=1, name="cross_ref", confidence="strong", evidence=""
-    )
+    hit = SignalHit(related_n=1, name="cross_ref", confidence="strong", evidence="")
     with pytest.raises(dataclasses.FrozenInstanceError):
         hit.related_n = 2  # type: ignore[misc]
