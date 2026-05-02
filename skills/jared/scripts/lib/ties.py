@@ -368,3 +368,116 @@ def analyze_file_paths(
                 )
             )
     return hits
+
+
+# Map signal name → human-readable relationship label (used as primary +
+# secondary_relationships in the Tie). Suggested action is derived separately
+# below.
+_RELATIONSHIP_LABELS: dict[SignalName, str] = {
+    "cross_ref": "cross-ref",
+    "blocked_by": "blocker",
+    "milestone": "milestone-mate",
+    "file_paths": "same-file",
+    "title_tokens": "adjacent",
+    "labels": "adjacent",
+}
+
+
+def _suggested_action(
+    primary: SignalName,
+    target: OpenIssueForTies,
+    related_n: int,
+    hits: tuple[SignalHit, ...],
+) -> str:
+    """Heuristic suggested-action mapping. Heuristic, not gospel — the
+    output block carries a header note saying so."""
+    if primary == "blocked_by":
+        # Direction matters: did target block related, or related block target?
+        for h in hits:
+            if h.name == "blocked_by":
+                if related_n in target.blocked_by:
+                    return f"blocking — sequence #{related_n} first"
+                return "unblocked by target — flag in PR"
+        return "blocking — sequence first"
+    if primary == "cross_ref":
+        return "review for bundling vs separate"
+    if primary == "milestone":
+        return "bundling vs fast-follow — your call"
+    if primary == "file_paths":
+        return "fold into target's PR"
+    # title_tokens or labels
+    return "review for bundling vs separate"
+
+
+def combine(
+    hits: list[SignalHit],
+    threshold: Threshold,
+    target: OpenIssueForTies,
+    open_issues: list[OpenIssueForTies],
+) -> list[Tie]:
+    """Group hits by related_n, compute combined_score (capped), apply
+    threshold, derive primary/secondary relationships + suggested action,
+    sort by score desc + number asc, cap at MAX_TIES_DISPLAYED.
+    """
+    # Group hits by related_n.
+    by_related: dict[int, list[SignalHit]] = {}
+    for h in hits:
+        by_related.setdefault(h.related_n, []).append(h)
+
+    # Lookup for related issue metadata.
+    by_number = {i.number: i for i in open_issues}
+
+    candidates: list[Tie] = []
+    for related_n, related_hits in by_related.items():
+        if related_n not in by_number:
+            continue  # related issue isn't in the open set (race)
+        related = by_number[related_n]
+
+        score = min(
+            sum(CONFIDENCE_WEIGHT[h.confidence] for h in related_hits),
+            MAX_COMBINED_SCORE,
+        )
+
+        if not _passes_threshold(score, related_hits, threshold):
+            continue
+
+        # Sort hits strong → weak so primary is the strongest signal.
+        # Within same confidence, keep stable order.
+        sorted_hits = sorted(related_hits, key=lambda h: -CONFIDENCE_WEIGHT[h.confidence])
+        primary_signal = sorted_hits[0].name
+        primary_label = _RELATIONSHIP_LABELS[primary_signal]
+        secondary_labels: list[str] = []
+        seen_labels = {primary_label}
+        for h in sorted_hits[1:]:
+            label = _RELATIONSHIP_LABELS[h.name]
+            if label not in seen_labels:
+                secondary_labels.append(label)
+                seen_labels.add(label)
+
+        suggested = _suggested_action(primary_signal, target, related_n, tuple(sorted_hits))
+
+        candidates.append(
+            Tie(
+                related_n=related_n,
+                related_title=related.title,
+                related_status=related.status,
+                hits=tuple(sorted_hits),
+                combined_score=score,
+                primary_relationship=primary_label,
+                secondary_relationships=tuple(secondary_labels),
+                suggested_action=suggested,
+            )
+        )
+
+    # Sort: combined_score desc, then related_n asc.
+    candidates.sort(key=lambda t: (-t.combined_score, t.related_n))
+    return candidates[:MAX_TIES_DISPLAYED]
+
+
+def _passes_threshold(score: int, hits: list[SignalHit], threshold: Threshold) -> bool:
+    if threshold == "weak":
+        return score >= 1
+    if threshold == "medium":
+        return score >= 3
+    # threshold == "strong"
+    return score >= 3 and any(h.confidence == "strong" for h in hits)
