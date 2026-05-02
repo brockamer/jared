@@ -234,3 +234,76 @@ def analyze_labels(
                 )
             )
     return hits
+
+
+# Title-token stop-words: common English connectors that produce noise.
+_TITLE_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "for",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "with",
+        "from",
+        "into",
+        "is",
+        "be",
+        "as",
+        "it",
+        "this",
+        "that",
+        "these",
+        "those",
+        "make",
+        "add",
+    }
+)
+
+# Minimum number of shared non-stop-word tokens to fire the signal.
+_TITLE_TOKEN_OVERLAP_MIN = 2
+
+
+def _tokenize_title(title: str) -> frozenset[str]:
+    """Lowercase, drop punctuation, split, drop stop-words, drop length-1 tokens."""
+    cleaned = re.sub(r"[^a-z0-9\s]+", " ", title.lower())
+    return frozenset(
+        tok for tok in cleaned.split() if len(tok) > 1 and tok not in _TITLE_STOP_WORDS
+    )
+
+
+def analyze_title_tokens(
+    target: OpenIssueForTies, open_issues: list[OpenIssueForTies]
+) -> list[SignalHit]:
+    """Weak signal: target and related share at least N non-stop-word title tokens.
+
+    Case-insensitive; punctuation stripped; stop-words removed.
+    """
+    target_toks = _tokenize_title(target.title)
+    if len(target_toks) < _TITLE_TOKEN_OVERLAP_MIN:
+        return []
+    hits: list[SignalHit] = []
+    for related in open_issues:
+        if related.number == target.number:
+            continue
+        related_toks = _tokenize_title(related.title)
+        shared = target_toks & related_toks
+        if len(shared) >= _TITLE_TOKEN_OVERLAP_MIN:
+            shared_list = sorted(shared)
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="title_tokens",
+                    confidence="weak",
+                    evidence=f"shares title tokens: {', '.join(shared_list)}",
+                )
+            )
+    return hits

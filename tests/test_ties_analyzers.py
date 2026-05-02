@@ -7,6 +7,7 @@ from skills.jared.scripts.lib.ties import (
     analyze_cross_references,
     analyze_labels,
     analyze_milestone_overlap,
+    analyze_title_tokens,
 )
 
 
@@ -211,4 +212,33 @@ class TestAnalyzeLabels:
         target = _make_issue(1, labels=("perf",))
         others = [_make_issue(1, labels=("perf",))]
         hits = analyze_labels(target, others, stop_words=frozenset())
+        assert hits == []
+
+
+class TestAnalyzeTitleTokens:
+    def test_strong_token_overlap_fires(self) -> None:
+        target = _make_issue(1, title="perf(file): batched mutations for jared file")
+        others = [_make_issue(2, title="perf(file): on-disk snapshot cache for jared")]
+        hits = analyze_title_tokens(target, others)
+        assert len(hits) == 1
+        assert hits[0].related_n == 2
+        assert hits[0].confidence == "weak"
+
+    def test_weak_overlap_no_hit_below_threshold(self) -> None:
+        """A single common token (esp. a stop-word like 'for') shouldn't fire."""
+        target = _make_issue(1, title="add cache for jared file")
+        others = [_make_issue(2, title="rewrite docs for findajob")]
+        hits = analyze_title_tokens(target, others)
+        assert hits == []
+
+    def test_case_insensitive(self) -> None:
+        target = _make_issue(1, title="Cache GraphQL Calls")
+        others = [_make_issue(2, title="cache graphql responses across runs")]
+        hits = analyze_title_tokens(target, others)
+        assert len(hits) == 1
+
+    def test_self_is_never_a_hit(self) -> None:
+        target = _make_issue(1, title="perf(file): batched mutations")
+        others = [_make_issue(1, title="perf(file): batched mutations")]
+        hits = analyze_title_tokens(target, others)
         assert hits == []
