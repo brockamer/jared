@@ -69,9 +69,8 @@ def test_ties_smoke_renders_block(tmp_path: Path, capsys: pytest.CaptureFixture[
         patch.object(
             cli.Board,
             "fetch_open_issues_for_ties",
-            lambda self, **kw: _stub_open_issues(),
+            lambda self, **kw: [_stub_target(), *_stub_open_issues()],
         ),
-        patch.object(cli.Board, "get_issue", lambda self, n: _stub_target()),
         patch.object(cli.Board, "tie_stop_words", lambda self: frozenset()),
     ):
         rc = cli.main(["--board", str(doc), "ties", "1"])
@@ -87,14 +86,34 @@ def test_ties_budget_exhausted_emits_skip_line(
 ) -> None:
     cli = import_cli()
     doc = _board_doc(tmp_path)
-    with (
-        patch.object(cli.Board, "graphql_budget", lambda self: (25, 5000, 0)),
-        patch.object(cli.Board, "get_issue", lambda self, n: _stub_target()),
-    ):
+    with patch.object(cli.Board, "graphql_budget", lambda self: (25, 5000, 0)):
         rc = cli.main(["--board", str(doc), "ties", "1"])
     assert rc == 0
     out = capsys.readouterr().out.strip()
     assert out == "(GraphQL budget exhausted — ties analysis skipped)"
+
+
+def test_ties_full_mode_single_fetch_with_bodies(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression for #81: full mode does ONE body-bearing fetch, not two."""
+    cli = import_cli()
+    doc = _board_doc(tmp_path)
+    captured_calls: list[dict[str, Any]] = []
+
+    def fake_fetch(self: Any, **kw: Any) -> list[Any]:
+        captured_calls.append(dict(kw))
+        return [_stub_target(), *_stub_open_issues()]
+
+    with (
+        patch.object(cli.Board, "graphql_budget", lambda self: (5000, 5000, 0)),
+        patch.object(cli.Board, "fetch_open_issues_for_ties", fake_fetch),
+        patch.object(cli.Board, "tie_stop_words", lambda self: frozenset()),
+    ):
+        rc = cli.main(["--board", str(doc), "ties", "1"])
+
+    assert rc == 0
+    assert captured_calls == [{"include_bodies": True}]
 
 
 def test_ties_partial_mode_emits_diagnostic(
@@ -106,12 +125,11 @@ def test_ties_partial_mode_emits_diagnostic(
 
     def fake_fetch(self: Any, **kw: Any) -> list[Any]:
         captured_calls.append(dict(kw))
-        return _stub_open_issues()
+        return [_stub_target(), *_stub_open_issues()]
 
     with (
         patch.object(cli.Board, "graphql_budget", lambda self: (100, 5000, 0)),
         patch.object(cli.Board, "fetch_open_issues_for_ties", fake_fetch),
-        patch.object(cli.Board, "get_issue", lambda self, n: _stub_target()),
         patch.object(cli.Board, "tie_stop_words", lambda self: frozenset()),
     ):
         rc = cli.main(["--board", str(doc), "ties", "1"])
@@ -119,17 +137,24 @@ def test_ties_partial_mode_emits_diagnostic(
     assert rc == 0
     out = capsys.readouterr().out
     assert "low GraphQL budget" in out
-    # _cmd_ties calls fetch_open_issues_for_ties twice in partial mode:
-    # once via get_issue (always include_bodies=True) and once for the
-    # actual partial-mode analysis (include_bodies=False). Verify the
-    # second call is the partial-mode one.
-    assert captured_calls[-1] == {"include_bodies": False}
+    # Regression for #81: partial mode now does ONE body-skipped fetch.
+    # Previously it called fetch_open_issues_for_ties twice — once via
+    # Board.get_issue with bodies, once for analysis without — which
+    # defeated the budget protection.
+    assert captured_calls == [{"include_bodies": False}]
 
 
 def test_ties_target_closed_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     cli = import_cli()
     doc = _board_doc(tmp_path)
-    with patch.object(cli.Board, "get_issue", lambda self, n: None):
+    with (
+        patch.object(cli.Board, "graphql_budget", lambda self: (5000, 5000, 0)),
+        patch.object(
+            cli.Board,
+            "fetch_open_issues_for_ties",
+            lambda self, **kw: _stub_open_issues(),  # no record with number=1
+        ),
+    ):
         rc = cli.main(["--board", str(doc), "ties", "1"])
     assert rc == 1
 
@@ -142,9 +167,8 @@ def test_ties_json_format(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
         patch.object(
             cli.Board,
             "fetch_open_issues_for_ties",
-            lambda self, **kw: _stub_open_issues(),
+            lambda self, **kw: [_stub_target(), *_stub_open_issues()],
         ),
-        patch.object(cli.Board, "get_issue", lambda self, n: _stub_target()),
         patch.object(cli.Board, "tie_stop_words", lambda self: frozenset()),
     ):
         rc = cli.main(["--board", str(doc), "ties", "1", "--format", "json"])
