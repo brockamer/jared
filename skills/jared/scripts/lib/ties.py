@@ -237,6 +237,9 @@ def analyze_labels(
 
 
 # Title-token stop-words: common English connectors that produce noise.
+# Private: not project-configurable, unlike DEFAULT_LABEL_STOP_WORDS — title
+# stop-words are uniform across projects (English connectors), label stop-words
+# are project-specific.
 _TITLE_STOP_WORDS: frozenset[str] = frozenset(
     {
         "a",
@@ -312,6 +315,8 @@ def analyze_title_tokens(
 # Path-like token: at least one '/' or a recognized file extension, with
 # common code/doc extensions. Generic single-word names like README are
 # excluded by requiring either a slash or an extension.
+# Lowercase extensions only by design — issue bodies conventionally use
+# lowercase paths (`lib/board.py`, not `lib/Board.PY`).
 _FILE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])"
     r"([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+\.[a-z]+|"
