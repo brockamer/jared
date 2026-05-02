@@ -59,7 +59,7 @@ def test_add_to_board_when_issue_not_on_board(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Issue absent from board → item-list (membership check) → item-add → field edits."""
+    """Issue absent from board → item-list (membership check) → item-add → graphql mutation."""
     board_md = _write_full_board(tmp_path)
     calls: list[list[str]] = []
 
@@ -96,13 +96,18 @@ def test_add_to_board_when_issue_not_on_board(
     # find_item_id triggers item-list; issue isn't on board, so we item-add.
     assert any("item-add" in " ".join(c) for c in calls)
 
-    # All three edits land: Priority + Status + Work Stream.
-    edits = [c for c in calls if "item-edit" in c]
-    assert len(edits) >= 3, calls
-    joined_edits = " ".join(" ".join(c) for c in edits)
-    assert "PVTSSF_prio" in joined_edits and "OPTION_high" in joined_edits
-    assert "PVTSSF_status" in joined_edits and "OPTION_up_next" in joined_edits
-    assert "PVTSSF_ws" in joined_edits and "OPTION_plan" in joined_edits
+    # All three fields land in a single graphql mutation — no item-edit calls.
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert len(graphql_calls) == 1, (
+        f"expected exactly 1 graphql call, got {len(graphql_calls)}: {calls}"
+    )
+    joined_graphql = " ".join(" ".join(c) for c in graphql_calls)
+    assert "PVTSSF_prio" in joined_graphql and "OPTION_high" in joined_graphql
+    assert "PVTSSF_status" in joined_graphql and "OPTION_up_next" in joined_graphql
+    assert "PVTSSF_ws" in joined_graphql and "OPTION_plan" in joined_graphql
+    assert not any("item-edit" in " ".join(c) for c in calls), (
+        "item-edit should be replaced by graphql mutation"
+    )
 
 
 def test_add_to_board_idempotent_when_issue_already_on_board(
@@ -110,7 +115,7 @@ def test_add_to_board_idempotent_when_issue_already_on_board(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Issue already on board → item-list finds it → NO item-add → field edits.
+    """Issue already on board → item-list finds it → NO item-add → single graphql mutation.
 
     Confirms the helper re-uses an existing item-id rather than calling
     `gh project item-add` (which would either error or duplicate). This is
@@ -155,12 +160,18 @@ def test_add_to_board_idempotent_when_issue_already_on_board(
         f"add-to-board should re-use the existing item-id, not call item-add. Calls: {calls}"
     )
 
-    # Edits still apply against the discovered item-id.
-    edits = [c for c in calls if "item-edit" in c]
-    joined_edits = " ".join(" ".join(c) for c in edits)
-    assert "PVTI_existing" in joined_edits, joined_edits
-    assert "PVTSSF_prio" in joined_edits and "OPTION_med" in joined_edits
-    assert "PVTSSF_status" in joined_edits and "OPTION_backlog" in joined_edits
+    # Fields are set via a single graphql mutation using the discovered item-id.
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert len(graphql_calls) == 1, (
+        f"expected exactly 1 graphql call, got {len(graphql_calls)}: {calls}"
+    )
+    joined_graphql = " ".join(" ".join(c) for c in graphql_calls)
+    assert "PVTI_existing" in joined_graphql, joined_graphql
+    assert "PVTSSF_prio" in joined_graphql and "OPTION_med" in joined_graphql
+    assert "PVTSSF_status" in joined_graphql and "OPTION_backlog" in joined_graphql
+    assert not any("item-edit" in " ".join(c) for c in calls), (
+        "item-edit should be replaced by graphql mutation"
+    )
 
 
 def test_add_to_board_applies_labels_when_provided(
