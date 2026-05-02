@@ -5,6 +5,7 @@ from skills.jared.scripts.lib.ties import (
     SignalHit,
     analyze_blocked_by,
     analyze_cross_references,
+    analyze_labels,
     analyze_milestone_overlap,
 )
 
@@ -168,3 +169,46 @@ class TestAnalyzeCrossReferences:
         others = [_make_issue(42)]
         hits = analyze_cross_references(target, others, direction="forward")
         assert len(hits) == 1  # one hit per related, not per mention
+
+
+class TestAnalyzeLabels:
+    def test_shared_non_stop_word_label_fires(self) -> None:
+        target = _make_issue(1, labels=("perf",))
+        others = [_make_issue(2, labels=("perf",))]
+        hits = analyze_labels(target, others, stop_words=frozenset({"enhancement"}))
+        assert len(hits) == 1
+        assert hits[0].related_n == 2
+        assert hits[0].confidence == "weak"
+        assert hits[0].name == "labels"
+        assert "perf" in hits[0].evidence
+
+    def test_only_stop_word_overlap_no_hit(self) -> None:
+        target = _make_issue(1, labels=("enhancement",))
+        others = [_make_issue(2, labels=("enhancement",))]
+        hits = analyze_labels(target, others, stop_words=frozenset({"enhancement"}))
+        assert hits == []
+
+    def test_partial_overlap_with_stop_word_still_fires_on_non_stop(self) -> None:
+        target = _make_issue(1, labels=("enhancement", "perf"))
+        others = [_make_issue(2, labels=("enhancement", "perf"))]
+        hits = analyze_labels(target, others, stop_words=frozenset({"enhancement"}))
+        assert len(hits) == 1
+        assert "perf" in hits[0].evidence
+
+    def test_no_label_overlap_no_hit(self) -> None:
+        target = _make_issue(1, labels=("perf",))
+        others = [_make_issue(2, labels=("docs",))]
+        hits = analyze_labels(target, others, stop_words=frozenset())
+        assert hits == []
+
+    def test_target_no_labels_no_hit(self) -> None:
+        target = _make_issue(1, labels=())
+        others = [_make_issue(2, labels=("perf",))]
+        hits = analyze_labels(target, others, stop_words=frozenset())
+        assert hits == []
+
+    def test_self_is_never_a_hit(self) -> None:
+        target = _make_issue(1, labels=("perf",))
+        others = [_make_issue(1, labels=("perf",))]
+        hits = analyze_labels(target, others, stop_words=frozenset())
+        assert hits == []

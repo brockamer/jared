@@ -200,3 +200,37 @@ def analyze_cross_references(
                 seen.add(related.number)
 
     return hits
+
+
+def analyze_labels(
+    target: OpenIssueForTies,
+    open_issues: list[OpenIssueForTies],
+    *,
+    stop_words: frozenset[str],
+) -> list[SignalHit]:
+    """Weak signal: shared non-stop-word label between target and related.
+
+    Stop-words are common type labels (enhancement, bug, ...) that fire on
+    nearly every issue and would drown the signal. Caller passes the
+    project-specific set; defaults are in DEFAULT_LABEL_STOP_WORDS.
+    """
+    target_labels = frozenset(target.labels) - stop_words
+    if not target_labels:
+        return []
+    hits: list[SignalHit] = []
+    for related in open_issues:
+        if related.number == target.number:
+            continue
+        related_labels = frozenset(related.labels) - stop_words
+        shared = target_labels & related_labels
+        if shared:
+            shared_list = sorted(shared)
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="labels",
+                    confidence="weak",
+                    evidence=f"shares non-stop-word label(s): {', '.join(shared_list)}",
+                )
+            )
+    return hits
