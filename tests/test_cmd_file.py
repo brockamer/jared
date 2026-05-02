@@ -103,15 +103,19 @@ def test_file_sequences_create_add_status_priority(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
 
-    # Must invoke the three essentials: issue create, item-add, field edits.
+    # Must invoke the three essentials: issue create, item-add, single graphql mutation.
     assert any("issue" in c and "create" in c for c in calls)
     assert any("item-add" in c for c in calls)
 
-    edits = [c for c in calls if "item-edit" in c]
-    assert len(edits) >= 2, "expected at least Priority + Status item-edit calls"
-    joined_edits = " ".join(" ".join(c) for c in edits)
-    assert "PVTSSF_prio" in joined_edits and "OPTION_high" in joined_edits
-    assert "PVTSSF_status" in joined_edits and "OPTION_backlog" in joined_edits
+    # Field mutations go through a single `gh api graphql` call now — no item-edit.
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert len(graphql_calls) >= 1, "expected at least one gh api graphql call for field mutations"
+    joined_graphql = " ".join(" ".join(c) for c in graphql_calls)
+    assert "PVTSSF_prio" in joined_graphql and "OPTION_high" in joined_graphql
+    assert "PVTSSF_status" in joined_graphql and "OPTION_backlog" in joined_graphql
+    assert not any("item-edit" in " ".join(c) for c in calls), (
+        "item-edit should be replaced by graphql mutation"
+    )
 
     # No item-list in the filing path — that's the #4 regression we guard
     # against. See test_file_makes_no_item_list_calls for the explicit pin.
@@ -146,9 +150,13 @@ def test_file_with_custom_status_and_extra_field(
     )
     captured = capsys.readouterr()
     assert rc == 0, captured.err
-    joined_edits = " ".join(" ".join(c) for c in calls if "item-edit" in c)
-    assert "OPTION_up_next" in joined_edits
-    assert "PVTSSF_ws" in joined_edits and "OPTION_plan" in joined_edits
+    # All three fields land in the single graphql mutation; no item-edit calls.
+    joined_graphql = " ".join(" ".join(c) for c in calls if "api" in c and "graphql" in c)
+    assert "OPTION_up_next" in joined_graphql
+    assert "PVTSSF_ws" in joined_graphql and "OPTION_plan" in joined_graphql
+    assert not any("item-edit" in " ".join(c) for c in calls), (
+        "item-edit should be replaced by graphql mutation"
+    )
 
 
 def test_file_emits_recovery_command_on_post_create_failure(
@@ -224,16 +232,16 @@ def test_file_emits_recovery_command_on_post_create_failure(
     assert "Resource not accessible" in captured.err, captured.err
 
 
-def test_file_emits_recovery_command_on_item_edit_failure(
+def test_file_emits_recovery_command_on_field_mutation_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Same recovery contract when failure is *after* item-add succeeds.
 
-    Covers the "network blip mid-loop" failure mode advisor flagged: the
-    issue is on the board with an item-id, but a later `gh project item-edit`
-    fails (Priority set, Status not yet, etc.). Recovery line still works
-    because `jared add-to-board` is idempotent — it'll find the existing
-    item, skip item-add, and finish setting fields.
+    Covers the "network blip on field mutation" failure mode: the issue is on
+    the board with an item-id, but the single `gh api graphql` mutation for
+    setting fields fails. Recovery line still works because `jared add-to-board`
+    is idempotent — it'll find the existing item, skip item-add, and retry
+    setting fields.
     """
     board_md = _write_full_board(tmp_path)
     body_file = tmp_path / "body.md"
@@ -249,7 +257,7 @@ def test_file_emits_recovery_command_on_item_edit_failure(
             )
         if "item-add" in joined:
             return FakeGhResult(stdout='{"id": "PVTI_new"}')
-        if "item-edit" in joined:
+        if "api" in joined and "graphql" in joined and "updateProjectV2" in joined:
             return FakeGhResult(
                 stdout="",
                 returncode=1,
@@ -330,12 +338,10 @@ def test_file_makes_no_item_list_calls(
     for c in calls:
         joined = " ".join(c)
         assert "item-list" not in joined, f"`jared file` should not call item-list; got: {joined!r}"
-    # Expected call ceiling: issue create + item-add + item-edit × 2 (Status,
-    # Priority) = 4. Gives AC headroom of 1 for an extra --field if present.
-    # Allow the test to flex by asserting an upper bound rather than equality,
-    # since argparse or gh version changes could introduce an extra query we
-    # haven't noticed.
-    assert len(calls) <= 5, (
-        f"`jared file` made {len(calls)} gh calls; expected ≤5. Calls:\n"
+    # Expected call ceiling: issue create + item-add + 1 graphql mutation = 3.
+    # All field-setting (Priority + Status + extras) is batched into one call.
+    # Allow the test to flex by asserting an upper bound rather than equality.
+    assert len(calls) <= 4, (
+        f"`jared file` made {len(calls)} gh calls; expected ≤4. Calls:\n"
         + "\n".join(" ".join(c) for c in calls)
     )

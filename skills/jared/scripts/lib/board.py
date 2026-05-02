@@ -375,27 +375,24 @@ class Board:
                 label_args.extend(["--add-label", label])
             self.run_gh(label_args)
 
-        # Priority → Status → extras, in that order. Failures here leave the
-        # item partially configured; recovery is `jared add-to-board <N> ...`.
-        for field_id_, option_id_ in [
-            (prio_field_id, prio_option_id),
-            (status_field_id, status_option_id),
-            *extras,
-        ]:
-            self.run_gh(
-                [
-                    "project",
-                    "item-edit",
-                    "--project-id",
-                    self.project_id,
-                    "--id",
-                    item_id,
-                    "--field-id",
-                    field_id_,
-                    "--single-select-option-id",
-                    option_id_,
-                ]
-            )
+        # Build a single aliased mutation that sets Priority, Status, and any
+        # extras in one GraphQL round-trip. IDs are opaque internal values
+        # resolved above from project-board.md — interpolating them directly
+        # is safe. cache=None is required (mutations must never be cached).
+        all_fields = [
+            ("setPriority", prio_field_id, prio_option_id),
+            ("setStatus", status_field_id, status_option_id),
+            *[(f"setExtra{i}", fid, oid) for i, (fid, oid) in enumerate(extras)],
+        ]
+        mutation_parts = "\n  ".join(
+            f"{alias}: updateProjectV2ItemFieldValue("
+            f'input: {{projectId: "{self.project_id}", itemId: "{item_id}", '
+            f'fieldId: "{fid}", value: {{singleSelectOptionId: "{oid}"}}}}'
+            f") {{ projectV2Item {{ id }} }}"
+            for alias, fid, oid in all_fields
+        )
+        mutation = f"mutation {{\n  {mutation_parts}\n}}"
+        self.run_graphql(mutation, cache=None)
 
         return item_id
 
@@ -445,14 +442,19 @@ def _looks_like_project_mutation(args: list[str]) -> bool:
     """
     if not args:
         return False
-    if args[0] == "project" and len(args) > 1 and args[1] in {
-        "item-add",
-        "item-edit",
-        "item-archive",
-        "item-delete",
-        "create",
-        "field-create",
-    }:
+    if (
+        args[0] == "project"
+        and len(args) > 1
+        and args[1]
+        in {
+            "item-add",
+            "item-edit",
+            "item-archive",
+            "item-delete",
+            "create",
+            "field-create",
+        }
+    ):
         return True
     if args[:2] == ["api", "graphql"]:
         for chunk in args:
@@ -532,13 +534,8 @@ def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
         env=_child_env(),
     )
     if result.returncode != 0:
-        message = (
-            f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
-        )
-        if (
-            _TOKEN_SCOPE_ERROR_SIGNATURE in result.stderr
-            and _looks_like_project_mutation(args)
-        ):
+        message = f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
+        if _TOKEN_SCOPE_ERROR_SIGNATURE in result.stderr and _looks_like_project_mutation(args):
             message += "\n" + _format_token_scope_diagnostic()
         raise GhInvocationError(message)
     return result.stdout.strip()
