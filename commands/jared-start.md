@@ -52,7 +52,17 @@ Flow:
    - Any plan or spec linked from `## Planning` — read and summarize
    - Git state: current branch, uncommitted changes, last 5 commits touching related files
 
-6. **Announce the session plan.** When a prompt was found in step 1, prepend a **posture block**:
+6. **Run tied-issues pre-pull analysis.** Run:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared ties <N>
+   ```
+
+   Capture stdout. If non-empty, prepend it as a "Ties to consider" block at the top of the announce, before the per-issue summary. If exit code is non-zero or stdout is empty, suppress the block and proceed.
+
+   The block is **advisory** — never gate the start on tie resolution. Operators may close superseded predecessors, sequence feeders first, fold same-file issues into the target's PR, or ignore the block entirely. Each tie carries a confidence tag (`strong` / `medium` / `weak`) and a heuristic suggested action.
+
+7. **Announce the session plan.** When a prompt was found in step 1, prepend a **posture block**:
 
    ```
    Handoff posture (tmp/next-session-prompt-<TIMESTAMP>.md, <relative-time>):
@@ -91,8 +101,8 @@ Flow:
    Git: branch <name>, <clean | N modified>, last relevant commit <hash> <msg>
    ```
 
-   The posture block is omitted when no prompt was found in step 1. Two visually-separated blocks when both are present: cross-issue posture above, issue-specific below.
+   The posture block is omitted when no prompt was found in step 1. Up to three visually-separated blocks when all are present: cross-issue posture above, ties block (from step 6) next, issue-specific below.
 
-7. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
+8. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
 
 This replaces the pattern of manually reading the issue, the plan, and a handoff prompt before starting. The board + latest Session note + (when present) the most recent handoff prompt is the handoff.
