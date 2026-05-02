@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from skills.jared.scripts.lib.ties import OpenIssueForTies
+    from .ties import OpenIssueForTies
 
 
 class BoardConfigError(Exception):
@@ -261,7 +261,7 @@ class Board:
         Falls back to ties.DEFAULT_LABEL_STOP_WORDS otherwise. Override is
         total — defaults are NOT merged with project-specific words.
         """
-        from skills.jared.scripts.lib.ties import DEFAULT_LABEL_STOP_WORDS
+        from .ties import DEFAULT_LABEL_STOP_WORDS
 
         text = self._raw_doc  # the verbatim project-board.md content
         section_re = re.compile(
@@ -447,7 +447,7 @@ class Board:
         If an issue is on multiple boards, the first item's Status/Priority are
         used (typically the relevant one for jared-governed repos).
         """
-        from skills.jared.scripts.lib.ties import OpenIssueForTies
+        from .ties import OpenIssueForTies
 
         body_field = "body" if include_bodies else ""
         # Board.repo is stored as "owner/name" (see _parse and _infer_repo_from_git).
