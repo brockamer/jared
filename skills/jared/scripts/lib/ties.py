@@ -479,3 +479,31 @@ def _passes_threshold(score: int, hits: list[SignalHit], threshold: Threshold) -
         return score >= 3
     # threshold == "strong"
     return score >= 3 and any(h.confidence == "strong" for h in hits)
+
+
+def format_ties_block(ties: list[Tie], *, degraded: bool, diagnostic: str | None) -> str:
+    """Render the locked compact output shape for the announce block.
+
+    Empty ties + no diagnostic → empty string (signals "suppress block" to
+    the skill). Empty ties + diagnostic → diagnostic alone. Non-empty ties
+    → header + line-per-tie + footer note + optional diagnostic.
+    """
+    if not ties and not diagnostic:
+        return ""
+    if not ties and diagnostic:
+        return diagnostic
+
+    lines: list[str] = ["Ties to consider:"]
+    for t in ties:
+        line = (
+            f"  #{t.related_n} [{t.hits[0].confidence}, {t.primary_relationship}]"
+            f"   {t.suggested_action}"
+        )
+        if t.secondary_relationships:
+            secondaries = ", ".join(t.secondary_relationships)
+            line = f"{line}  (also {secondaries})"
+        lines.append(line)
+    lines.append("  (Suggestions are heuristic — operator decides.)")
+    if diagnostic:
+        lines.append(f"  {diagnostic}")
+    return "\n".join(lines)
