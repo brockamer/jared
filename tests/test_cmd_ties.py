@@ -102,10 +102,10 @@ def test_ties_partial_mode_emits_diagnostic(
 ) -> None:
     cli = import_cli()
     doc = _board_doc(tmp_path)
-    captured_kw: dict[str, Any] = {}
+    captured_calls: list[dict[str, Any]] = []
 
     def fake_fetch(self: Any, **kw: Any) -> list[Any]:
-        captured_kw.update(kw)
+        captured_calls.append(dict(kw))
         return _stub_open_issues()
 
     with (
@@ -119,7 +119,11 @@ def test_ties_partial_mode_emits_diagnostic(
     assert rc == 0
     out = capsys.readouterr().out
     assert "low GraphQL budget" in out
-    assert captured_kw == {"include_bodies": False}
+    # _cmd_ties calls fetch_open_issues_for_ties twice in partial mode:
+    # once via get_issue (always include_bodies=True) and once for the
+    # actual partial-mode analysis (include_bodies=False). Verify the
+    # second call is the partial-mode one.
+    assert captured_calls[-1] == {"include_bodies": False}
 
 
 def test_ties_target_closed_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
