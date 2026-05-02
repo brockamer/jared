@@ -10,7 +10,10 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from skills.jared.scripts.lib.ties import OpenIssueForTies
 
 
 class BoardConfigError(Exception):
@@ -429,6 +432,90 @@ class Board:
         self.run_graphql(mutation, cache=None)
 
         return item_id
+
+    def fetch_open_issues_for_ties(self, *, include_bodies: bool = True) -> list[OpenIssueForTies]:
+        """Single batched GraphQL fetch for ties analysis.
+
+        Returns OPEN issues only; excludes Done. When include_bodies=False, the
+        body field is omitted from the query (saves response size + bandwidth)
+        and OpenIssueForTies.body is "" on every record.
+
+        Cached 5 minutes via run_graphql(cache="5m"). Two cache keys via the
+        distinct query strings (with vs without body).
+
+        NOTE: projectItems(first: 5) takes [0] — assumes one board per repo.
+        If an issue is on multiple boards, the first item's Status/Priority are
+        used (typically the relevant one for jared-governed repos).
+        """
+        from skills.jared.scripts.lib.ties import OpenIssueForTies
+
+        body_field = "body" if include_bodies else ""
+        # Board.repo is stored as "owner/name" (see _parse and _infer_repo_from_git).
+        owner, name = self.repo.split("/", 1)
+        query = f"""
+        query OpenIssuesForTies($owner: String!, $name: String!, $cursor: String) {{
+          repository(owner: $owner, name: $name) {{
+            issues(states: OPEN, first: 100, after: $cursor) {{
+              nodes {{
+                number
+                title
+                {body_field}
+                labels(first: 20) {{ nodes {{ name }} }}
+                milestone {{ title }}
+                projectItems(first: 5) {{
+                  nodes {{
+                    fieldValueByName(name: "Status") {{
+                      ... on ProjectV2ItemFieldSingleSelectValue {{ name }}
+                    }}
+                    priority: fieldValueByName(name: "Priority") {{
+                      ... on ProjectV2ItemFieldSingleSelectValue {{ name }}
+                    }}
+                  }}
+                }}
+                trackedInIssues(first: 10) {{ nodes {{ number }} }}
+              }}
+              pageInfo {{ hasNextPage endCursor }}
+            }}
+          }}
+        }}
+        """
+        cursor: str | None = None
+        all_records: list[OpenIssueForTies] = []
+        while True:
+            # Only pass cursor when non-None — passing cursor=None becomes the
+            # literal string "None" in gh args, not GraphQL null. Follows the
+            # same pattern as fetch_blocked_by_edges.
+            kwargs: dict[str, str | int | bool] = {"owner": owner, "name": name}
+            if cursor is not None:
+                kwargs["cursor"] = cursor
+            data = self.run_graphql(query, cache="5m", **kwargs)
+            page = data["data"]["repository"]["issues"]
+            for node in page["nodes"]:
+                project_items = node.get("projectItems", {}).get("nodes") or []
+                project_item = project_items[0] if project_items else {}
+                status_field = project_item.get("fieldValueByName") or {}
+                priority_field = project_item.get("priority") or {}
+                milestone_obj = node.get("milestone") or {}
+                tracked_in = node.get("trackedInIssues", {}).get("nodes") or []
+                all_records.append(
+                    OpenIssueForTies(
+                        number=int(node["number"]),
+                        title=str(node["title"]),
+                        body=str(node.get("body") or ""),
+                        labels=tuple(
+                            n["name"] for n in (node.get("labels", {}).get("nodes") or [])
+                        ),
+                        milestone=milestone_obj.get("title"),
+                        status=str(status_field.get("name") or "Backlog"),
+                        priority=priority_field.get("name"),
+                        blocked_by=tuple(int(t["number"]) for t in tracked_in),
+                    )
+                )
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+        # Filter Done if any leaked in (defensive — `states: OPEN` should already exclude).
+        return [r for r in all_records if r.status != "Done"]
 
     def run_graphql(
         self, query: str, *, cache: str | None = None, **variables: str | int | bool
