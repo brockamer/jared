@@ -88,6 +88,7 @@ def analyze_blocked_by(
     for related in open_issues:
         if related.number == target.number:
             continue
+        # Both directions can fire (rare mutual-blocker case); combine() dedupes per related_n.
         if related.number in target.blocked_by:
             hits.append(
                 SignalHit(
@@ -97,7 +98,7 @@ def analyze_blocked_by(
                     evidence=f"target #{target.number} is blocked by #{related.number}",
                 )
             )
-        elif target.number in related.blocked_by:
+        if target.number in related.blocked_by:
             hits.append(
                 SignalHit(
                     related_n=related.number,
