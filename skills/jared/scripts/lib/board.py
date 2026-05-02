@@ -47,6 +47,11 @@ class Board:
     # Cached `gh project item-list` result, populated on first board_items()
     # call and reused for the lifetime of this instance. None means uncached.
     _items: list[dict[str, Any]] | None = field(default=None, repr=False)
+    # Verbatim text of docs/project-board.md, stored for post-parse lookups
+    # (e.g. tie_stop_words). Set by from_path / _parse; empty string if not
+    # constructed via those entry points (e.g. direct dataclass construction
+    # in tests that don't need this feature).
+    _raw_doc: str = field(default="", repr=False)
 
     @classmethod
     def from_path(cls, path: Path) -> Board:
@@ -133,6 +138,7 @@ class Board:
             _field_options=field_options,
             session_handoff_prompt=session_handoff_prompt,
             session_start_checks=session_start_checks,
+            _raw_doc=text,
         )
 
     @staticmethod
@@ -240,6 +246,34 @@ class Board:
                 f"Option '{option}' not found for field '{field_name}'. Available: {available}"
             )
         return options[option]
+
+    def tie_stop_words(self) -> frozenset[str]:
+        """Project-specific label stop-words for ties analysis.
+
+        Reads `### Tie Analysis` section from project-board.md if present:
+
+            ### Tie Analysis
+            - Label stop-words: foo, bar, baz
+
+        Falls back to ties.DEFAULT_LABEL_STOP_WORDS otherwise. Override is
+        total — defaults are NOT merged with project-specific words.
+        """
+        from skills.jared.scripts.lib.ties import DEFAULT_LABEL_STOP_WORDS
+
+        text = self._raw_doc  # the verbatim project-board.md content
+        section_re = re.compile(
+            r"^###\s+Tie Analysis\s*$(?P<body>.*?)(?=^###\s|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = section_re.search(text)
+        if not match:
+            return DEFAULT_LABEL_STOP_WORDS
+        bullet_re = re.compile(r"^\s*-\s*Label stop-words:\s*(?P<words>.+?)\s*$", re.MULTILINE)
+        bullet_match = bullet_re.search(match.group("body"))
+        if not bullet_match:
+            return DEFAULT_LABEL_STOP_WORDS
+        words = [w.strip() for w in bullet_match.group("words").split(",")]
+        return frozenset(w for w in words if w)
 
     def run_gh(self, args: list[str], *, cache: str | None = None) -> Any:
         return run_gh(args, cache=cache)
