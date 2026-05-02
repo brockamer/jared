@@ -246,10 +246,7 @@ def test_token_scope_error_on_project_mutation_includes_diagnostic(
     class FakeResult:
         returncode = 1
         stdout = ""
-        stderr = (
-            "GraphQL: Resource not accessible by personal access token "
-            "(addProjectV2ItemById)"
-        )
+        stderr = "GraphQL: Resource not accessible by personal access token (addProjectV2ItemById)"
 
     # Sequenced fake: first call (the failing mutation) returns the 403; any
     # subsequent call (the auth-status probe inside the diagnostic) returns no
@@ -592,9 +589,7 @@ def test_check_graphql_budget_force_overrides_low() -> None:
     )
 
 
-def test_run_gh_strips_github_token_envs(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_run_gh_strips_github_token_envs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """gh prefers GH_TOKEN/GITHUB_TOKEN over `gh auth login`'s OAuth session, so a
     fine-grained PAT without `project` scope shadows an OAuth token that has it.
     run_gh_raw must scrub both vars from the child env (jared#65)."""
@@ -1110,6 +1105,112 @@ def test_board_defaults_when_jared_config_absent(tmp_path: Path) -> None:
     board = Board.from_path(board_md)
     assert board.session_handoff_prompt == "ask"
     assert board.session_start_checks == []
+
+
+def _write_full_board_for_add(tmp_path: Path) -> "Path":
+    """Write a full board with Status, Priority, and Work Stream fields."""
+    from textwrap import dedent
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True, exist_ok=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Status
+        - Field ID: PVTSSF_status
+        - Backlog: OPTION_backlog
+        - Up Next: OPTION_up_next
+        - In Progress: OPTION_in_progress
+        - Done: OPTION_done
+        - Blocked: OPTION_blocked
+
+        ### Priority
+        - Field ID: PVTSSF_prio
+        - High: OPTION_high
+        - Medium: OPTION_med
+        - Low: OPTION_low
+
+        ### Work Stream
+        - Field ID: PVTSSF_ws
+        - Perception: OPTION_perc
+        - Planning: OPTION_plan
+        - Fleet Ops: OPTION_fleet
+    """)
+    )
+    return board_md
+
+
+def test_add_existing_to_board_batches_field_mutations_into_one_graphql_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Priority + Status + 1 extra field must issue ONE gh api graphql call, not
+    three gh project item-edit calls. This is the perf regression guard for #53.
+
+    The mutation must embed all three field IDs and option IDs in a single
+    aliased document so GitHub bills one GraphQL point instead of three.
+    """
+    from skills.jared.scripts.lib.board import Board
+    from tests.conftest import FakeGhResult
+
+    board_md = _write_full_board_for_add(tmp_path)
+    board = Board.from_path(board_md)
+
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        calls.append(args)
+        joined = " ".join(args)
+        if "item-list" in joined:
+            # Issue already on board — find_item_id returns existing item-id.
+            return FakeGhResult(
+                stdout='{"items": [{"id": "PVTI_abc123", "content": {"number": 99}}]}'
+            )
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    item_id = board.add_existing_to_board(
+        99,
+        priority="High",
+        status="Up Next",
+        fields=[("Work Stream", "Planning")],
+    )
+
+    assert item_id == "PVTI_abc123"
+
+    # Regression guard: zero item-edit calls.
+    item_edit_calls = [c for c in calls if "item-edit" in " ".join(c)]
+    assert item_edit_calls == [], (
+        f"add_existing_to_board should not call item-edit; got {len(item_edit_calls)} call(s):\n"
+        + "\n".join(" ".join(c) for c in item_edit_calls)
+    )
+
+    # Exactly one gh api graphql call for all three field mutations.
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert len(graphql_calls) == 1, (
+        f"expected exactly 1 gh api graphql call, got {len(graphql_calls)}:\n"
+        + "\n".join(" ".join(c) for c in graphql_calls)
+    )
+
+    # The single mutation carries all three field IDs and their option IDs.
+    joined_mutation = " ".join(graphql_calls[0])
+    assert "PVTSSF_prio" in joined_mutation and "OPTION_high" in joined_mutation, joined_mutation
+    assert "PVTSSF_status" in joined_mutation and "OPTION_up_next" in joined_mutation, (
+        joined_mutation
+    )
+    assert "PVTSSF_ws" in joined_mutation and "OPTION_plan" in joined_mutation, joined_mutation
+
+    # The item-id is embedded in the mutation document.
+    assert "PVTI_abc123" in joined_mutation, joined_mutation
+
+    # Aliased mutation structure: each field has its own alias.
+    assert "setPriority" in joined_mutation, joined_mutation
+    assert "setStatus" in joined_mutation, joined_mutation
 
 
 def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) -> None:
