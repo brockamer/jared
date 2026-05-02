@@ -1,6 +1,6 @@
 [project]
 name = "jared"
-version = "0.8.0"
+version = "0.8.1"
 description = "Jared — GitHub Projects v2 board steward (Claude Code plugin)"
 requires-python = ">=3.11"
 dependencies = [
