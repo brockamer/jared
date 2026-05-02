@@ -1213,6 +1213,51 @@ def test_add_existing_to_board_batches_field_mutations_into_one_graphql_call(
     assert "setStatus" in joined_mutation, joined_mutation
 
 
+def test_tie_stop_words_uses_project_override(tmp_path: Path) -> None:
+    """If docs/project-board.md has a `### Tie Analysis` section with a
+    `- Label stop-words: x, y, z` bullet, those override the built-in defaults."""
+    from skills.jared.scripts.lib.board import Board
+
+    doc = tmp_path / "project-board.md"
+    doc.write_text(
+        "# Project\n\n"
+        "- Project URL: https://github.com/users/x/projects/1\n"
+        "- Project number: 1\n"
+        "- Project ID: PVT_x\n"
+        "- Owner: x\n"
+        "- Repo: x/y\n\n"
+        "### Status\n- Field ID: F1\n- Backlog: A\n- Up Next: B\n"
+        "- In Progress: C\n- Blocked: D\n- Done: E\n\n"
+        "### Priority\n- Field ID: F2\n- High: H\n- Medium: M\n- Low: L\n\n"
+        "### Tie Analysis\n- Label stop-words: chore, wip, draft\n"
+    )
+    board = Board.from_path(doc)
+    assert board.tie_stop_words() == frozenset({"chore", "wip", "draft"})
+    # Defaults are not merged in — override is total.
+    assert "enhancement" not in board.tie_stop_words()
+
+
+def test_tie_stop_words_falls_back_to_defaults(tmp_path: Path) -> None:
+    """No `### Tie Analysis` section → use ties.DEFAULT_LABEL_STOP_WORDS."""
+    from skills.jared.scripts.lib.board import Board
+    from skills.jared.scripts.lib.ties import DEFAULT_LABEL_STOP_WORDS
+
+    doc = tmp_path / "project-board.md"
+    doc.write_text(
+        "# Project\n\n"
+        "- Project URL: https://github.com/users/x/projects/1\n"
+        "- Project number: 1\n"
+        "- Project ID: PVT_x\n"
+        "- Owner: x\n"
+        "- Repo: x/y\n\n"
+        "### Status\n- Field ID: F1\n- Backlog: A\n- Up Next: B\n"
+        "- In Progress: C\n- Blocked: D\n- Done: E\n\n"
+        "### Priority\n- Field ID: F2\n- High: H\n- Medium: M\n- Low: L\n"
+    )
+    board = Board.from_path(doc)
+    assert board.tie_stop_words() == DEFAULT_LABEL_STOP_WORDS
+
+
 def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) -> None:
     """A `### Status` field block following `## Jared config` must not leak
     its option bullets (e.g. `- Backlog: <id>`) into the config dict.
