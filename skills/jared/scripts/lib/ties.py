@@ -10,6 +10,7 @@ design.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -130,4 +131,72 @@ def analyze_milestone_overlap(
                     evidence=f"shares milestone {target.milestone!r}",
                 )
             )
+    return hits
+
+
+# Match #N with word boundary, where N is a positive integer.
+# Not preceded by an alphanumeric (so item123#42 doesn't match) and N is
+# captured. Trailing word boundary handles ", " or end-of-line cleanly.
+_ISSUE_REF_RE = re.compile(r"(?<![A-Za-z0-9])#(\d+)\b")
+
+
+def _strip_fenced_code(text: str) -> str:
+    """Remove triple-fenced code blocks so #N inside code doesn't count."""
+    return re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+
+
+def _refs_in_body(body: str) -> set[int]:
+    """Return the set of #N references in body, excluding fenced code blocks."""
+    if not body:
+        return set()
+    cleaned = _strip_fenced_code(body)
+    return {int(m.group(1)) for m in _ISSUE_REF_RE.finditer(cleaned)}
+
+
+def analyze_cross_references(
+    target: OpenIssueForTies,
+    open_issues: list[OpenIssueForTies],
+    *,
+    direction: Literal["forward", "both"] = "both",
+) -> list[SignalHit]:
+    """Strong signal: target body mentions #N (forward) or #N body mentions
+    target (reverse). Reverse direction skipped when direction='forward'
+    (used in low-budget partial mode where other-issue bodies aren't fetched).
+
+    `#N` inside fenced code blocks is ignored. Word-boundary required so
+    `v1.0` is not `#0`. Multiple mentions of the same issue produce one hit.
+    """
+    target_refs = _refs_in_body(target.body)
+    hits: list[SignalHit] = []
+    seen: set[int] = set()
+
+    for related in open_issues:
+        if related.number == target.number or related.number in seen:
+            continue
+        # Forward: target body → related?
+        if related.number in target_refs:
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="cross_ref",
+                    confidence="strong",
+                    evidence=f"target #{target.number} body mentions #{related.number}",
+                )
+            )
+            seen.add(related.number)
+            continue
+        # Reverse: related body → target?
+        if direction == "both":
+            related_refs = _refs_in_body(related.body)
+            if target.number in related_refs:
+                hits.append(
+                    SignalHit(
+                        related_n=related.number,
+                        name="cross_ref",
+                        confidence="strong",
+                        evidence=f"#{related.number} body mentions target #{target.number}",
+                    )
+                )
+                seen.add(related.number)
+
     return hits
