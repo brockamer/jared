@@ -4,6 +4,7 @@ from skills.jared.scripts.lib.ties import (
     OpenIssueForTies,
     SignalHit,
     analyze_blocked_by,
+    analyze_milestone_overlap,
 )
 
 
@@ -72,3 +73,40 @@ class TestAnalyzeBlockedBy:
         hits = analyze_blocked_by(target, others)
         related_ns = {h.related_n for h in hits}
         assert related_ns == {2, 3}
+
+
+class TestAnalyzeMilestoneOverlap:
+    def test_same_milestone_fires(self) -> None:
+        target = _make_issue(1, milestone="v0.9 — soon")
+        others = [_make_issue(2, milestone="v0.9 — soon")]
+        hits = analyze_milestone_overlap(target, others)
+        assert len(hits) == 1
+        assert hits[0].related_n == 2
+        assert hits[0].confidence == "strong"
+        assert hits[0].name == "milestone"
+        assert "v0.9 — soon" in hits[0].evidence
+
+    def test_different_milestone_no_hit(self) -> None:
+        target = _make_issue(1, milestone="v0.9 — soon")
+        others = [_make_issue(2, milestone="v1.0 — GA")]
+        hits = analyze_milestone_overlap(target, others)
+        assert hits == []
+
+    def test_target_no_milestone_no_hit(self) -> None:
+        target = _make_issue(1, milestone=None)
+        others = [_make_issue(2, milestone="v0.9 — soon")]
+        hits = analyze_milestone_overlap(target, others)
+        assert hits == []
+
+    def test_both_no_milestone_no_hit(self) -> None:
+        """None ≠ None for tie purposes — un-milestoned issues aren't ties."""
+        target = _make_issue(1, milestone=None)
+        others = [_make_issue(2, milestone=None)]
+        hits = analyze_milestone_overlap(target, others)
+        assert hits == []
+
+    def test_self_is_never_a_hit(self) -> None:
+        target = _make_issue(1, milestone="v0.9")
+        others = [_make_issue(1, milestone="v0.9")]
+        hits = analyze_milestone_overlap(target, others)
+        assert hits == []

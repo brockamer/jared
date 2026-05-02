@@ -108,3 +108,26 @@ def analyze_blocked_by(
                 )
             )
     return hits
+
+
+def analyze_milestone_overlap(
+    target: OpenIssueForTies, open_issues: list[OpenIssueForTies]
+) -> list[SignalHit]:
+    """Strong signal: same milestone as target. None ≠ None — un-milestoned
+    issues aren't tied to each other on this signal."""
+    if target.milestone is None:
+        return []
+    hits: list[SignalHit] = []
+    for related in open_issues:
+        if related.number == target.number:
+            continue
+        if related.milestone == target.milestone:
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="milestone",
+                    confidence="strong",
+                    evidence=f"shares milestone {target.milestone!r}",
+                )
+            )
+    return hits
