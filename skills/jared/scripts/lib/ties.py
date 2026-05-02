@@ -78,3 +78,32 @@ class OpenIssueForTies:
     status: str
     priority: str | None
     blocked_by: tuple[int, ...]
+
+
+def analyze_blocked_by(
+    target: OpenIssueForTies, open_issues: list[OpenIssueForTies]
+) -> list[SignalHit]:
+    """Strong signal: native GitHub addBlockedBy edge in either direction."""
+    hits: list[SignalHit] = []
+    for related in open_issues:
+        if related.number == target.number:
+            continue
+        if related.number in target.blocked_by:
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="blocked_by",
+                    confidence="strong",
+                    evidence=f"target #{target.number} is blocked by #{related.number}",
+                )
+            )
+        elif target.number in related.blocked_by:
+            hits.append(
+                SignalHit(
+                    related_n=related.number,
+                    name="blocked_by",
+                    confidence="strong",
+                    evidence=f"#{related.number} is blocked by target #{target.number}",
+                )
+            )
+    return hits
