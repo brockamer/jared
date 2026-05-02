@@ -64,3 +64,11 @@ class TestAnalyzeBlockedBy:
         others = [_make_issue(1, blocked_by=(1,))]
         hits = analyze_blocked_by(target, others)
         assert hits == []
+
+    def test_target_with_multiple_blockers(self) -> None:
+        """All blockers in target.blocked_by produce hits — no short-circuit."""
+        target = _make_issue(1, blocked_by=(2, 3))
+        others = [_make_issue(2), _make_issue(3), _make_issue(4)]
+        hits = analyze_blocked_by(target, others)
+        related_ns = {h.related_n for h in hits}
+        assert related_ns == {2, 3}
