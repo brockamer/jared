@@ -281,6 +281,94 @@ def test_archive_one_still_skips_open_issue(
     assert "[10]" in result
 
 
+def test_check_plan_conv_compliance_returns_empty_when_all_present() -> None:
+    """All required sections present (case-insensitive heading match,
+    'Self-review' or 'Self-review checklist' both count)."""
+    text = (
+        "# Plan\n\n"
+        "## Issue\n\n- #1\n\n"
+        "## Documentation Impact\n\n- README.md\n\n"
+        "## Self-review checklist\n\n- [x] Tests pass\n"
+    )
+    assert ap.check_plan_conv_compliance(text) == []
+
+
+def test_check_plan_conv_compliance_flags_missing_documentation_impact() -> None:
+    text = "# Plan\n\n## Issue\n\n- #1\n\n## Self-review\n\n- [x] Tests pass\n"
+    missing = ap.check_plan_conv_compliance(text)
+    assert "Documentation Impact" in missing
+    assert "Self-review" not in missing
+
+
+def test_check_plan_conv_compliance_flags_missing_self_review() -> None:
+    text = "# Plan\n\n## Issue\n\n- #1\n\n## Documentation Impact\n\n- README.md\n"
+    missing = ap.check_plan_conv_compliance(text)
+    assert "Self-review" in missing
+    assert "Documentation Impact" not in missing
+
+
+def test_check_plan_conv_compliance_flags_both_when_neither_present() -> None:
+    text = "# Plan\n\n## Issue\n\n- #1\n\nJust a body, no required sections.\n"
+    missing = ap.check_plan_conv_compliance(text)
+    assert set(missing) == {"Documentation Impact", "Self-review"}
+
+
+def test_archive_one_warns_to_stderr_when_plan_lacks_required_sections(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warn — do NOT refuse — when plan is missing required sections.
+
+    Refusing would compound parser fragility (#86, #87, #88 backlog of bugs)
+    and break legitimate edge cases (recycled-issue plans, #89). Warning to
+    stderr keeps the operator informed without gating the archival.
+    """
+    plan = _write_plan(tmp_path, "noncompliant.md", [42])
+    # _write_plan creates a plan with `## Issues` and `## Body` only —
+    # neither required section is present.
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue view 42": '{"state": "CLOSED", "closedAt": "2026-05-01T00:00:00Z"}'},
+    )
+
+    result = ap.archive_one(plan, "brockamer/jared", dry_run=True, yes=True)
+
+    captured = capsys.readouterr()
+    # Archival proceeds (dry-run returns the would-be path, not None).
+    assert result is not None
+    # Warning lives on stderr, not stdout — the archival output is on stdout.
+    assert "Documentation Impact" in captured.err
+    assert "Self-review" in captured.err
+    assert "warning" in captured.err.lower() or "missing" in captured.err.lower()
+
+
+def test_archive_one_does_not_warn_when_plan_compliant(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No warning when both required sections are present."""
+    plan = tmp_path / "compliant.md"
+    plan.write_text(
+        "# Plan\n\n"
+        "## Issues\n\n- #42\n\n"
+        "## Documentation Impact\n\n- README.md\n\n"
+        "## Self-review checklist\n\n- [x] Tests pass\n"
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue view 42": '{"state": "CLOSED", "closedAt": "2026-05-01T00:00:00Z"}'},
+    )
+
+    result = ap.archive_one(plan, "brockamer/jared", dry_run=True, yes=True)
+
+    captured = capsys.readouterr()
+    assert result is not None
+    assert "Documentation Impact" not in captured.err
+    assert "Self-review" not in captured.err
+
+
 def test_main_plan_path_surfaces_skip_reason(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
