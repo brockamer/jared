@@ -21,6 +21,8 @@ Flow:
 
    **Never fabricate.** Empty fields stay empty. If you'd have to guess, ask or leave blank.
 
+   **Pre-flight redaction.** Session notes and `## Current state` updates posted via `jared comment` are scanned by the same pre-flight as `jared file`. Drafts referencing private content from `CLAUDE.local.md` will be refused on post — fix the draft, don't fight the redactor. See `references/pii-pre-flight.md`.
+
 3. **Reconcile drift.** Before posting, check for:
    - In Progress items that were actually completed → propose closing
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why
