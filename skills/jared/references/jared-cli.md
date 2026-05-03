@@ -130,19 +130,22 @@ OK: closed #12, board auto-moved to Done
 
 ---
 
-## `jared comment <issue_number> --body-file PATH`
+## `jared comment <issue_number> (--body TEXT | --body-file PATH)`
 
-**Purpose.** Add a comment to an issue. `--body-file -` reads from stdin,
-which is the typical pattern for session notes or anything multi-line.
+**Purpose.** Add a comment to an issue. Three input forms, mutually exclusive:
+`--body "<text>"` for inline content, `--body-file <path>` for a markdown file,
+`--body-file -` to read from stdin (the typical pattern for session notes or
+anything multi-line).
 
 ```
+jared comment <issue_number> --body "Quick one-liner update."
 jared comment <issue_number> --body-file session-note.md
 cat session-note.md | jared comment <issue_number> --body-file -
 ```
 
 ---
 
-## `jared file --title ... --body-file ... --priority ...`
+## `jared file --title ... (--body ... | --body-file ...) --priority ...`
 
 **Purpose.** Atomic create-issue + add-to-board + set-Priority + set-Status
 + post-create verification. Kills the `gh issue create` / `gh project
@@ -157,6 +160,9 @@ jared file \
   --status "Up Next" \
   --label enhancement \
   --field "Work Stream=Planning"
+
+# Or inline body, parity with `gh issue create --body`:
+jared file --title "Quick fix" --body "One-line summary of the bug." --priority Low
 ```
 
 **Arguments:**
@@ -164,7 +170,7 @@ jared file \
 | Flag | Required | Notes |
 |---|---|---|
 | `--title` | yes | Issue title; keep ≤ 70 chars, verb-first. |
-| `--body-file` | yes | Path to the markdown body (see `assets/issue-body.md.template`). |
+| `--body` / `--body-file` | yes (exactly one) | `--body "<text>"` for inline content; `--body-file <path>` for a markdown file; `--body-file -` reads stdin. Mutually exclusive. |
 | `--priority {High,Medium,Low}` | yes | Enforced to avoid filing with null Priority. |
 | `--status` | no | Any Status column. Default: `Backlog`. |
 | `--label` | no | Repeatable. |
