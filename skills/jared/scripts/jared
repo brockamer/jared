@@ -405,6 +405,24 @@ def _cmd_file(args: argparse.Namespace) -> int:
         tf.write(body)
         body_tmp_path = tf.name
 
+    # Round-trip fence: read the staged file back and verify it matches
+    # what we tried to write. Catches a different failure mode than the
+    # gh-error path below — silent staging corruption (filesystem oddity,
+    # future routing surprise) where gh would otherwise succeed with
+    # empty/wrong body and the user gets a corrupt issue with no signal
+    # anything went wrong. Cheap I/O on a tmpfs-backed file.
+    if Path(body_tmp_path).read_text(encoding="utf-8") != body:
+        print(
+            "error: inline --body failed to stage to temp file (round-trip mismatch)",
+            file=sys.stderr,
+        )
+        print(
+            f"  staged at: {body_tmp_path} — retry with --body-file <path>",
+            file=sys.stderr,
+        )
+        Path(body_tmp_path).unlink(missing_ok=True)
+        return 2
+
     create_args = [
         "issue",
         "create",
