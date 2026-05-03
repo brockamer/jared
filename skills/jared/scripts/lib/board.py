@@ -746,6 +746,76 @@ def fetch_blocked_by_edges(
     raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
 
 
+# ---------- Plan/spec issue-ref parsing ----------
+#
+# Shared between archive-plan.py and sweep.py so the two scripts can't
+# disagree on what counts as a referenced issue (#86, #87, #88).
+
+_PLAN_BOLD_ISSUE_LOOKAHEAD = 15
+_PLAN_BOLD_ISSUE_LINE_RE = re.compile(
+    r"^\*\*(?:Tracking\s+)?Issues?:\*\*\s+(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PLAN_ISSUE_REF_RE = re.compile(
+    r"(?:https?://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/(\d+)"
+    r"|(?:[\w.-]+/[\w.-]+)?#(\d+))"
+)
+# A line in the ## Issue section "counts" as a ref-bearing line only if its
+# meaningful content (after an optional list marker) STARTS with a ref —
+# either a bare/qualified `#N`, a GitHub issues/pull URL, or a markdown link
+# to one. Mid-line refs in narrative prose (`Adapter #2 ...`, `**Issue:**
+# [#408](...)`, `> closes #310 ...`) are deliberately ignored — they are
+# the source of #86/#87 false positives.
+_PLAN_LINE_REF_RE = re.compile(
+    r"^[\s]*[-*]?\s*"
+    r"(?:\[)?"  # optional opening of a markdown link `[#N](...)`
+    r"(?:https?://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/(\d+)"
+    r"|(?:[\w.-]+/[\w.-]+)?#(\d+))"
+)
+
+
+def parse_referenced_issues(plan_text: str) -> list[int]:
+    """Extract issue numbers from a plan/spec.
+
+    Primary source: a `## Issue` / `## Issues` / `## Issue(s)` section. Inside
+    that section, only lines whose meaningful content STARTS with a ref count
+    — list-item form (`- #42`, `* https://github.com/.../issues/42`) and
+    bare line-start form (`#229 — Metric Layer C.0`) both qualify.
+    Mid-line refs in prose, blockquotes, or bold lines are skipped.
+
+    Fallback (when no `## Issue` heading is present): a `**Issue:**` /
+    `**Issues:**` / `**Tracking issue:**` bold line near the top of the file
+    (within the first `_PLAN_BOLD_ISSUE_LOOKAHEAD` lines). The fallback path
+    accepts inline ref lists since the bold line itself is the ref carrier
+    — there's no risk of swallowing prose paragraphs.
+
+    Refs in `#N`, `owner/repo#N`, and full GitHub issue/pull URL forms.
+    Heading wins when both forms are present.
+    """
+    section_match = re.search(
+        r"^#{1,3}\s+Issue[s()]*\s*$([\s\S]+?)(?=^#{1,3}\s|\Z)",
+        plan_text,
+        re.MULTILINE,
+    )
+    if section_match:
+        refs: list[int] = []
+        for line in section_match.group(1).splitlines():
+            m = _PLAN_LINE_REF_RE.match(line)
+            if not m:
+                continue
+            for g in m.groups():
+                if g:
+                    refs.append(int(g))
+                    break
+        return refs
+
+    head = "\n".join(plan_text.splitlines()[:_PLAN_BOLD_ISSUE_LOOKAHEAD])
+    bold = _PLAN_BOLD_ISSUE_LINE_RE.search(head)
+    if not bold:
+        return []
+    return [int(n) for ref in _PLAN_ISSUE_REF_RE.findall(bold.group(1)) for n in ref if n]
+
+
 def check_closed_not_done(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Closed issues should auto-move to Done. If they don't, return them.
 
