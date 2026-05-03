@@ -1036,6 +1036,41 @@ class RedactionReport:
         return not self.matches
 
 
+# Lines shorter than this (post-strip) are too generic to be useful private content.
+_MIN_PHRASE_CHARS = 20
+# Phrases with fewer words than this match too eagerly (any common word in a
+# local file would flag the body).
+_MIN_PHRASE_WORDS = 3
+# Markdown-leader characters stripped from line starts before length checks.
+_MARKDOWN_LEADER_RE = re.compile(r"^[\s\-\*\>#\|`]+")
+
+
+def _extract_phrases(file_path: Path) -> list[str]:
+    """Extract candidate phrases from one gitignored claude-shaped file.
+
+    A phrase is a line of the file that — after stripping markdown leaders
+    (`-`, `*`, `>`, `#`, `|`, backticks, leading whitespace) — has at least
+    `_MIN_PHRASE_WORDS` whitespace-separated words AND at least
+    `_MIN_PHRASE_CHARS` characters. Returns the cleaned phrases in file order.
+
+    Missing file → empty list, not an exception (the caller has already
+    decided this file is in scope; we don't want to second-guess).
+    """
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        return []
+    out = []
+    for raw in text.splitlines():
+        cleaned = _MARKDOWN_LEADER_RE.sub("", raw).rstrip()
+        if len(cleaned) < _MIN_PHRASE_CHARS:
+            continue
+        if len(cleaned.split()) < _MIN_PHRASE_WORDS:
+            continue
+        out.append(cleaned)
+    return out
+
+
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     """Scan body against gitignored claude-shaped files; return a structured report.
 
