@@ -1106,6 +1106,36 @@ def _find_claude_shaped_files(project_root: Path) -> list[Path]:
     return found
 
 
+def _read_tracked_content(project_root: Path) -> str:
+    """Concatenate every tracked file's content into one searchable blob.
+
+    `git ls-files` enumerates tracked paths. We read each and join into
+    one string so the allowlist check is a single `phrase in tracked` per
+    candidate phrase. Decoding errors on binary files are swallowed —
+    binary files can't contain text phrases anyway.
+    """
+    if not (project_root / ".git").exists():
+        return ""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    chunks = []
+    for relpath in out.splitlines():
+        f = project_root / relpath
+        try:
+            chunks.append(f.read_text(encoding="utf-8"))
+        except (FileNotFoundError, UnicodeDecodeError, IsADirectoryError):
+            continue
+    return "\n".join(chunks)
+
+
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     """Scan body against gitignored claude-shaped files; return a structured report.
 
@@ -1116,10 +1146,14 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     if not files:
         return RedactionReport(matches=[], scanned_files=[])
 
-    # Index every candidate phrase to its source file for diagnostic output.
+    tracked = _read_tracked_content(project_root)
+
     phrase_to_source: dict[str, Path] = {}
     for f in files:
         for phrase in _extract_phrases(f):
+            # Allowlist: a phrase already in any tracked file is public.
+            if tracked and phrase in tracked:
+                continue
             phrase_to_source.setdefault(phrase, f)
 
     matches: list[RedactionMatch] = []
@@ -1136,5 +1170,5 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
                             source_file=source,
                         )
                     )
-                    break  # first hit per phrase is enough
+                    break
     return RedactionReport(matches=matches, scanned_files=files)

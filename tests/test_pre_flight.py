@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from skills.jared.scripts.lib.board import (
@@ -178,3 +179,53 @@ def test_pre_flight_check_records_line_number(tmp_path: Path) -> None:
     body = "line 1\nline 2\nthe deploy host is internal-foo-7.corp.example\nline 4\n"
     report = pre_flight_check(body, project_root=tmp_path)
     assert report.matches[0].line_no == 3
+
+
+def _git_init_with_tracked(tmp_path: Path, tracked_files: dict[str, str]) -> None:
+    """Initialize a git repo at tmp_path with the given files tracked."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    for relpath, content in tracked_files.items():
+        f = tmp_path / relpath
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content)
+        subprocess.run(["git", "add", relpath], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+
+def test_pre_flight_check_allowlists_phrase_present_in_tracked_README(
+    tmp_path: Path,
+) -> None:
+    """A phrase that lives in CLAUDE.local.md AND in a tracked README is
+    already public; the redactor must not flag it."""
+    _git_init_with_tracked(
+        tmp_path,
+        {"README.md": "Our deploy host is internal-foo-7.corp.example.\n"},
+    )
+    (tmp_path / "CLAUDE.local.md").write_text("Our deploy host is internal-foo-7.corp.example.\n")
+    body = "Issue: Our deploy host is internal-foo-7.corp.example. is flaky.\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert report.clean, (
+        f"phrase that exists in tracked README is allowlisted; got matches: {report.matches}"
+    )
+
+
+def test_pre_flight_check_flags_phrase_only_in_gitignored_file(
+    tmp_path: Path,
+) -> None:
+    """The same phrase, but only in CLAUDE.local.md (not in any tracked file),
+    must be flagged."""
+    _git_init_with_tracked(
+        tmp_path,
+        {"README.md": "Public-safe content only.\n"},
+    )
+    (tmp_path / "CLAUDE.local.md").write_text("Our deploy host is internal-foo-7.corp.example.\n")
+    body = "Issue: Our deploy host is internal-foo-7.corp.example. is flaky.\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert not report.clean
+    assert report.matches[0].matched_phrase.startswith("Our deploy host")
