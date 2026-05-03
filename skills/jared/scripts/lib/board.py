@@ -760,18 +760,49 @@ _PLAN_ISSUE_REF_RE = re.compile(
     r"(?:https?://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/(\d+)"
     r"|(?:[\w.-]+/[\w.-]+)?#(\d+))"
 )
-# A line in the ## Issue section "counts" as a ref-bearing line only if its
-# meaningful content (after an optional list marker) STARTS with a ref —
-# either a bare/qualified `#N`, a GitHub issues/pull URL, or a markdown link
-# to one. Mid-line refs in narrative prose (`Adapter #2 ...`, `**Issue:**
-# [#408](...)`, `> closes #310 ...`) are deliberately ignored — they are
-# the source of #86/#87 false positives.
+# A line in the ## Issue / ## Shipped section "counts" as a ref-bearing line
+# only if it's either:
+#   1. a bare line-start ref (`#229 — Metric Layer C.0`, no list marker), or
+#   2. a list item (`- ...`/`* ...`) whose first content is a ref, optionally
+#      preceded by a `PR ` / `Issue ` label (e.g. `- PR #415`).
+#
+# Mid-line refs in narrative prose are deliberately ignored — they are the
+# source of #86/#87 false positives. The label is gated behind a list marker
+# so a bare prose line like `Issue #99 supersedes this work.` cannot match.
 _PLAN_LINE_REF_RE = re.compile(
-    r"^[\s]*[-*]?\s*"
+    r"^[\s]*"
+    r"(?:[-*]\s+(?:(?:PR|Issue)\s+)?)?"  # optional list marker + optional PR/Issue label
     r"(?:\[)?"  # optional opening of a markdown link `[#N](...)`
     r"(?:https?://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/(\d+)"
-    r"|(?:[\w.-]+/[\w.-]+)?#(\d+))"
+    r"|(?:[\w.-]+/[\w.-]+)?#(\d+))",
+    re.IGNORECASE,
 )
+
+
+def _parse_plan_section(plan_text: str, heading_pattern: str) -> list[int] | None:
+    """Find a heading-bounded section and return line-start refs from its body.
+
+    Returns None if the heading is absent — distinguishes "section missing"
+    from "section present but empty" so callers can fall back to alternate
+    parsers (e.g. the `**Issue:**` bold-line fallback).
+    """
+    section_match = re.search(
+        rf"^{heading_pattern}\s*$([\s\S]+?)(?=^#{{1,3}}\s|\Z)",
+        plan_text,
+        re.MULTILINE,
+    )
+    if not section_match:
+        return None
+    refs: list[int] = []
+    for line in section_match.group(1).splitlines():
+        m = _PLAN_LINE_REF_RE.match(line)
+        if not m:
+            continue
+        for g in m.groups():
+            if g:
+                refs.append(int(g))
+                break
+    return refs
 
 
 def parse_referenced_issues(plan_text: str) -> list[int]:
@@ -792,21 +823,8 @@ def parse_referenced_issues(plan_text: str) -> list[int]:
     Refs in `#N`, `owner/repo#N`, and full GitHub issue/pull URL forms.
     Heading wins when both forms are present.
     """
-    section_match = re.search(
-        r"^#{1,3}\s+Issue[s()]*\s*$([\s\S]+?)(?=^#{1,3}\s|\Z)",
-        plan_text,
-        re.MULTILINE,
-    )
-    if section_match:
-        refs: list[int] = []
-        for line in section_match.group(1).splitlines():
-            m = _PLAN_LINE_REF_RE.match(line)
-            if not m:
-                continue
-            for g in m.groups():
-                if g:
-                    refs.append(int(g))
-                    break
+    refs = _parse_plan_section(plan_text, r"#{1,3}\s+Issue[s()]*")
+    if refs is not None:
         return refs
 
     head = "\n".join(plan_text.splitlines()[:_PLAN_BOLD_ISSUE_LOOKAHEAD])
@@ -814,6 +832,20 @@ def parse_referenced_issues(plan_text: str) -> list[int]:
     if not bold:
         return []
     return [int(n) for ref in _PLAN_ISSUE_REF_RE.findall(bold.group(1)) for n in ref if n]
+
+
+def parse_shipped_section(plan_text: str) -> list[int]:
+    """Extract PR numbers from a `## Shipped` section.
+
+    Same line-start rules as `parse_referenced_issues`. Used by archive-plan
+    to support recycled-issue plans (#89): a plan that shipped via a merged
+    PR but whose originally-tracked issue was rewritten to track follow-on
+    work can still be archived by declaring shipping evidence explicitly.
+
+    Returns an empty list if no `## Shipped` section is present.
+    """
+    refs = _parse_plan_section(plan_text, r"#{1,3}\s+Shipped")
+    return refs if refs is not None else []
 
 
 def check_closed_not_done(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
