@@ -1009,3 +1009,37 @@ def resolve_body(body: str | None, body_file: str | None) -> str:
     if body_file == "-":
         return sys.stdin.read()
     return Path(body_file).read_text()
+
+
+# ---------- PII pre-flight redactor (#102) ----------
+
+
+@dataclass
+class RedactionMatch:
+    """One body line that matched a phrase from a gitignored claude-shaped file."""
+
+    line_no: int
+    line_text: str
+    matched_phrase: str
+    source_file: Path
+
+
+@dataclass
+class RedactionReport:
+    """Result of pre_flight_check. Pure data; caller decides how to react."""
+
+    matches: list[RedactionMatch]
+    scanned_files: list[Path]
+
+    @property
+    def clean(self) -> bool:
+        return not self.matches
+
+
+def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
+    """Scan body against gitignored claude-shaped files; return a structured report.
+
+    Skeleton — returns a clean report unconditionally. Subsequent tasks fill
+    in phrase extraction, file discovery, allowlist filtering, and caching.
+    """
+    return RedactionReport(matches=[], scanned_files=[])
