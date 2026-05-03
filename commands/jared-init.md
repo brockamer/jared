@@ -66,4 +66,18 @@ Flow:
 
 This is a one-time event per project. From here on, routine discipline (`/jared-wrap`, `/jared-groom`, triggers) keeps the project in shape without another migration.
 
+## Surfaces jared-init does NOT bootstrap
+
+Jared bootstraps the **board convention doc** and migrates board-adjacent legacy patterns. It does not author other Claude Code surfaces — those belong to sibling skills. When `/jared-init` notices a missing surface outside its lane, defer to the appropriate skill rather than offer to write it:
+
+| Missing surface | Defer to | Skill / command |
+|---|---|---|
+| `CLAUDE.md` not present | `/init` (the built-in command) | n/a (built-in) |
+| `CLAUDE.md` audit / quality / improvements | `claude-md-improver` skill | `claude-md-management:claude-md-improver` |
+| `~/.claude/settings.json`, hooks, env vars | `update-config` skill | `update-config` |
+| Keybindings / chord shortcuts | `keybindings-help` skill | `keybindings-help` |
+| Auto-memory entries | (system-managed; no skill writes here) | n/a |
+
+The discipline is mutual: those skills don't write to the project board, and Jared doesn't write to the surfaces they own. Two writers diverge. See `SKILL.md` § "The lane" for the broader contract.
+
 Install as a user-scope plugin (`/plugin install jared`) so `/jared-init` is available in any project you touch.
