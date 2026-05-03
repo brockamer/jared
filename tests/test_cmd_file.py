@@ -786,6 +786,16 @@ def test_cmd_file_clean_when_no_claude_local(
     — this guards every existing test in this file. Without this guarantee,
     the existing 13 tests would all break the moment Task 8 lands."""
     board_md = _write_full_board(tmp_path)
+
+    # Isolate from pytest's cwd — without this, a stray CLAUDE.local.md at
+    # the repo root would trip this regression guard test. tmp_path has no
+    # .git/, no CLAUDE.local.md, so the redactor is a guaranteed no-op.
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
     # No CLAUDE.local.md, no .git/. The existing _routed_fake gives us a
     # clean filing path; pre_flight_check should return empty, gh proceeds.
     calls = _routed_fake(monkeypatch)
