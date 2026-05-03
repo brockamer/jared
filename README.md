@@ -26,6 +26,35 @@ house uses the same model — `Backlog / Up Next / In Progress / Blocked /
 Done` — with work streams like *Demo*, *Rough-in*, *Finish*. The
 invariants are identical.
 
+## Where the discipline comes from
+
+Jared is a software-engineering translation of **Personal Kanban**, the
+two-rule visual-management framework Jim Benson and Tonianne DeMaria
+introduced in *Personal Kanban: Mapping Work | Navigating Life*
+(Modus Cooperandi Press, 2011). The rules are deliberately small:
+
+1. **Visualize your work.**
+2. **Limit your work-in-progress.**
+
+Everything else is consequence. The first rule turns information you'd
+otherwise carry in your head into something you can scan in two seconds;
+the second forces you to finish before you start.
+
+> "Set limits to stay within capacity." — [Modus Cooperandi](https://moduscooperandi.com/)
+
+In a software-engineering context the sticky note on the wall is a
+GitHub issue, the wall is a GitHub Projects v2 board, and the column
+transitions happen via API mutations Claude can execute atomically. The
+discipline outlives any single chat because the state lives in GitHub,
+not in your conversation history.
+
+The two rules map directly onto what Jared enforces:
+
+| Personal Kanban rule | How Jared enforces it |
+|---|---|
+| **Visualize your work** | Every issue has Status + Priority the moment it lands; `jared file` is atomic, so nothing is "filed but invisible". `Blocked` is a Status column with a `## Blocked by` body section, not a stray label. Plans cite issues, issues link back. |
+| **Limit your work-in-progress** | In Progress caps at ~3 by default; `/jared-groom` flags scattered focus and stalled items; `/jared-start` is the only sanctioned way to add to In Progress, and it expects the previous session's `## Session` note to be closed out. |
+
 ## Working in Claude Code, with vs. without Jared
 
 | | Without Jared | With Jared |
