@@ -1,80 +1,233 @@
 # Jared
 
-A Claude Code plugin that stewards a GitHub Projects v2 board as the single
-source of truth for what's being worked on.
+A Claude Code plugin that turns a GitHub Projects v2 board into the single
+source of truth for what's being worked on — with a discipline that
+survives across sessions, weeks, and shifts in scope.
 
-<p align="center">
-  <a href="docs/field-notes-full.png">
-    <img src="docs/field-notes-full.png"
-         alt="Jared — Field Notes: the board is a mirror of reality, not a plan. Click to expand."
-         width="480">
-  </a>
-  <br>
-  <em>Field Notes — why Jared exists. Click to expand.</em>
-</p>
-
-Project boards drift. Scope gets captured in `TODO:` comments and
-`tmp/next-session-prompt.md` files. Issues land on the board with a null
-Status field and sort to the bottom of every view, effectively invisible.
-Plans approved three weeks ago no longer match the code. By month two the
-board is decorative and planning has quietly moved elsewhere.
-
-Jared makes the board unignorable. Every board operation that would
-otherwise be a multi-step `gh` dance is a single atomic call that fails
-loudly instead of leaving the board half-updated. `jared file` is one
-invocation — create the issue, add it to the project, set Priority and
-Status, verify. There is no path to "on the board but invisible".
-
-**Status.** v0.2.0, pre-1.0. The plugin's own development runs on a
-Jared-stewarded project board; a dedicated `brockamer/jared-testbed`
-repo backs the integration tests.
+> Project boards drift. Scope leaks into `TODO:` comments and
+> `tmp/next-session-prompt.md` files. Plans approved three weeks ago no
+> longer match the code. By month two the board is decorative and real
+> status lives in your head. **Jared makes the board the thing you
+> actually look at.**
 
 ---
 
-## What it does
+## What it's for
 
-Slash commands cover the full work cycle. Use them directly, or let the
-skill fire its own triggers mid-conversation when drift signals show up
-("let me refactor X", "I noticed", "I'll file that later").
+Long-running work on a complex project — features that take more than one
+sitting, bugs surfaced mid-refactor, plans that need to outlast the
+session that wrote them. Anywhere the work is bigger than your working
+memory, Jared keeps the board in lockstep with reality so you (and any
+agent picking up the work) can resume from the board instead of from
+recollection.
 
-| Command | What it does |
+It works just as well on non-software projects. A kanban for renovating a
+house uses the same model — `Backlog / Up Next / In Progress / Blocked /
+Done` — with work streams like *Demo*, *Rough-in*, *Finish*. The
+invariants are identical.
+
+## Where the discipline comes from
+
+Jared is a software-engineering translation of **Personal Kanban**, the
+two-rule visual-management framework Jim Benson and Tonianne DeMaria
+introduced in *Personal Kanban: Mapping Work | Navigating Life*
+(Modus Cooperandi Press, 2011). The rules are deliberately small:
+
+1. **Visualize your work.**
+2. **Limit your work-in-progress.**
+
+Everything else is consequence. The first rule turns information you'd
+otherwise carry in your head into something you can scan in two seconds;
+the second forces you to finish before you start.
+
+> "Set limits to stay within capacity." — [Modus Cooperandi](https://moduscooperandi.com/)
+
+In a software-engineering context the sticky note on the wall is a
+GitHub issue, the wall is a GitHub Projects v2 board, and the column
+transitions happen via API mutations Claude can execute atomically. The
+discipline outlives any single chat because the state lives in GitHub,
+not in your conversation history.
+
+The two rules map directly onto what Jared enforces:
+
+| Personal Kanban rule | How Jared enforces it |
 |---|---|
-| `/jared` | Fast read-only status — In Progress, top of Up Next, blocked, aging. |
-| `/jared-file` | File a new issue with full metadata, atomically. |
-| `/jared-start` | Begin work on an issue — move to In Progress, load body + latest Session note + linked plan, announce the session plan. |
-| `/jared-groom` | Routine sweep — metadata, WIP, aging, pullable check, plan/spec drift. Proposes; you approve. |
-| `/jared-wrap` | End of session — append Session notes to touched issues, reconcile drift, propose plan archivals. |
-| `/jared-reshape` | Structural review — shape, phasing, milestones, dependencies, long-horizon arc. |
-| `/jared-init` | Bootstrap Jared on a new project — introspect a board, write `docs/project-board.md`, create missing fields. |
+| **Visualize your work** | Every issue has Status + Priority the moment it lands; `jared file` is atomic, so nothing is "filed but invisible". `Blocked` is a Status column with a `## Blocked by` body section, not a stray label. Plans cite issues, issues link back. |
+| **Limit your work-in-progress** | In Progress caps at ~3 by default; `/jared-groom` flags scattered focus and stalled items; `/jared-start` is the only sanctioned way to add to In Progress, and it expects the previous session's `## Session` note to be closed out. |
 
-Under the hood, a unified Python CLI (`skills/jared/scripts/jared`) owns
-the error-prone multi-step operations: `file`, `move`, `set`, `close`,
-`comment`, `blocked-by`, `get-item`, `summary`. When the GitHub MCP
-plugin is loaded, the skill prefers its typed tools for single-call ops;
-the CLI handles everything multi-step. Raw `gh` is a last resort.
+## Working in Claude Code, with vs. without Jared
 
-## What it enforces
+| | Without Jared | With Jared |
+|---|---|---|
+| **Starting a session** | "What were we doing?" Re-read CLAUDE.md and any `tmp/next-session-prompt.md` you remembered to write last time. | `/jared` shows In Progress, top of Up Next, what's blocked, what's aging — in two seconds. `/jared-start <N>` loads issue body + latest Session note + linked plan. |
+| **Mid-session scope discovery** | "We should also fix X" — either filed as an issue you'll forget about, or done inline and lost in the diff. | The skill triggers on phrases like *"let me refactor X"*, *"I noticed"*, *"I'll file that later"*. `jared file` opens an issue with Priority + Status set atomically before the change happens. |
+| **Plans** | Approved at one moment in time, then drift from the code as decisions change during implementation. Stranded in `docs/plans/` after shipping. | Plans cite the issue (`## Issue` or `**Issue:** #N`); decisions made during implementation are captured on the issue. `/jared-wrap` proposes archiving plans whose work has shipped. |
+| **Ending a session** | Manually write a handoff prompt — or skip it and lose the context. | `/jared-wrap` appends a structured `## Session YYYY-MM-DD` note (Progress / Decisions / Next action / Gotchas / State) to every issue touched. Next session reads from the issue. |
+| **Two months in** | Board half-decorative, items with `Status=null` floating off the kanban, `## Blocked by` written as a label that nobody's filtering for. | Daily `/jared-groom` flags drift before it accumulates: missing metadata, WIP-cap violations, aging items, stale plans, native-dependency hygiene. Nothing silent. |
+| **Cross-session continuity** | Lives in your head. | Lives on the board, in Session notes on issues, in the Status column. Any agent — Sonnet, Opus, you next Tuesday — picks up the same context. |
 
-The board model isn't just documented — the CLI validates it.
+The shape Jared enforces makes this work:
 
-- **Five Status columns:** `Backlog` / `Up Next` / `In Progress` /
-  `Blocked` / `Done`. Blocked is a column, never a label.
-- **Status + Priority required** on every issue the moment it lands on
-  the board. `jared file` sets them atomically or fails.
-- **Blocked-by is a native GitHub issue dependency** (the
-  `addBlockedBy` / `removeBlockedBy` GraphQL mutations), not a comment
-  convention.
-- **Plans cite issues, issues link back.** Plans archive into
-  `archived/YYYY-MM/` when the issue ships. Decisions made during
-  implementation are captured on the issue, not stranded in a plan file
-  that was frozen at approval time.
-- **Session notes replace handoff prompts.** `/jared-wrap` appends a
-  structured Progress / Decisions / Next action note to every issue
-  touched this session. Next session reads the note from the issue — no
-  `tmp/next-session-prompt.md` detour.
-- **WIP and aging** are enforced with light-touch flagging. In Progress
-  caps at the project's configured limit; items with no activity in 7
-  days get flagged; Jared never silently re-prioritizes.
+- **Five Status columns.** `Backlog / Up Next / In Progress / Blocked / Done`. Blocked is a column, never a label.
+- **Status + Priority required** the moment an issue lands. `jared file` fails loudly rather than leave the board half-updated.
+- **Blocked-by is a native GitHub dependency** (`addBlockedBy`/`removeBlockedBy` GraphQL), not a comment convention.
+- **WIP cap on In Progress.** More than ~3 items means focus is scattered; the groom flags it.
+
+---
+
+## A typical week
+
+| When | Command | Why |
+|---|---|---|
+| Once a week (Mon morning) | `/jared-reshape` | Structural review — shape, phasing, milestones, dependencies, long-horizon arc. Catches drift the daily groom can't see. |
+| Every day | `/jared-groom` | Routine sweep — metadata completeness, WIP cap, aging items, pullable check, plan/spec drift, label hygiene. Advisory; you approve each proposed change. |
+| Per work session — start | `/jared` then `/jared-start <N>` | `/jared` orients in 2 seconds. `/jared-start` moves the issue to In Progress and loads everything you need to resume. |
+| Per work session — end | `/jared-wrap` | Captures Progress / Decisions / Next action on every touched issue. Files any discovered scope. Proposes plan archivals. |
+| As scope arrives | `/jared-file` | One atomic operation: create issue, add to board, set Priority + Status, verify. No "filed but invisible" state. |
+
+### What the cycle looks like
+
+<details>
+<summary><strong>Excerpt — <code>/jared</code> at session start</strong></summary>
+
+```
+Where we are (2026-05-03):
+
+In Progress (1/3):
+  #89 [Low] feat(archive-plan): support recycled-issue plans
+    Last session: "Add ## Shipped section parser to lib/board.py; tests next"
+
+Up Next (top 3):
+  #76 [Medium] Jared roadmap — open strategic questions — pullable: yes
+  #80 [Medium] feat(ties): LLM-pass overlay for semantic ties — pullable: yes
+  #67 [Low] verify: #22 rate-limit fix smoke results on findajob — pullable: yes
+
+Blocked:
+  #60 — waiting on findajob measurement run for post-#51/#55 GraphQL delta
+
+Aging: none
+Totals: 6 open (0 H / 3 M / 3 L)
+```
+
+</details>
+
+<details>
+<summary><strong>Excerpt — <code>/jared-start 89</code></strong></summary>
+
+```
+Started #89 — feat(archive-plan): support recycled-issue plans via ## Shipped section
+  Status: Backlog → In Progress
+  Priority: Low
+  Linked plan: docs/superpowers/plans/2026-05-03-89-shipped-section.md
+  Latest Session note (2026-05-02):
+    Progress: Designed ## Shipped section convention; reviewed bug repros.
+    Next action: Add parse_shipped_section to lib/board.py with same
+                 line-start rules as parse_referenced_issues.
+    Gotchas: PR/Issue label needs to be gated behind a list marker or
+             we re-open the #87 false-positive class.
+  Branch: feature/89-shipped-section-archival
+```
+
+Session plan announced. Picking up from the documented Next action.
+
+</details>
+
+<details>
+<summary><strong>Excerpt — <code>/jared-file</code> mid-session, scope discovered</strong></summary>
+
+```
+You: "Hmm, the regex relaxation here re-opens the #87 prose-match bug
+      if I don't gate the label behind a list marker. Let me file that as
+      a sub-concern so we don't lose it."
+
+  → jared file --title "bug: PR/Issue label gating in plan-line ref regex"
+                --body-file /tmp/issue.md --priority Medium
+
+OK: filed #94 → Backlog, Priority=Medium
+URL: https://github.com/brockamer/jared/issues/94
+```
+
+The conversation continues. The scope is on the board, not in your head.
+
+</details>
+
+<details>
+<summary><strong>Excerpt — <code>/jared-groom</code></strong></summary>
+
+```
+Sweep for https://github.com/users/brockamer/projects/4
+Run at: 2026-05-03T13:42:00+00:00
+
+Open items on board: 6
+Open issues in brockamer/jared: 6
+
+== Metadata completeness ==
+  All open items have required metadata
+
+== WIP (In Progress cap = 3) ==
+  Healthy
+
+== Stale High-priority Backlog (>14d) ==
+  None
+
+== Stalled In Progress (>7d no activity) ==
+  None
+
+== Blocked-status hygiene (>7d) ==
+  #60: in Blocked status with no activity for 9 days
+
+== Plan/spec drift ==
+  docs/superpowers/plans/2026-05-03-89-shipped-section.md:
+    all referenced issues closed ([89]) — propose archiving
+
+== Closed items not on Done ==
+  None
+
+Sweep complete. Advisory only — review and propose before applying.
+```
+
+You approve each proposed change individually. The groom never silently mutates state.
+
+</details>
+
+<details>
+<summary><strong>Excerpt — <code>/jared-wrap</code> at session end</strong></summary>
+
+```
+Touched this session: #89
+
+Proposed Session note for #89:
+
+  ## Session 2026-05-03
+
+  **Progress:** Implemented ## Shipped section archival path. Added
+  parse_shipped_section to lib/board.py via shared _parse_plan_section
+  helper. Tightened _PLAN_LINE_REF_RE to gate the PR/Issue label behind
+  a list marker. PR #93 merged.
+
+  **Decisions:** Shipped takes priority over ## Issue when both are
+  present — explicit shipping evidence beats potentially-recycled refs.
+
+  **Next action:** None — issue shipped.
+
+  **Gotchas:** Advisor caught the label-gating regression before push;
+  test_parse_referenced_issues_ignores_prose_line_starting_with_issue_label
+  locks it in.
+
+  **State:** Branch deleted; main tagged v0.9.0.
+
+Apply? [Y/n] y
+  Appended Session note to #89.
+
+Discovered scope filed this session: none.
+
+Plans ready to archive:
+  docs/superpowers/plans/2026-05-03-89-shipped-section.md → archived/2026-05/
+Archive? [Y/n] y
+  Archived. Updated #89 ## Planning section.
+```
+
+</details>
 
 ---
 
@@ -85,38 +238,66 @@ The board model isn't just documented — the CLI validates it.
 /plugin install jared
 ```
 
-Then in any project with a `docs/project-board.md`, use `/jared` for a
-fast status or the workflow commands above.
+In any project with a `docs/project-board.md`, use `/jared` for status or
+the workflow commands above.
 
 ## Bootstrap on a new project
 
 If a project has no `docs/project-board.md` yet, run `/jared-init` to
 pair the repo with an existing (or new) GitHub Projects v2 board. The
 bootstrap introspects the board's field schema and writes a convention
-doc with the project ID, field IDs, and single-select option IDs. The
-CLI reads that file on every invocation — it's the contract between
-Jared and the board.
-
-Non-software projects work the same way. A kanban board for renovating
-a house uses the same model — the work streams are "Demo", "Rough-in",
-"Finish", the invariants are identical.
+doc with the project ID, field IDs, and option IDs. The CLI reads that
+file on every invocation — it's the contract between Jared and the board.
 
 ---
 
+## Under the hood
+
+Slash commands sit on top of a unified Python CLI
+(`skills/jared/scripts/jared`) that owns the multi-step operations:
+`file`, `move`, `set`, `close`, `comment`, `blocked-by`, `add-to-board`,
+`get-item`, `summary`, `ties`. Each subcommand is atomic — `file`
+guarantees "issue exists AND on board AND Status set" or fails with a
+non-zero exit.
+
+When the GitHub MCP plugin is loaded, the skill prefers its typed tools
+for single-call ops; the CLI handles everything multi-step. Raw `gh` is
+the last resort.
+
+The plugin's own development runs on a Jared-stewarded board; integration
+tests target a dedicated `brockamer/jared-testbed` repo.
+
+---
+
+## Reference cards
+
 <details>
-<summary><strong>Pocket reference</strong> — install snippets, triggers, the five board states, the Session-note template, anti-patterns. Click to open.</summary>
+<summary><strong>Field Notes</strong> — why Jared exists, in one page (click to expand image)</summary>
+
+<p align="center">
+  <a href="docs/field-notes-full.png">
+    <img src="docs/field-notes-full.png"
+         alt="Jared — Field Notes: the board is a mirror of reality, not a plan."
+         width="320">
+  </a>
+</p>
+
+</details>
+
+<details>
+<summary><strong>Pocket Reference</strong> — install, triggers, board states, session-note template, anti-patterns (click to expand image)</summary>
 
 <p align="center">
   <a href="docs/pocket-reference-full.png">
     <img src="docs/pocket-reference-full.png"
-         alt="Jared — Pocket Reference: install, triggers, board states, session-note template, anti-patterns. Click to expand."
-         width="560">
+         alt="Jared — Pocket Reference: install, triggers, board states, session-note template, anti-patterns."
+         width="320">
   </a>
-  <br>
-  <em>Click the image for full-resolution.</em>
 </p>
 
 </details>
+
+---
 
 ## Developing
 
@@ -157,9 +338,9 @@ skills/jared/
   references/           Detail docs loaded on demand
   scripts/
     jared               Unified CLI: file, move, set, close, comment,
-                        blocked-by, get-item, summary
+                        blocked-by, add-to-board, get-item, summary, ties
     lib/board.py        Shared helper: board parsing, gh wrapper,
-                        item-id lookup
+                        item-id lookup, plan-issue-ref parser
     sweep.py            Routine grooming sweep
     bootstrap-project.py  Introspect a board; write docs/project-board.md
     dependency-graph.py   Render issue-dependency graph
@@ -174,7 +355,7 @@ docs/                   Field Notes + Pocket Reference + plugin's own
 ## Versioning
 
 Semantic versioning in `.claude-plugin/plugin.json`. Git tag `v<x.y.z>`
-per release.
+per release. Currently **v0.9.0**.
 
 ## License
 
