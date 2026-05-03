@@ -183,6 +183,15 @@ def guess_repo_from_items(items: list[dict[str, Any]]) -> str | None:
 # ---------- Checks ----------
 
 
+# Items can land on the board with no column assignment (auto-add-to-project
+# workflow, manual API call without a Status set). `gh project item-list
+# --format json` surfaces those as missing-key, None, "", or — depending on
+# gh version and field configuration — as a display string like "No Status".
+# Whitelist-validate against the known kanban column names so all four
+# shapes get flagged uniformly. (#85)
+VALID_STATUSES = frozenset({"Backlog", "Up Next", "In Progress", "Blocked", "Done"})
+
+
 def check_metadata(items: list[dict[str, Any]]) -> list[str]:
     # Detect whether Work Stream is in use on this board. If no open item
     # has Work Stream set, assume the project doesn't define the field and
@@ -203,9 +212,9 @@ def check_metadata(items: list[dict[str, Any]]) -> list[str]:
         n = content.get("number")
         prio = field(i, "priority")
         ws = field(i, "work Stream", "workStream", "workstream")
-        status = i.get("status") or ""
+        status = i.get("status")
         issues = []
-        if not status:
+        if status not in VALID_STATUSES:
             issues.append("no Status")
         if not prio:
             issues.append("no Priority")

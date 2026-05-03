@@ -72,6 +72,71 @@ def test_check_closed_not_done_ignores_missing_content() -> None:
     assert stuck[0]["number"] == 5
 
 
+def test_check_metadata_flags_missing_status_key() -> None:
+    mod = import_sweep()
+    items = [{"content": {"number": 999, "title": "x"}, "priority": "Low"}]
+    assert mod.check_metadata(items) == ["#999: no Status"]
+
+
+def test_check_metadata_flags_null_status() -> None:
+    mod = import_sweep()
+    items = [{"content": {"number": 999, "title": "x"}, "priority": "Low", "status": None}]
+    assert mod.check_metadata(items) == ["#999: no Status"]
+
+
+def test_check_metadata_flags_empty_status() -> None:
+    mod = import_sweep()
+    items = [{"content": {"number": 999, "title": "x"}, "priority": "Low", "status": ""}]
+    assert mod.check_metadata(items) == ["#999: no Status"]
+
+
+def test_check_metadata_flags_no_status_sentinel_string() -> None:
+    """Regression for #85 — `gh project item-list --format json` can surface
+    items without a column assignment as the literal display string
+    `"No Status"` (or other non-column values). The check must whitelist
+    against the known kanban columns, not just test truthiness.
+    """
+    mod = import_sweep()
+    items = [
+        {
+            "content": {"number": 999, "title": "x"},
+            "priority": "Low",
+            "status": "No Status",
+        }
+    ]
+    assert mod.check_metadata(items) == ["#999: no Status"]
+
+
+def test_check_metadata_flags_arbitrary_unknown_status_string() -> None:
+    """Any value that isn't one of {Backlog, Up Next, In Progress, Blocked, Done}
+    is treated as not-on-the-kanban — including future typos like a status
+    accidentally set to a Priority value."""
+    mod = import_sweep()
+    items = [
+        {
+            "content": {"number": 999, "title": "x"},
+            "priority": "Low",
+            "status": "High",  # bogus
+        }
+    ]
+    assert mod.check_metadata(items) == ["#999: no Status"]
+
+
+def test_check_metadata_passes_known_kanban_columns() -> None:
+    mod = import_sweep()
+    items = [
+        {"content": {"number": 1, "title": "x"}, "priority": "Low", "status": "Backlog"},
+        {"content": {"number": 2, "title": "x"}, "priority": "Low", "status": "Up Next"},
+        {
+            "content": {"number": 3, "title": "x"},
+            "priority": "Low",
+            "status": "In Progress",
+        },
+        {"content": {"number": 4, "title": "x"}, "priority": "Low", "status": "Blocked"},
+    ]
+    assert mod.check_metadata(items) == []
+
+
 def test_check_plan_spec_drift_recognizes_bare_hash_issue_refs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
