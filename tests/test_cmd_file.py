@@ -274,6 +274,64 @@ def test_file_unlinks_staged_body_on_success(
     assert not staged.exists(), f"staged body must be cleaned up on success: {staged}"
 
 
+def test_file_inline_body_staging_round_trip_mismatch_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Phase 2 fence (#100): if the staged temp file's content doesn't match
+    what we tried to write, refuse to call gh.
+
+    This catches a different failure mode from preserve-on-create-failure:
+    here, staging itself silently produced wrong content, and gh would
+    succeed with empty/wrong body — the user gets a corrupt issue with no
+    signal. After #98 this should be unreachable, but it's a cheap fence
+    against the next routing surprise.
+
+    We simulate the silent corruption by monkeypatching Path.read_text to
+    return empty for the staged tmp file. A real-world cause would be a
+    filesystem write that didn't take (disk full, encoding error, future
+    refactor that loses bytes).
+    """
+    board_md = _write_full_board(tmp_path)
+    real_read_text = Path.read_text
+
+    def maybe_truncating_read_text(self: Path, *a: object, **kw: object) -> str:
+        # Only intercept the temp body file (created in /tmp directly,
+        # not under any subdirectory). The board file lives under
+        # tmp_path/docs/, so we won't break Board parsing.
+        if self.parent == Path("/tmp") and self.suffix == ".md":
+            return ""
+        return real_read_text(self, *a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", maybe_truncating_read_text)
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Real body content that will not survive the round-trip.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc != 0, captured.err
+    # CLI-shape error, not a gh error. Must mention the failure mode.
+    assert "round-trip" in captured.err or "stage" in captured.err, captured.err
+    # Retry guidance points at --body-file.
+    assert "--body-file" in captured.err, captured.err
+    # Critical: gh must NOT have been invoked. Fence trips before any
+    # network call, so no risk of a corrupt issue landing on the repo.
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"fence must trip before gh issue create; got calls: {calls}"
+    )
+
+
 def test_file_emits_recovery_command_on_post_create_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
