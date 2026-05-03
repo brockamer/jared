@@ -160,6 +160,178 @@ def test_file_with_custom_status_and_extra_field(
     )
 
 
+def test_file_preserves_staged_body_on_create_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression for #100: when `gh issue create` fails, the staged temp body
+    file must be preserved (not unlinked) and its path printed in stderr so
+    the user can retry with --body-file <staged-path> without re-typing the body.
+
+    Pre-fix, `_cmd_file` unlinked the temp file in `finally:` regardless of
+    outcome, leaving the user to reconstruct the body from scratch. The
+    failure mode then drove sessions to fall back to plain `gh issue create`,
+    which succeeds at the issue level but skips add-to-board → off-board
+    ghost issue. Preserving the stage closes that fallback path.
+    """
+    board_md = _write_full_board(tmp_path)
+    inline_body = "## Title\n\nMulti-line body content with **markdown**."
+
+    captured_paths: list[str] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue create" in joined:
+            # Capture the staged path so the test can verify it survives.
+            if "--body-file" in args:
+                idx = args.index("--body-file")
+                captured_paths.append(args[idx + 1])
+            return FakeGhResult(
+                stdout="",
+                returncode=1,
+                stderr="GraphQL: API rate limit exceeded for installation",
+            )
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            inline_body,
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc != 0, captured.err
+
+    # Staged temp file must still exist with the original body content.
+    assert len(captured_paths) == 1, f"expected one staged path; got {captured_paths}"
+    staged = Path(captured_paths[0])
+    assert staged.exists(), f"staged body must be preserved on create failure: {staged}"
+    assert staged.read_text() == inline_body
+
+    # The error message must surface the staged path so the user can retry.
+    assert str(staged) in captured.err, captured.err
+    # And include a clear, retry-shaped recovery line — not just gh's stderr.
+    assert "--body-file" in captured.err, captured.err
+    assert "rate limit exceeded" in captured.err, captured.err  # underlying gh stderr preserved
+
+    # Cleanup so we don't leave the file behind in tmp_path.
+    staged.unlink(missing_ok=True)
+
+
+def test_file_unlinks_staged_body_on_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The flip side of preserve-on-failure: on success, the staged body is
+    cleaned up so /tmp doesn't accumulate junk.
+
+    Implementation note: the temp path can be observed at gh-call time via
+    --body-file argv; after main() returns, that path should no longer exist.
+    """
+    board_md = _write_full_board(tmp_path)
+    captured_paths: list[str] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue create" in joined:
+            if "--body-file" in args:
+                idx = args.index("--body-file")
+                captured_paths.append(args[idx + 1])
+            return FakeGhResult(stdout="https://github.com/brockamer/findajob/issues/42\n")
+        if "item-add" in joined:
+            return FakeGhResult(stdout='{"id": "PVTI_new"}')
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "OK body",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+
+    assert len(captured_paths) == 1
+    staged = Path(captured_paths[0])
+    assert not staged.exists(), f"staged body must be cleaned up on success: {staged}"
+
+
+def test_file_inline_body_staging_round_trip_mismatch_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Phase 2 fence (#100): if the staged temp file's content doesn't match
+    what we tried to write, refuse to call gh.
+
+    This catches a different failure mode from preserve-on-create-failure:
+    here, staging itself silently produced wrong content, and gh would
+    succeed with empty/wrong body — the user gets a corrupt issue with no
+    signal. After #98 this should be unreachable, but it's a cheap fence
+    against the next routing surprise.
+
+    We simulate the silent corruption by monkeypatching Path.read_text to
+    return empty for the staged tmp file. A real-world cause would be a
+    filesystem write that didn't take (disk full, encoding error, future
+    refactor that loses bytes).
+    """
+    board_md = _write_full_board(tmp_path)
+    real_read_text = Path.read_text
+
+    def maybe_truncating_read_text(self: Path, *a: object, **kw: object) -> str:
+        # Only intercept the temp body file (created in /tmp directly,
+        # not under any subdirectory). The board file lives under
+        # tmp_path/docs/, so we won't break Board parsing.
+        if self.parent == Path("/tmp") and self.suffix == ".md":
+            return ""
+        return real_read_text(self, *a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", maybe_truncating_read_text)
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Real body content that will not survive the round-trip.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc != 0, captured.err
+    # CLI-shape error, not a gh error. Must mention the failure mode.
+    assert "round-trip" in captured.err or "stage" in captured.err, captured.err
+    # Retry guidance points at --body-file.
+    assert "--body-file" in captured.err, captured.err
+    # Critical: gh must NOT have been invoked. Fence trips before any
+    # network call, so no risk of a corrupt issue landing on the repo.
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"fence must trip before gh issue create; got calls: {calls}"
+    )
+
+
 def test_file_emits_recovery_command_on_post_create_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

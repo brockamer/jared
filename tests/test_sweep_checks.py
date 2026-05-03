@@ -324,6 +324,95 @@ def test_check_plan_spec_drift_still_flags_genuinely_orphaned_plans(
     assert any("no ## Issue section" in f for f in findings)
 
 
+def _open_issue(number: int, title: str = "") -> dict[str, Any]:
+    """Shape matches what `gh issue list --json number,title,...` returns."""
+    return {"number": number, "title": title or f"Issue {number}", "labels": []}
+
+
+def test_check_off_board_issues_returns_empty_when_all_on_board() -> None:
+    """Healthy case: every open repo issue has a project item."""
+    mod = import_sweep()
+    items = [
+        _item(1, "OPEN", "In Progress"),
+        _item(2, "OPEN", "Up Next"),
+        _item(3, "OPEN", "Backlog"),
+    ]
+    issues_by_number = {
+        1: _open_issue(1),
+        2: _open_issue(2),
+        3: _open_issue(3),
+    }
+    assert mod.check_off_board_issues(items, issues_by_number) == []
+
+
+def test_check_off_board_issues_flags_repo_issue_missing_from_project() -> None:
+    """The whole point of this check (#100): an issue exists on the repo but
+    isn't on the board — Status is null, Priority is null, the operator can't
+    see it without a sweep. Surface it with a `jared add-to-board` recovery."""
+    mod = import_sweep()
+    items = [
+        _item(1, "OPEN", "In Progress"),
+        _item(2, "OPEN", "Up Next"),
+    ]
+    issues_by_number = {
+        1: _open_issue(1),
+        2: _open_issue(2),
+        # 99 is open on the repo but absent from the project.
+        99: _open_issue(99, title="Ghost issue from gh fallback"),
+    }
+    findings = mod.check_off_board_issues(items, issues_by_number)
+    assert len(findings) == 1
+    assert "#99" in findings[0]
+    assert "Ghost issue from gh fallback" in findings[0]
+    # Recovery line must be paste-and-run for the operator.
+    assert "jared add-to-board 99" in findings[0]
+    assert "--priority" in findings[0]
+
+
+def test_check_off_board_issues_handles_multiple_ghosts() -> None:
+    mod = import_sweep()
+    items = [_item(1, "OPEN", "Backlog")]
+    issues_by_number = {
+        1: _open_issue(1),
+        50: _open_issue(50, title="ghost A"),
+        51: _open_issue(51, title="ghost B"),
+    }
+    findings = mod.check_off_board_issues(items, issues_by_number)
+    nums = sorted(int(f.split("#")[1].split(":")[0]) for f in findings)
+    assert nums == [50, 51]
+
+
+def test_check_off_board_issues_ignores_closed_repo_issues() -> None:
+    """The repo issue list is already filtered to --state open by
+    fetch_open_issues_bulk, so closed issues don't appear in
+    issues_by_number. But document the contract: this check trusts the
+    caller to pass open issues only — it doesn't re-filter.
+    """
+    mod = import_sweep()
+    items = [_item(1, "OPEN", "Backlog")]
+    # Caller already filtered; only pass open ones in.
+    issues_by_number = {1: _open_issue(1)}
+    assert mod.check_off_board_issues(items, issues_by_number) == []
+
+
+def test_check_off_board_issues_ignores_closed_board_items() -> None:
+    """A board item whose content state is CLOSED still 'covers' a
+    repo-open issue with the same number — but that's a different drift
+    pattern (the repo says open, the board has it closed). Handled by
+    `check_closed_not_done`, not here. This check only flags repo-open
+    issues that have NO project item at all.
+    """
+    mod = import_sweep()
+    items = [
+        _item(1, "OPEN", "Backlog"),
+        _item(99, "CLOSED", "Done"),  # board has it
+    ]
+    issues_by_number = {1: _open_issue(1), 99: _open_issue(99)}
+    # 99 is on the board (even if mismatched state) — not flagged here.
+    findings = mod.check_off_board_issues(items, issues_by_number)
+    assert findings == []
+
+
 def test_format_closed_not_done_line_includes_propose_command() -> None:
     """The render-site formatter names the remediation command so the groom
     flow has a concrete next action to propose with per-item approval.
