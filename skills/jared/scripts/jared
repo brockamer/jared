@@ -417,17 +417,32 @@ def _cmd_file(args: argparse.Namespace) -> int:
     ]
     for label in args.label or []:
         create_args.extend(["--label", label])
+    # Preserve the staged temp file on any create-step failure so the user can
+    # retry without re-typing the body. #100: closes the fallback loop where
+    # an opaque `jared file` failure → Claude shells out to plain `gh issue
+    # create` → off-board ghost issue. The staged file is cleaned up on the
+    # success path further down.
     try:
         issue_url = board.run_gh_raw(create_args)
     except GhInvocationError as e:
         print(f"error: gh issue create failed: {e}", file=sys.stderr)
+        print(
+            f"  body staged at: {body_tmp_path} "
+            f"(retry with: --body-file {body_tmp_path})",
+            file=sys.stderr,
+        )
         return 2
-    finally:
-        Path(body_tmp_path).unlink(missing_ok=True)
     if not issue_url.startswith("http"):
         print(f"error: unexpected gh issue create output: {issue_url[:200]}", file=sys.stderr)
+        print(
+            f"  body staged at: {body_tmp_path} "
+            f"(retry with: --body-file {body_tmp_path})",
+            file=sys.stderr,
+        )
         return 2
     issue_number = int(issue_url.rsplit("/", 1)[-1])
+    # Past the create step — issue exists, no need to keep the staged body.
+    Path(body_tmp_path).unlink(missing_ok=True)
 
     # assume_new=True skips the find_item_id membership scan that #4's perf
     # fix removed from the filing hot path. On failure the issue exists on
