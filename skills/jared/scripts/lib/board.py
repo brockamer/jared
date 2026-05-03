@@ -1009,3 +1009,234 @@ def resolve_body(body: str | None, body_file: str | None) -> str:
     if body_file == "-":
         return sys.stdin.read()
     return Path(body_file).read_text()
+
+
+# ---------- PII pre-flight redactor (#102) ----------
+
+
+@dataclass
+class RedactionMatch:
+    """One body line that matched a phrase from a gitignored claude-shaped file."""
+
+    line_no: int
+    line_text: str
+    matched_phrase: str
+    source_file: Path
+
+
+@dataclass
+class RedactionReport:
+    """Result of pre_flight_check. Pure data; caller decides how to react."""
+
+    matches: list[RedactionMatch]
+    scanned_files: list[Path]
+
+    @property
+    def clean(self) -> bool:
+        return not self.matches
+
+
+# Lines shorter than this (post-strip) are too generic to be useful private content.
+_MIN_PHRASE_CHARS = 20
+# Phrases with fewer words than this match too eagerly (any common word in a
+# local file would flag the body).
+_MIN_PHRASE_WORDS = 3
+# Markdown-leader characters stripped from line starts before length checks.
+_MARKDOWN_LEADER_RE = re.compile(r"^[\s\-\*\>#\|`]+")
+
+
+def _extract_phrases(file_path: Path) -> list[str]:
+    """Extract candidate phrases from one gitignored claude-shaped file.
+
+    A phrase is a line of the file that — after stripping markdown leaders
+    (`-`, `*`, `>`, `#`, `|`, backticks, leading whitespace) — has at least
+    `_MIN_PHRASE_WORDS` whitespace-separated words AND at least
+    `_MIN_PHRASE_CHARS` characters. Returns the cleaned phrases in file order.
+
+    Missing file → empty list, not an exception (the caller has already
+    decided this file is in scope; we don't want to second-guess).
+    """
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        return []
+    out = []
+    for raw in text.splitlines():
+        cleaned = _MARKDOWN_LEADER_RE.sub("", raw).rstrip()
+        if len(cleaned) < _MIN_PHRASE_CHARS:
+            continue
+        if len(cleaned.split()) < _MIN_PHRASE_WORDS:
+            continue
+        out.append(cleaned)
+    return out
+
+
+# Standard locations for gitignored claude-shaped local content.
+_CLAUDE_SHAPED_PATTERNS = (
+    "CLAUDE.local.md",
+    ".claude/CLAUDE.local.md",
+    ".claude/local/*.md",
+)
+
+
+def _find_claude_shaped_files(project_root: Path) -> list[Path]:
+    """Locate gitignored claude-shaped files under `project_root`.
+
+    Checks the standard patterns: `CLAUDE.local.md`, `.claude/CLAUDE.local.md`,
+    `.claude/local/*.md`. Returns absolute paths in deterministic order.
+
+    If `project_root` isn't a git repo (no `.git/` directory), returns an
+    empty list — the redactor's allowlist semantics depend on git, so without
+    git there's no meaningful scan to do.
+    """
+    if not (project_root / ".git").exists():
+        return []
+    found = []
+    for pattern in _CLAUDE_SHAPED_PATTERNS:
+        if "*" in pattern:
+            # glob the pattern's directory
+            base = project_root / pattern.rsplit("/", 1)[0]
+            glob_pat = pattern.rsplit("/", 1)[1]
+            if base.is_dir():
+                found.extend(sorted(base.glob(glob_pat)))
+        else:
+            p = project_root / pattern
+            if p.is_file():
+                found.append(p)
+    return found
+
+
+def _find_project_root(start: Path) -> Path:
+    """Walk up from `start` to the nearest ancestor containing a `.git/` entry.
+
+    Returns the discovered project root if found, else `start.resolve()` so
+    the redactor's no-git short-circuit applies cleanly. Used by the CLI to
+    fix #102's subdir blind spot — `Path.cwd()` alone doesn't find the root
+    when the operator invokes `jared` from a feature subdirectory.
+    """
+    p = start.resolve()
+    for candidate in (p, *p.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return p
+
+
+def _read_tracked_content(project_root: Path) -> str:
+    """Concatenate every tracked file's content into one searchable blob.
+
+    `git ls-files` enumerates tracked paths. We read each and join into
+    one string so the allowlist check is a single `phrase in tracked` per
+    candidate phrase. Decoding errors on binary files are swallowed —
+    binary files can't contain text phrases anyway.
+    """
+    if not (project_root / ".git").exists():
+        return ""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    chunks = []
+    for relpath in out.splitlines():
+        f = project_root / relpath
+        try:
+            chunks.append(f.read_text(encoding="utf-8"))
+        except (FileNotFoundError, UnicodeDecodeError, IsADirectoryError):
+            continue
+    return "\n".join(chunks)
+
+
+# Process-local cache for pre_flight_check scan inputs (phrases + tracked
+# content). Keyed on the resolved absolute project_root path. Survives only
+# within one `jared` invocation; that's the intended scope per the spec.
+_PRE_FLIGHT_CACHE: dict[Path, tuple[dict[str, Path], list[Path]]] = {}
+
+
+def _clear_pre_flight_cache() -> None:
+    """Test seam — drops the in-process cache."""
+    _PRE_FLIGHT_CACHE.clear()
+
+
+def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
+    """Scan body against gitignored claude-shaped files; return a structured report."""
+    root = project_root.resolve()
+    cached = _PRE_FLIGHT_CACHE.get(root)
+    if cached is None:
+        files = _find_claude_shaped_files(root)
+        if not files:
+            _PRE_FLIGHT_CACHE[root] = ({}, [])
+            return RedactionReport(matches=[], scanned_files=[])
+        tracked = _read_tracked_content(root)
+        phrase_to_source: dict[str, Path] = {}
+        for f in files:
+            for phrase in _extract_phrases(f):
+                if tracked and phrase in tracked:
+                    continue
+                phrase_to_source.setdefault(phrase, f)
+        _PRE_FLIGHT_CACHE[root] = (phrase_to_source, files)
+        cached = _PRE_FLIGHT_CACHE[root]
+
+    phrase_to_source, scanned_files = cached
+    if not phrase_to_source:
+        return RedactionReport(matches=[], scanned_files=scanned_files)
+
+    matches: list[RedactionMatch] = []
+    body_lines = body.splitlines()
+    for phrase, source in phrase_to_source.items():
+        if phrase in body:
+            for i, line in enumerate(body_lines, start=1):
+                if phrase in line:
+                    matches.append(
+                        RedactionMatch(
+                            line_no=i,
+                            line_text=line,
+                            matched_phrase=phrase,
+                            source_file=source,
+                        )
+                    )
+                    break
+    return RedactionReport(matches=matches, scanned_files=scanned_files)
+
+
+def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
+    """Format a non-clean RedactionReport for stderr.
+
+    Caller is responsible for the exit code; this only writes the diagnostic.
+    No-op when the report is clean — it's a guard against future callers that
+    invoke us without checking. Today's callers always gate with `if not
+    report.clean:`, but the guard prevents the "0 matches across 0 files"
+    nonsense output if that contract ever drifts.
+    """
+    if report.clean:
+        return
+    f = file if file is not None else sys.stderr
+    print(
+        "error: pre-flight redaction check failed — body references content from",
+        file=f,
+    )
+    print(
+        "gitignored claude-shaped local files. Refusing to post.",
+        file=f,
+    )
+    print("", file=f)
+    n = len(report.matches)
+    distinct_files = sorted({m.source_file for m in report.matches})
+    nf = len(distinct_files)
+    match_word = "match" if n == 1 else "matches"
+    file_word = "file" if nf == 1 else "files"
+    print(f"  {n} {match_word} across {nf} {file_word}:", file=f)
+    for m in report.matches:
+        print(f'    line {m.line_no}: "{m.line_text}"', file=f)
+        print(f"      ↳ matches {m.source_file}", file=f)
+    print("", file=f)
+    print("  next steps:", file=f)
+    print("    1. Re-issue the call with private content removed.", file=f)
+    print(
+        "    2. OR add the matched phrase to a tracked file if it's intentionally public.",
+        file=f,
+    )

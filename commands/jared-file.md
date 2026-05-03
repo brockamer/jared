@@ -33,6 +33,8 @@ Flow:
    from a file via `--body-file <path>`, or from stdin via `--body-file -`.
    Use exactly one — they're mutually exclusive.
 
+   **Pre-flight redaction.** `jared file` runs the body through a pre-flight scan against gitignored claude-shaped local files before posting. If any rich phrase from a local-claude file appears in the body, the call refuses with a stderr diff and exit 2. See `references/pii-pre-flight.md`.
+
 5. **File atomically.** One call does it all:
 
    ```bash
