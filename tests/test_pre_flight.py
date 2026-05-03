@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from skills.jared.scripts.lib.board import (
     RedactionMatch,
     RedactionReport,
@@ -12,6 +14,14 @@ from skills.jared.scripts.lib.board import (
     _find_claude_shaped_files,
     pre_flight_check,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_redactor_cache() -> None:
+    """Auto-applied — every test starts with a fresh redactor cache."""
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
 
 
 def test_pre_flight_check_empty_body_clean(tmp_path: Path) -> None:
@@ -229,3 +239,36 @@ def test_pre_flight_check_flags_phrase_only_in_gitignored_file(
     report = pre_flight_check(body, project_root=tmp_path)
     assert not report.clean
     assert report.matches[0].matched_phrase.startswith("Our deploy host")
+
+
+def test_pre_flight_check_caches_per_project_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Second call to the same project_root reuses scan results — no second
+    `git ls-files` invocation."""
+    _git_init_with_tracked(tmp_path, {"README.md": "public.\n"})
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+
+    real_subprocess_run = subprocess.run
+    call_count = {"git_ls_files": 0}
+
+    def counting_run(args, **kwargs):  # type: ignore[no-untyped-def]
+        if isinstance(args, list) and args[:2] == ["git", "ls-files"]:
+            call_count["git_ls_files"] += 1
+        return real_subprocess_run(args, **kwargs)
+
+    # Clear the cache before the test (it's process-local).
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        counting_run,
+    )
+
+    pre_flight_check("body 1", project_root=tmp_path)
+    pre_flight_check("body 2", project_root=tmp_path)
+
+    assert call_count["git_ls_files"] == 1, (
+        f"expected one git ls-files call (cached); got {call_count}"
+    )

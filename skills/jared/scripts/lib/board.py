@@ -1136,25 +1136,39 @@ def _read_tracked_content(project_root: Path) -> str:
     return "\n".join(chunks)
 
 
+# Process-local cache for pre_flight_check scan inputs (phrases + tracked
+# content). Keyed on the resolved absolute project_root path. Survives only
+# within one `jared` invocation; that's the intended scope per the spec.
+_PRE_FLIGHT_CACHE: dict[Path, tuple[dict[str, Path], list[Path]]] = {}
+
+
+def _clear_pre_flight_cache() -> None:
+    """Test seam — drops the in-process cache."""
+    _PRE_FLIGHT_CACHE.clear()
+
+
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
-    """Scan body against gitignored claude-shaped files; return a structured report.
+    """Scan body against gitignored claude-shaped files; return a structured report."""
+    root = project_root.resolve()
+    cached = _PRE_FLIGHT_CACHE.get(root)
+    if cached is None:
+        files = _find_claude_shaped_files(root)
+        if not files:
+            _PRE_FLIGHT_CACHE[root] = ({}, [])
+            return RedactionReport(matches=[], scanned_files=[])
+        tracked = _read_tracked_content(root)
+        phrase_to_source: dict[str, Path] = {}
+        for f in files:
+            for phrase in _extract_phrases(f):
+                if tracked and phrase in tracked:
+                    continue
+                phrase_to_source.setdefault(phrase, f)
+        _PRE_FLIGHT_CACHE[root] = (phrase_to_source, files)
+        cached = _PRE_FLIGHT_CACHE[root]
 
-    Pure function — no I/O on caller's behalf, no exit, no print. Caller
-    decides what to do with a non-clean report.
-    """
-    files = _find_claude_shaped_files(project_root)
-    if not files:
-        return RedactionReport(matches=[], scanned_files=[])
-
-    tracked = _read_tracked_content(project_root)
-
-    phrase_to_source: dict[str, Path] = {}
-    for f in files:
-        for phrase in _extract_phrases(f):
-            # Allowlist: a phrase already in any tracked file is public.
-            if tracked and phrase in tracked:
-                continue
-            phrase_to_source.setdefault(phrase, f)
+    phrase_to_source, scanned_files = cached
+    if not phrase_to_source:
+        return RedactionReport(matches=[], scanned_files=scanned_files)
 
     matches: list[RedactionMatch] = []
     body_lines = body.splitlines()
@@ -1171,4 +1185,4 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
                         )
                     )
                     break
-    return RedactionReport(matches=matches, scanned_files=files)
+    return RedactionReport(matches=matches, scanned_files=scanned_files)
