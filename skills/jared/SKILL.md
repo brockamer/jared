@@ -17,7 +17,7 @@ This is the principle that resolves every ambiguity in the rest of this skill. W
 
 **Jared writes only board state.** Issue bodies, comments (Session notes and `## Current state` updates), project field values, native blocked-by edges. That's it.
 
-Jared *reads* memory, `CLAUDE.md`, project settings, and any gitignored claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`) to align style, infer conventions, and (in a future change, see #102) pre-flight redact private content from public board posts. But Jared never writes to those surfaces. When a sibling skill owns a surface, Jared defers rather than competes:
+Jared *reads* memory, `CLAUDE.md`, project settings, and any gitignored claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`) to align style, infer conventions, and pre-flight redact private content from public board posts. The pre-flight scans every issue and comment body before any `gh` call and refuses to post on hits — see `references/pii-pre-flight.md`. But Jared never writes to those surfaces. When a sibling skill owns a surface, Jared defers rather than competes:
 
 | Surface | Owner |
 |---|---|
