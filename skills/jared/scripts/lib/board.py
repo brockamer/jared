@@ -1071,6 +1071,41 @@ def _extract_phrases(file_path: Path) -> list[str]:
     return out
 
 
+# Standard locations for gitignored claude-shaped local content.
+_CLAUDE_SHAPED_PATTERNS = (
+    "CLAUDE.local.md",
+    ".claude/CLAUDE.local.md",
+    ".claude/local/*.md",
+)
+
+
+def _find_claude_shaped_files(project_root: Path) -> list[Path]:
+    """Locate gitignored claude-shaped files under `project_root`.
+
+    Checks the standard patterns: `CLAUDE.local.md`, `.claude/CLAUDE.local.md`,
+    `.claude/local/*.md`. Returns absolute paths in deterministic order.
+
+    If `project_root` isn't a git repo (no `.git/` directory), returns an
+    empty list — the redactor's allowlist semantics depend on git, so without
+    git there's no meaningful scan to do.
+    """
+    if not (project_root / ".git").exists():
+        return []
+    found = []
+    for pattern in _CLAUDE_SHAPED_PATTERNS:
+        if "*" in pattern:
+            # glob the pattern's directory
+            base = project_root / pattern.rsplit("/", 1)[0]
+            glob_pat = pattern.rsplit("/", 1)[1]
+            if base.is_dir():
+                found.extend(sorted(base.glob(glob_pat)))
+        else:
+            p = project_root / pattern
+            if p.is_file():
+                found.append(p)
+    return found
+
+
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     """Scan body against gitignored claude-shaped files; return a structured report.
 

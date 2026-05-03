@@ -8,6 +8,7 @@ from skills.jared.scripts.lib.board import (
     RedactionMatch,
     RedactionReport,
     _extract_phrases,
+    _find_claude_shaped_files,
     pre_flight_check,
 )
 
@@ -85,3 +86,43 @@ def test_extract_phrases_skips_blank_lines(tmp_path: Path) -> None:
 def test_extract_phrases_handles_missing_file(tmp_path: Path) -> None:
     """Missing file returns empty list, not an exception."""
     assert _extract_phrases(tmp_path / "does-not-exist.md") == []
+
+
+def test_find_claude_shaped_files_finds_CLAUDE_local(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.local.md").write_text("hi")
+    found = _find_claude_shaped_files(tmp_path)
+    assert tmp_path / "CLAUDE.local.md" in found
+
+
+def test_find_claude_shaped_files_finds_dot_claude_local(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    local_dir = tmp_path / ".claude" / "local"
+    local_dir.mkdir(parents=True)
+    (local_dir / "ops.md").write_text("hi")
+    (local_dir / "secrets.md").write_text("hi")
+    found = _find_claude_shaped_files(tmp_path)
+    assert local_dir / "ops.md" in found
+    assert local_dir / "secrets.md" in found
+
+
+def test_find_claude_shaped_files_finds_dot_claude_CLAUDE_local(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    dot_claude = tmp_path / ".claude"
+    dot_claude.mkdir()
+    (dot_claude / "CLAUDE.local.md").write_text("hi")
+    found = _find_claude_shaped_files(tmp_path)
+    assert dot_claude / "CLAUDE.local.md" in found
+
+
+def test_find_claude_shaped_files_no_git_repo_returns_empty(tmp_path: Path) -> None:
+    """Without a .git/ dir we have no notion of gitignored — return empty."""
+    (tmp_path / "CLAUDE.local.md").write_text("hi")
+    assert _find_claude_shaped_files(tmp_path) == []
+
+
+def test_find_claude_shaped_files_ignores_non_claude_files(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("hi")
+    (tmp_path / "notes.md").write_text("hi")
+    assert _find_claude_shaped_files(tmp_path) == []
