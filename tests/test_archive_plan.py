@@ -128,12 +128,121 @@ def test_parse_referenced_issues_accepts_url_form_in_list_items() -> None:
     assert ap.parse_referenced_issues(text) == [42, 15]
 
 
+def test_parse_referenced_issues_ignores_prose_line_starting_with_issue_label() -> None:
+    """The PR/Issue label is gated behind a list marker — a bare prose line
+    like `Issue #99 supersedes this work.` (no `- ` or `* ` prefix) must not
+    match. Otherwise PR 3's relaxation re-opens the #87 false-positive class.
+    """
+    text = (
+        "# Plan\n\n## Issue\n\n- #408\n\n"
+        "Issue #99 supersedes this work; see also PR #100 for context.\n\n"
+        "## Body\n"
+    )
+    assert ap.parse_referenced_issues(text) == [408]
+
+
 def test_parse_referenced_issues_accepts_bare_line_at_column_zero() -> None:
     """The pre-existing #48-style bare-line form (no list marker — the ref
     sits at column zero) must still be accepted. A line whose meaningful
     content starts with `#NNN` counts."""
     text = "# Plan\n\n## Issue(s)\n\n#229 — Metric Layer C.0\n#230 — follow-up\n\n## Approach\n"
     assert ap.parse_referenced_issues(text) == [229, 230]
+
+
+def test_parse_shipped_section_returns_pr_numbers() -> None:
+    """The `## Shipped` section is the same shape as `## Issue` — list-item
+    refs whose meaningful content starts with `#NNN` or a URL.
+    """
+    text = "# Plan\n\n## Shipped\n\n- PR #415 (merged 2026-05-02)\n- PR #416\n\n## Body\n"
+    assert ap.parse_shipped_section(text) == [415, 416]
+
+
+def test_parse_shipped_section_empty_when_absent() -> None:
+    text = "# Plan\n\n## Issue\n\n- #408\n\n## Body\n"
+    assert ap.parse_shipped_section(text) == []
+
+
+def test_parse_shipped_section_ignores_inline_prose_refs() -> None:
+    """Same line-start rule as parse_referenced_issues — refs in narrative
+    prose between bullets and the next heading don't count."""
+    text = (
+        "# Plan\n\n## Shipped\n\n- PR #415\n\n"
+        "Adapter #2 was the first one merged.\n"
+        "**Note:** also see #888 follow-up.\n\n## Body\n"
+    )
+    assert ap.parse_shipped_section(text) == [415]
+
+
+def test_archive_one_archives_via_shipped_section_when_pr_merged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Regression for #89 — a plan whose tracking issue was recycled (still
+    OPEN) but which shipped via a merged PR can archive by declaring the PR
+    in a `## Shipped` section. Archive uses the PR merge date."""
+    plan = tmp_path / "2026-05-03-recycled-issue.md"
+    plan.write_text("# Plan\n\n## Shipped\n\n- PR #415\n\n## Body\n\nDetails.\n")
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue view 415": '{"state": "MERGED", "closedAt": "2026-05-02T15:30:00Z"}'},
+    )
+
+    result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
+
+    captured = capsys.readouterr()
+    assert result is not None
+    assert "skipping" not in result, f"merged-PR Shipped section must archive; got: {result}"
+    assert "archived/2026-05" in result
+    assert "2026-05-02" in captured.out
+
+
+def test_archive_one_skips_shipped_section_with_open_pr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `## Shipped` section whose listed PR is not MERGED still refuses to
+    archive — the predicate is "evidence of shipping," not just "the section
+    exists"."""
+    plan = tmp_path / "still-shipping.md"
+    plan.write_text("# Plan\n\n## Shipped\n\n- PR #999\n\n## Body\n")
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue view 999": '{"state": "OPEN", "closedAt": null}'},
+    )
+
+    result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
+
+    assert result is not None
+    assert "skipping" in result
+    assert "[999]" in result
+
+
+def test_archive_one_shipped_takes_priority_over_issue_section(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When both `## Issue` (with an open recycled issue) and `## Shipped`
+    (with a merged PR) are present, archival uses the Shipped evidence
+    and ignores the open issue."""
+    plan = tmp_path / "mixed.md"
+    plan.write_text("# Plan\n\n## Issue\n\n- #414\n\n## Shipped\n\n- PR #415\n\n## Body\n")
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue view 414": '{"state": "OPEN", "closedAt": null}',
+            "issue view 415": '{"state": "MERGED", "closedAt": "2026-05-02T15:30:00Z"}',
+        },
+    )
+
+    result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
+
+    captured = capsys.readouterr()
+    assert result is not None
+    assert "skipping" not in result, (
+        f"Shipped section must take priority over open Issue refs; got: {result}"
+    )
+    assert "2026-05-02" in captured.out
 
 
 def test_archive_one_accepts_merged_pr_as_shipped(
