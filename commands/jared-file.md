@@ -29,15 +29,16 @@ Flow:
    - `## Depends on` / `## Blocks` — fill in if applicable, else "(none)"
    - `## Planning` — fill in if a plan/spec already exists, else "(none)"
 
-   Write the body to a file path the CLI can read, or pipe it through
-   stdin with `--body-file -`.
+   Body content can be passed three ways: inline via `--body "<text>"`,
+   from a file via `--body-file <path>`, or from stdin via `--body-file -`.
+   Use exactly one — they're mutually exclusive.
 
 5. **File atomically.** One call does it all:
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file \
      --title "<verb-first title>" \
-     --body-file <path or -> \
+     --body-file <path or ->          # OR --body "<inline text>" \
      --priority <High|Medium|Low> \
      --status "<status column>" \
      --label <label> \

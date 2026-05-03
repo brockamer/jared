@@ -1,3 +1,4 @@
+from io import StringIO
 from pathlib import Path
 from textwrap import dedent
 
@@ -287,6 +288,169 @@ def test_file_emits_recovery_command_on_field_mutation_failure(
     assert str(issue_number) in captured.err, captured.err
     assert "--priority Medium" in captured.err, captured.err
     assert "rate limit exceeded" in captured.err, captured.err
+
+
+def _patch_gh_capturing_body_file(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    verify_number: int = 142,
+) -> tuple[list[list[str]], list[str | None]]:
+    """Same shape as tests/test_cmd_comment.py's helper, adapted to file's
+    full call sequence (issue create → item-add → graphql).
+
+    Snapshots `--body-file` content at call time so tests can assert on the
+    resolved body regardless of whether it came from --body, --body-file path,
+    or --body-file - stdin.
+    """
+    calls: list[list[str]] = []
+    bodies: list[str | None] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        calls.append(args)
+        joined = " ".join(args)
+        if "--body-file" in args:
+            idx = args.index("--body-file")
+            body_path = args[idx + 1]
+            try:
+                bodies.append(Path(body_path).read_text())
+            except (FileNotFoundError, OSError):
+                bodies.append(None)
+        if "issue create" in joined:
+            return FakeGhResult(
+                stdout=f"https://github.com/brockamer/findajob/issues/{verify_number}\n"
+            )
+        if "item-add" in joined:
+            return FakeGhResult(stdout='{"id": "PVTI_new"}')
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        fake_run,
+    )
+    return calls, bodies
+
+
+def test_file_with_inline_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--body <text> passes inline content to gh; symmetric with `gh issue create --body`."""
+    board_md = _write_full_board(tmp_path)
+    _calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "## Hello\n\nLiteral inline markdown.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert bodies == ["## Hello\n\nLiteral inline markdown."]
+
+
+def test_file_with_body_file_dash_stdin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--body-file - reads body from stdin (parity with `jared comment`)."""
+    board_md = _write_full_board(tmp_path)
+    _calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+    monkeypatch.setattr("sys.stdin", StringIO("piped body content"))
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body-file",
+            "-",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert bodies == ["piped body content"]
+
+
+def test_file_rejects_both_body_and_body_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--body and --body-file are mutually exclusive; specifying both must error."""
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("from file")
+    _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    with pytest.raises(SystemExit) as excinfo:
+        mod.main(
+            [
+                "--board",
+                str(board_md),
+                "file",
+                "--title",
+                "Test",
+                "--body",
+                "from inline",
+                "--body-file",
+                str(body_file),
+                "--priority",
+                "Low",
+            ]
+        )
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "not allowed with" in captured.err or "mutually exclusive" in captured.err, captured.err
+
+
+def test_file_rejects_body_prefix_abbrev(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression for #98: argparse abbrev must not silently route --bod to --body.
+
+    Pre-fix, allow_abbrev=True (argparse default) accepted --bod as a unique
+    prefix of --body-file and assigned the next argv to body_file, sending the
+    user's literal markdown into `gh issue create --body-file <markdown>` →
+    `open: no such file or directory`. With allow_abbrev=False the parser
+    exits before any handler runs — assertion is on that absence: gh is never
+    invoked and the exit is argparse's, not the command's.
+    """
+    board_md = _write_full_board(tmp_path)
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    with pytest.raises(SystemExit) as excinfo:
+        mod.main(
+            [
+                "--board",
+                str(board_md),
+                "file",
+                "--title",
+                "Test",
+                "--bod",
+                "hello world",
+                "--priority",
+                "Low",
+            ]
+        )
+    assert excinfo.value.code != 0
+    # No gh call should have happened — abbrev was rejected before the handler.
+    # If allow_abbrev had stayed True, --bod would have aliased to --body-file,
+    # `_cmd_file` would have run, and we'd see a `gh issue create` invocation.
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"--bod must not silently route to --body / --body-file; gh was invoked: {calls}"
+    )
 
 
 def test_file_makes_no_item_list_calls(
