@@ -140,6 +140,102 @@ def test_check_plan_spec_drift_recognizes_bare_hash_issue_refs(
     )
 
 
+def test_check_plan_spec_drift_accepts_bold_line_issue_form(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression for #88 — sweep used a stricter parser than archive-plan,
+    so plans using the legacy `**Issue:** #N` bold-line form (no `## Issue`
+    heading) were reported as orphaned. The shared parser in lib/board.py
+    accepts the bold-line fallback; sweep now inherits that behavior.
+    """
+    mod = import_sweep()
+
+    plan_dir = tmp_path / "plans"
+    plan_dir.mkdir()
+    (plan_dir / "legacy-bold-line.md").write_text(
+        dedent("""\
+        # An older plan
+
+        **Spec:** path/to/spec.md
+        **Issue:** brockamer/jared#339
+
+        ## Approach
+
+        Words.
+        """)
+    )
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"state": "OPEN"}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    findings = mod.check_plan_spec_drift([plan_dir], "brockamer/jared")
+    bug_messages = [f for f in findings if "no ## Issue section" in f or "no #N references" in f]
+    assert bug_messages == [], (
+        "Plans using **Issue:** bold-line fallback should NOT be reported as "
+        f"orphaned — got {bug_messages}"
+    )
+
+
+def test_check_plan_spec_drift_ignores_inline_prose_refs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sweep must not query issue state for stray prose `#NNN` mentions
+    inside the `## Issue` section — only list-item / line-start refs count.
+    """
+    mod = import_sweep()
+    plan_dir = tmp_path / "plans"
+    plan_dir.mkdir()
+    (plan_dir / "with-prose.md").write_text(
+        dedent("""\
+        # Plan
+
+        ## Issue
+
+        - #408
+        - #310
+
+        > agentic-workers note...
+
+        **Goal:** ...closes #310...
+
+        **Issue:** [#408](...); spawns [#410](...), [#411](...).
+
+        ## Approach
+
+        Words.
+        """)
+    )
+
+    seen_numbers: list[str] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = '{"state": "OPEN"}'
+        stderr = ""
+
+    def fake_run(*args: Any, **kwargs: Any) -> FakeResult:
+        cmd = args[0] if args else kwargs.get("args", [])
+        for tok in cmd or []:
+            if isinstance(tok, str) and tok.isdigit():
+                seen_numbers.append(tok)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod.check_plan_spec_drift([plan_dir], "brockamer/jared")
+    assert sorted(set(seen_numbers)) == ["310", "408"], (
+        f"sweep should only query refs from list-item lines, not inline prose; "
+        f"got {sorted(set(seen_numbers))}"
+    )
+
+
 def test_check_plan_spec_drift_still_flags_genuinely_orphaned_plans(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

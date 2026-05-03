@@ -68,6 +68,9 @@ from lib.board import (
     graphql_budget as board_graphql_budget,
 )
 from lib.board import (
+    parse_referenced_issues as board_parse_referenced_issues,
+)
+from lib.board import (
     run_gh as board_run_gh,
 )
 from lib.board import (
@@ -362,13 +365,15 @@ def check_legacy_priority_labels(issues_by_number: dict[int, dict[str, Any]]) ->
     return findings
 
 
-def parse_issue_refs(text: str) -> set[int]:
-    """Find #N references in a block of text."""
-    return {int(m) for m in re.findall(r"#(\d+)", text or "")}
-
-
 def check_plan_spec_drift(plan_dirs: list[Path], repo: str) -> list[str]:
-    """Scan plan/spec directories for orphans and shippable archivals."""
+    """Scan plan/spec directories for orphans and shippable archivals.
+
+    Issue refs are extracted via the shared `parse_referenced_issues` helper
+    in `lib.board`, so sweep and archive-plan can't disagree on what counts
+    as a referenced issue (#88). The helper accepts both the canonical
+    `## Issue` heading form (with list-item refs) and the legacy
+    `**Issue:** #N` bold-line fallback.
+    """
     if not repo:
         return ["(skipping plan/spec check — repo not determined)"]
 
@@ -383,23 +388,9 @@ def check_plan_spec_drift(plan_dirs: list[Path], repo: str) -> list[str]:
                 continue
             text = p.read_text(errors="replace")
 
-            # Look for ## Issue section — support ## Issue, ## Issue(s), ## Issues.
-            # The body terminator is `^#{1,3}\s` (a real heading) rather than
-            # `^#`: a bare `#229` issue reference at column zero is a valid
-            # plan-body line, not the start of the next section, so the
-            # terminator must require whitespace after the hashes. (#48)
-            issue_section_match = re.search(
-                r"^#{1,3}\s+Issue[s()]*\s*$([\s\S]+?)(?=^#{1,3}\s|\Z)",
-                text,
-                re.MULTILINE,
-            )
-            if not issue_section_match:
-                findings.append(f"  {p}: no ## Issue section — orphaned plan/spec")
-                continue
-
-            refs = parse_issue_refs(issue_section_match.group(1))
+            refs = set(board_parse_referenced_issues(text))
             if not refs:
-                findings.append(f"  {p}: ## Issue section but no #N references")
+                findings.append(f"  {p}: no ## Issue section — orphaned plan/spec")
                 continue
 
             # Check state of each referenced issue

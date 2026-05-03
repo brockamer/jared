@@ -83,6 +83,59 @@ def test_parse_referenced_issues_bold_line_only_scanned_near_top() -> None:
     assert ap.parse_referenced_issues(text) == []
 
 
+def test_parse_referenced_issues_ignores_inline_refs_in_section_prose() -> None:
+    """Regression for #86 — the ## Issue section parser previously captured
+    everything between the heading and the next heading, then ran a broad
+    `re.findall(r'#(\\d+)', section)` over the whole thing. That harvested
+    refs from prose paragraphs (bold lines, blockquotes, narrative) the user
+    happened to put after the bullet list but before the next heading. Only
+    list-item form (or refs at the start of a line) inside the section
+    should count.
+    """
+    text = (
+        "# Plan\n\n"
+        "## Issue\n\n"
+        "- #408\n"
+        "- #310 (closed by this plan)\n\n"
+        "> agentic-workers note...\n\n"
+        "**Goal:** ...closes #310...\n\n"
+        "**Issue:** [#408](...); spawns [#410](...), [#411](...), [#412](...).\n\n"
+        "## Pre-flight: branch setup\n"
+    )
+    assert ap.parse_referenced_issues(text) == [408, 310]
+
+
+def test_parse_referenced_issues_ignores_inline_prose_hash() -> None:
+    """Regression for #87 — bare `#NNN` inside flowing prose (e.g.
+    "Adapter #2 validating the framework") must not be matched as an issue
+    reference. Refs only count when they appear at the start of a line,
+    after an optional list marker."""
+    text = (
+        "# Plan\n\n"
+        "## Issue\n\n"
+        "- #408\n"
+        "- #310\n\n"
+        "Adapter #2 validating the framework — see #88 for follow-up.\n\n"
+        "## Body\n"
+    )
+    assert ap.parse_referenced_issues(text) == [408, 310]
+
+
+def test_parse_referenced_issues_accepts_url_form_in_list_items() -> None:
+    """URLs and `owner/repo#N` forms remain valid inside list items — they're
+    unambiguous, no prose-interpretation risk."""
+    text = "# Plan\n\n## Issue\n\n- https://github.com/o/r/issues/42\n- owner/repo#15\n\n## Body\n"
+    assert ap.parse_referenced_issues(text) == [42, 15]
+
+
+def test_parse_referenced_issues_accepts_bare_line_at_column_zero() -> None:
+    """The pre-existing #48-style bare-line form (no list marker — the ref
+    sits at column zero) must still be accepted. A line whose meaningful
+    content starts with `#NNN` counts."""
+    text = "# Plan\n\n## Issue(s)\n\n#229 — Metric Layer C.0\n#230 — follow-up\n\n## Approach\n"
+    assert ap.parse_referenced_issues(text) == [229, 230]
+
+
 def test_archive_one_accepts_merged_pr_as_shipped(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
