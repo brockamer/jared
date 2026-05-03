@@ -28,6 +28,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     OptionNotFound,
     check_closed_not_done,
     fetch_recent_comments_batch,
+    resolve_body,
 )
 
 ALL_SUBCOMMANDS = [
@@ -360,23 +361,6 @@ def _cmd_close(args: argparse.Namespace) -> int:
     return rc
 
 
-def _resolve_body(body: str | None, body_file: str | None) -> str:
-    """Resolve body content from either inline text or a file path / stdin.
-
-    Exactly one of `body` / `body_file` is set (argparse mutex group enforces).
-    `body_file == "-"` reads stdin. Other values are filesystem paths.
-
-    Single seam for #98 (inline --body support) and #97 (PII pre-flight
-    redactor will hook here so both flags get scanned identically).
-    """
-    if body is not None:
-        return body
-    assert body_file is not None  # argparse mutex group makes this unreachable
-    if body_file == "-":
-        return sys.stdin.read()
-    return Path(body_file).read_text()
-
-
 def _cmd_file(args: argparse.Namespace) -> int:
     """Atomic: create issue, add to project, set Priority + Status + extras.
 
@@ -414,7 +398,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # --body-file - (stdin). gh issue create still wants a path, so we round-
     # trip through a temp file. Single resolution seam keeps #97's redactor
     # ergonomic — one place to scan.
-    body = _resolve_body(args.body, args.body_file)
+    body = resolve_body(args.body, args.body_file)
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".md", delete=False, encoding="utf-8"
     ) as tf:
@@ -596,7 +580,7 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
 
 def _cmd_comment(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
-    body = _resolve_body(args.body, args.body_file)
+    body = resolve_body(args.body, args.body_file)
 
     # gh issue comment requires a file path, even when we got the body
     # from stdin — write a temp file, invoke, clean up.

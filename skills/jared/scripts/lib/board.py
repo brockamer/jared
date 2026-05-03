@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -988,3 +989,23 @@ def run_graphql(query: str, *, cache: str | None = None, **variables: str | int 
         flag = "-F" if isinstance(value, bool | int) and not isinstance(value, str) else "-f"
         args.extend([flag, f"{name}={value}"])
     return run_gh(args, cache=cache)
+
+
+def resolve_body(body: str | None, body_file: str | None) -> str:
+    """Resolve issue/comment body from inline text, a file path, or stdin.
+
+    Exactly one of `body` / `body_file` is set (the CLI's argparse mutex
+    group enforces this). `body_file == "-"` reads stdin; other values are
+    filesystem paths.
+
+    Single seam point — both `jared file` and `jared comment` route through
+    here. #97's PII pre-flight redactor will hook this function so inline
+    --body, --body-file paths, and stdin all get scanned for gitignored
+    claude-shaped local content identically before any GitHub write.
+    """
+    if body is not None:
+        return body
+    assert body_file is not None  # argparse mutex group makes this unreachable
+    if body_file == "-":
+        return sys.stdin.read()
+    return Path(body_file).read_text()
