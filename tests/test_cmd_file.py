@@ -1,3 +1,4 @@
+import subprocess as _subprocess
 from io import StringIO
 from pathlib import Path
 from textwrap import dedent
@@ -681,3 +682,128 @@ def test_file_makes_no_item_list_calls(
         f"`jared file` made {len(calls)} gh calls; expected ≤4. Calls:\n"
         + "\n".join(" ".join(c) for c in calls)
     )
+
+
+def _git_init_with_claude_local(tmp_path: Path, claude_local_content: str) -> None:
+    """Initialize a git repo at tmp_path and drop a CLAUDE.local.md.
+
+    The redactor only scans files when a `.git/` directory exists, so we
+    actually `git init` rather than just `mkdir .git/`. Tracked content is
+    empty (no README) — every claude-local phrase is therefore on the
+    redactor's flag list, not on the allowlist.
+    """
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        check=True,
+    )
+    _subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "CLAUDE.local.md").write_text(claude_local_content)
+
+
+def test_cmd_file_refuses_on_dirty_pre_flight_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """If pre_flight_check returns a non-clean report, _cmd_file must refuse
+    before any gh call. Operator gets a stderr diff explaining why."""
+    board_md = _write_full_board(tmp_path)
+    leaky_phrase = "the deploy host is internal-foo-7.corp.example"
+    _git_init_with_claude_local(tmp_path, leaky_phrase + "\n")
+
+    # CLI calls pre_flight_check with project_root=Path.cwd(), so chdir to
+    # tmp_path is what makes the redactor scan our fixture.
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            f"While testing I noticed {leaky_phrase} stops responding under load.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    assert "pre-flight redaction check failed" in captured.err
+    # gh issue create must not have been invoked.
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"redactor must short-circuit before gh; calls: {calls}"
+    )
+
+
+def test_cmd_file_proceeds_on_clean_pre_flight_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A clean body (no overlap with CLAUDE.local.md) lets the existing flow
+    continue normally."""
+    board_md = _write_full_board(tmp_path)
+    _git_init_with_claude_local(tmp_path, "the deploy host is internal-foo-7.corp.example\n")
+
+    monkeypatch.chdir(tmp_path)
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Wholly unrelated body about the public weather service.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    # Normal flow: gh issue create did happen.
+    assert any("issue" in c and "create" in c for c in calls)
+
+
+def test_cmd_file_clean_when_no_claude_local(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The redactor must be a no-op when there's no CLAUDE.local.md anywhere
+    — this guards every existing test in this file. Without this guarantee,
+    the existing 13 tests would all break the moment Task 8 lands."""
+    board_md = _write_full_board(tmp_path)
+    # No CLAUDE.local.md, no .git/. The existing _routed_fake gives us a
+    # clean filing path; pre_flight_check should return empty, gh proceeds.
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Some content with no special meaning.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert any("issue" in c and "create" in c for c in calls)
