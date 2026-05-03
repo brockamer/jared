@@ -27,7 +27,7 @@ Jared *reads* memory, `CLAUDE.md`, project settings, and any gitignored claude-s
 | `~/.claude/settings.json` and hooks | `update-config` skill |
 | Keybindings | `keybindings-help` skill |
 
-Two writers diverge. Jared consumes those surfaces; it does not author them. The PII pre-flight (#102) will enforce the read-only side of this contract in code; the doctrine here is the authoritative statement.
+Two writers diverge. Jared consumes those surfaces; it does not author them. The PII pre-flight (`references/pii-pre-flight.md`) enforces the read-only side of this contract in code; the doctrine here is the authoritative statement.
 
 **Canonical vs legacy surfaces.** Some projects carry both a Priority field and legacy `priority:*` labels (or similar duplication). The convention doc (`docs/project-board.md`) names which surface is canonical — Jared writes only there. Legacy duplicates are read-only; reconcile by removing the legacy label, never by writing to it.
 
