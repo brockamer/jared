@@ -28,6 +28,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     OptionNotFound,
     check_closed_not_done,
     fetch_recent_comments_batch,
+    _find_project_root,
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
@@ -405,7 +406,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # Pre-flight redaction check (#102): refuse to post when body references
     # content from gitignored claude-shaped local files. Pure stderr-only
     # diagnostic; no temp file is staged when we refuse here.
-    report = pre_flight_check(body, project_root=Path.cwd())
+    report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
     if not report.clean:
         print_redaction_diff(report, file=sys.stderr)
         return 2
@@ -627,7 +628,7 @@ def _cmd_comment(args: argparse.Namespace) -> int:
     body = resolve_body(args.body, args.body_file)
 
     # Pre-flight redaction check (#102): same as _cmd_file.
-    report = pre_flight_check(body, project_root=Path.cwd())
+    report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
     if not report.clean:
         print_redaction_diff(report, file=sys.stderr)
         return 2

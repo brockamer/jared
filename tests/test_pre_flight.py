@@ -12,6 +12,7 @@ from skills.jared.scripts.lib.board import (
     RedactionReport,
     _extract_phrases,
     _find_claude_shaped_files,
+    _find_project_root,
     pre_flight_check,
 )
 
@@ -333,3 +334,26 @@ def test_print_redaction_diff_no_op_on_clean_report(capsys: pytest.CaptureFixtur
     captured = capsys.readouterr()
     assert captured.err == ""
     assert captured.out == ""
+
+
+def test_find_project_root_returns_cwd_when_git_at_root(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    assert _find_project_root(tmp_path) == tmp_path.resolve()
+
+
+def test_find_project_root_walks_up_from_subdirectory(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    sub = tmp_path / "src" / "feature"
+    sub.mkdir(parents=True)
+    assert _find_project_root(sub) == tmp_path.resolve()
+
+
+def test_find_project_root_returns_start_when_no_git_found(tmp_path: Path) -> None:
+    """No .git/ in tmp_path or any of its parents (under pytest's tmpdir).
+    The function falls back to the start path; the redactor's no-git
+    short-circuit then applies.
+    """
+    sub = tmp_path / "deep" / "nested"
+    sub.mkdir(parents=True)
+    # Result is .resolve()'d
+    assert _find_project_root(sub) == sub.resolve()
