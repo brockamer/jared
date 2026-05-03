@@ -89,6 +89,56 @@ def test_comment_from_stdin(
     assert bodies == ["comment from stdin"]
 
 
+def test_comment_with_inline_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--body <text> on `jared comment` mirrors `gh issue comment --body`."""
+    board_md = write_minimal_board(tmp_path)
+    _calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body",
+            "## Inline note\n\nFrom argv.",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert bodies == ["## Inline note\n\nFrom argv."]
+
+
+def test_comment_rejects_both_body_and_body_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    board_md = write_minimal_board(tmp_path)
+    body_file = tmp_path / "note.md"
+    body_file.write_text("from file")
+    _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    with pytest.raises(SystemExit) as excinfo:
+        mod.main(
+            [
+                "--board",
+                str(board_md),
+                "comment",
+                "42",
+                "--body",
+                "from inline",
+                "--body-file",
+                str(body_file),
+            ]
+        )
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "not allowed with" in captured.err or "mutually exclusive" in captured.err, captured.err
+
+
 def test_comment_handles_plain_text_url_response(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

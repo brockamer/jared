@@ -40,11 +40,11 @@ For any board operation, pick the right tier:
 **Tier 2 — multi-step orchestrations.** Any operation that would take more than one underlying call: filing an issue (create + add-to-board + set fields), moving an issue (lookup item-id + set Status), closing with verification (close + confirm auto-move), dependency edges (resolve both node-IDs + graphql mutation). Always use the `jared` CLI:
 
 ```
-${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." --body-file - --priority High
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." (--body "..." | --body-file <path or ->) --priority High
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName>
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>
-${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file -
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --body-file <path or ->)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>     # JSON lookup helper
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary          # fast one-screen status
