@@ -92,6 +92,38 @@ def already_archived(path: Path) -> bool:
     return "archived" in path.parts
 
 
+# ---------- Plan-convention compliance ----------
+
+# Required-section headings per `assets/plan-conventions.md.template` and
+# `references/plan-spec-integration.md`. The compliance check (#97 acceptance
+# item 7) warns — never refuses — so legitimate edge cases like recycled-issue
+# plans (#89) and plans archived for cleanup don't get blocked. Hard refusal
+# would compound parser fragility (#86/#87/#88).
+#
+# Headings are matched case-insensitively at the start of a line, allowing
+# either the bare name or a trailing-word variant (e.g. "Self-review" matches
+# "## Self-review checklist").
+REQUIRED_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("Documentation Impact", r"^##\s+Documentation\s+Impact\b"),
+    ("Self-review", r"^##\s+Self-review\b"),
+)
+
+
+def check_plan_conv_compliance(plan_text: str) -> list[str]:
+    """Return the names of required plan-convention sections missing from the plan.
+
+    Empty list = fully compliant. Used by `archive_one` to warn (never refuse)
+    when archiving a non-compliant plan; surfaces drift without gating cleanup.
+    """
+    import re
+
+    missing = []
+    for name, pattern in REQUIRED_SECTIONS:
+        if not re.search(pattern, plan_text, re.IGNORECASE | re.MULTILINE):
+            missing.append(name)
+    return missing
+
+
 def archival_header(issues: list[int], ship_date: str) -> str:
     issue_refs = ", ".join(f"#{n}" for n in sorted(issues))
     return (
@@ -165,6 +197,17 @@ def archive_one(
     if text.startswith("---\n**Shipped in"):
         return f"{plan_path}: already has archival header; skipping"
     new_content = archival_header(refs, ship_date) + text
+
+    # Plan-convention compliance check (#97 item 7). Warn — don't refuse —
+    # so recycled-issue plans, cleanup archives, and pre-convention plans
+    # archive cleanly while drift gets surfaced.
+    missing_sections = check_plan_conv_compliance(text)
+    if missing_sections:
+        print(
+            f"warning: {plan_path} missing required plan-conv sections: "
+            f"{', '.join(missing_sections)} (archiving anyway)",
+            file=sys.stderr,
+        )
 
     # Show what will happen
     print(f"\n=== {plan_path} ===")

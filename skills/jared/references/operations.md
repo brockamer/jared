@@ -99,6 +99,12 @@ gh api graphql --cache 1h -f query='
 { __type(name: "Issue") { fields { name type { name } } } }'
 ```
 
+## Cautions
+
+**Canonical vs legacy surfaces.** Some projects carry both a Priority field on the project board and legacy `priority:*` labels on the issue (or similar duplication on other axes). The convention doc (`docs/project-board.md`) defines which surface is canonical — Jared writes only to that one. Legacy duplicates are read-only; reconcile drift by *removing* the legacy label or unsetting the legacy field, never by mirroring writes across both. `sweep.py::check_legacy_priority_labels` flags drift; remediation always strips the legacy surface, never the canonical one.
+
+**ProjectV2 single-select mutations are destructive.** `updateProjectV2ItemFieldValue` overwrites the existing value — there is no "merge," "append," or "add to set." Bucketing tags that need additive semantics belong on issue labels (which *are* additive by nature), not on single-select fields. If you find yourself wanting to express "this issue belongs to multiple work streams," that's a label schema problem, not a field-value problem.
+
 ## Operations Jared doesn't wrap today
 
 These remain raw-gh territory; none are used often enough to pull into the CLI.
