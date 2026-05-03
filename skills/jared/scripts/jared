@@ -28,6 +28,9 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     OptionNotFound,
     check_closed_not_done,
     fetch_recent_comments_batch,
+    _find_project_root,
+    pre_flight_check,
+    print_redaction_diff,
     resolve_body,
 )
 
@@ -399,6 +402,15 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # trip through a temp file. Single resolution seam keeps #97's redactor
     # ergonomic — one place to scan.
     body = resolve_body(args.body, args.body_file)
+
+    # Pre-flight redaction check (#102): refuse to post when body references
+    # content from gitignored claude-shaped local files. Pure stderr-only
+    # diagnostic; no temp file is staged when we refuse here.
+    report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
+    if not report.clean:
+        print_redaction_diff(report, file=sys.stderr)
+        return 2
+
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".md", delete=False, encoding="utf-8"
     ) as tf:
@@ -614,6 +626,12 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
 def _cmd_comment(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
     body = resolve_body(args.body, args.body_file)
+
+    # Pre-flight redaction check (#102): same as _cmd_file.
+    report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
+    if not report.clean:
+        print_redaction_diff(report, file=sys.stderr)
+        return 2
 
     # gh issue comment requires a file path, even when we got the body
     # from stdin — write a temp file, invoke, clean up.
