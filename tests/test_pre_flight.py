@@ -272,3 +272,39 @@ def test_pre_flight_check_caches_per_project_root(
     assert call_count["git_ls_files"] == 1, (
         f"expected one git ls-files call (cached); got {call_count}"
     )
+
+
+def test_print_redaction_diff_format(capsys: pytest.CaptureFixture[str]) -> None:
+    from skills.jared.scripts.lib.board import print_redaction_diff
+
+    report = RedactionReport(
+        matches=[
+            RedactionMatch(
+                line_no=12,
+                line_text="...the deploy host is internal-foo-7...",
+                matched_phrase="the deploy host is internal-foo-7",
+                source_file=Path("CLAUDE.local.md"),
+            ),
+            RedactionMatch(
+                line_no=18,
+                line_text="...credentials at /opt/secrets/...",
+                matched_phrase="credentials at /opt/secrets",
+                source_file=Path(".claude/local/ops.md"),
+            ),
+        ],
+        scanned_files=[
+            Path("CLAUDE.local.md"),
+            Path(".claude/local/ops.md"),
+        ],
+    )
+    import sys
+
+    print_redaction_diff(report, file=sys.stderr)
+    captured = capsys.readouterr()
+    assert "pre-flight redaction check failed" in captured.err
+    assert "2 matches" in captured.err
+    assert "line 12:" in captured.err
+    assert "line 18:" in captured.err
+    assert "CLAUDE.local.md" in captured.err
+    assert ".claude/local/ops.md" in captured.err
+    assert "next steps:" in captured.err
