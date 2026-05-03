@@ -308,3 +308,28 @@ def test_print_redaction_diff_format(capsys: pytest.CaptureFixture[str]) -> None
     assert "CLAUDE.local.md" in captured.err
     assert ".claude/local/ops.md" in captured.err
     assert "next steps:" in captured.err
+    # Pin the visual format — guards against silent regressions on
+    # indentation, the ↳ arrow, line-text quoting, and step ordering.
+    assert "↳ matches CLAUDE.local.md" in captured.err
+    assert "↳ matches .claude/local/ops.md" in captured.err
+    assert "    line 12:" in captured.err  # 4-space indent
+    assert "      ↳ " in captured.err  # 6-space indent for arrow line
+    assert "    1. Re-issue" in captured.err
+    assert "    2. OR add" in captured.err
+    # Step 1 must come before step 2 in the output.
+    assert captured.err.index("1. Re-issue") < captured.err.index("2. OR add")
+
+
+def test_print_redaction_diff_no_op_on_clean_report(capsys: pytest.CaptureFixture[str]) -> None:
+    """Guard added during Task 7 review: clean reports produce no output.
+
+    Real callers gate on `if not report.clean:` so this branch is unreachable
+    in practice, but the guard prevents misleading "0 matches across 0 files"
+    output if a future caller forgets to check.
+    """
+    from skills.jared.scripts.lib.board import print_redaction_diff
+
+    print_redaction_diff(RedactionReport(matches=[], scanned_files=[]))
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""

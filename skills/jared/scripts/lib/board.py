@@ -1192,7 +1192,13 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
     """Format a non-clean RedactionReport for stderr.
 
     Caller is responsible for the exit code; this only writes the diagnostic.
+    No-op when the report is clean — it's a guard against future callers that
+    invoke us without checking. Today's callers always gate with `if not
+    report.clean:`, but the guard prevents the "0 matches across 0 files"
+    nonsense output if that contract ever drifts.
     """
+    if report.clean:
+        return
     f = file if file is not None else sys.stderr
     print(
         "error: pre-flight redaction check failed — body references content from",
