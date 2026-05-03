@@ -1186,3 +1186,36 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
                     )
                     break
     return RedactionReport(matches=matches, scanned_files=scanned_files)
+
+
+def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
+    """Format a non-clean RedactionReport for stderr.
+
+    Caller is responsible for the exit code; this only writes the diagnostic.
+    """
+    f = file if file is not None else sys.stderr
+    print(
+        "error: pre-flight redaction check failed — body references content from",
+        file=f,
+    )
+    print(
+        "gitignored claude-shaped local files. Refusing to post.",
+        file=f,
+    )
+    print("", file=f)
+    n = len(report.matches)
+    distinct_files = sorted({m.source_file for m in report.matches})
+    nf = len(distinct_files)
+    match_word = "match" if n == 1 else "matches"
+    file_word = "file" if nf == 1 else "files"
+    print(f"  {n} {match_word} across {nf} {file_word}:", file=f)
+    for m in report.matches:
+        print(f'    line {m.line_no}: "{m.line_text}"', file=f)
+        print(f"      ↳ matches {m.source_file}", file=f)
+    print("", file=f)
+    print("  next steps:", file=f)
+    print("    1. Re-issue the call with private content removed.", file=f)
+    print(
+        "    2. OR add the matched phrase to a tracked file if it's intentionally public.",
+        file=f,
+    )
