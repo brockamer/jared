@@ -37,6 +37,9 @@ from lib.board import (
     parse_referenced_issues as board_parse_referenced_issues,
 )
 from lib.board import (
+    parse_shipped_section as board_parse_shipped_section,
+)
+from lib.board import (
     run_gh as board_run_gh,
 )
 from lib.board import (
@@ -78,10 +81,11 @@ def write_issue_body(repo: str, number: int, body: str) -> None:
         Path(path).unlink(missing_ok=True)
 
 
-# Re-export the shared helper so archive_plan.parse_referenced_issues stays
-# the public test surface — the actual logic lives in lib/board.py and is
-# shared with sweep.py (#86, #87, #88).
+# Re-export the shared helpers so archive_plan.parse_referenced_issues and
+# .parse_shipped_section stay the public test surface — the actual logic
+# lives in lib/board.py and is shared with sweep.py (#86, #87, #88, #89).
 parse_referenced_issues = board_parse_referenced_issues
+parse_shipped_section = board_parse_shipped_section
 
 
 def already_archived(path: Path) -> bool:
@@ -107,20 +111,37 @@ def archive_one(
     yes: bool = False,
     update_issues: bool = True,
 ) -> str | None:
-    """Archive a single plan file. Returns the archived path or None."""
-    text = plan_path.read_text()
-    refs = parse_referenced_issues(text)
-    if not refs:
-        return f"{plan_path}: no ## Issue section; skipping"
+    """Archive a single plan file. Returns the archived path or None.
 
-    # Check all referenced issue states. A plan's ## Issues section may
-    # cite an issue (CLOSED when shipped) or a PR (MERGED when shipped);
-    # both count as "shipped" for archival purposes.
-    SHIPPED = ("CLOSED", "MERGED")
-    states = {n: issue_state(repo, n) for n in refs}
-    if not all(s[0] in SHIPPED for s in states.values()):
-        open_ones = [n for n, (s, _) in states.items() if s not in SHIPPED]
-        return f"{plan_path}: not all issues closed (open: {open_ones}); skipping"
+    Two evidence paths for "this plan has shipped":
+
+    1. ## Shipped section listing one or more PR refs — checked first, since
+       it's an explicit declaration that survives issue recycling. PRs must
+       be MERGED. Archive on the latest merge date. (#89)
+    2. ## Issue section (or **Issue:** bold-line fallback) — referenced
+       issues/PRs must all be CLOSED/MERGED.
+    """
+    text = plan_path.read_text()
+
+    shipped_prs = parse_shipped_section(text)
+    if shipped_prs:
+        states = {n: issue_state(repo, n) for n in shipped_prs}
+        not_merged = [n for n, (s, _) in states.items() if s != "MERGED"]
+        if not_merged:
+            return f"{plan_path}: ## Shipped PRs not all merged (open: {not_merged}); skipping"
+        refs = shipped_prs
+    else:
+        refs = parse_referenced_issues(text)
+        if not refs:
+            return f"{plan_path}: no ## Issue section; skipping"
+
+        # ## Issue may cite an issue (CLOSED when shipped) or a PR (MERGED
+        # when shipped); both count as "shipped" for archival purposes.
+        SHIPPED = ("CLOSED", "MERGED")
+        states = {n: issue_state(repo, n) for n in refs}
+        if not all(s[0] in SHIPPED for s in states.values()):
+            open_ones = [n for n, (s, _) in states.items() if s not in SHIPPED]
+            return f"{plan_path}: not all issues closed (open: {open_ones}); skipping"
 
     # Determine ship date from latest closedAt
     closed_dates = [s[1] for s in states.values() if s[1]]
