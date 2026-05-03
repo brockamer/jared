@@ -28,6 +28,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     OptionNotFound,
     check_closed_not_done,
     fetch_recent_comments_batch,
+    resolve_body,
 )
 
 ALL_SUBCOMMANDS = [
@@ -46,9 +47,15 @@ ALL_SUBCOMMANDS = [
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # allow_abbrev=False is defense against #98: argparse's default abbrev
+    # silently routed `--body` to `--body-file` and the user's literal markdown
+    # ended up as a path to `gh issue create --body-file <markdown>`. Subparsers
+    # below get their own allow_abbrev=False to enforce this on the actual
+    # body-bearing flags (file, comment).
     parser = argparse.ArgumentParser(
         prog="jared",
         description="jared — GitHub Projects v2 board operations.",
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--board",
@@ -92,11 +99,19 @@ def build_parser() -> argparse.ArgumentParser:
     close_p.add_argument("issue_number", type=int)
     close_p.set_defaults(func=_cmd_close)
 
-    comment = sub.add_parser("comment", help="Add a comment to an issue.")
+    comment = sub.add_parser(
+        "comment",
+        help="Add a comment to an issue.",
+        allow_abbrev=False,
+    )
     comment.add_argument("issue_number", type=int)
-    comment.add_argument(
+    comment_body = comment.add_mutually_exclusive_group(required=True)
+    comment_body.add_argument(
+        "--body",
+        help="Inline body text.",
+    )
+    comment_body.add_argument(
         "--body-file",
-        required=True,
         help='Path to markdown file, or "-" for stdin.',
     )
     comment.set_defaults(func=_cmd_comment)
@@ -104,9 +119,18 @@ def build_parser() -> argparse.ArgumentParser:
     file_p = sub.add_parser(
         "file",
         help="File a new issue + add to board + set fields atomically.",
+        allow_abbrev=False,
     )
     file_p.add_argument("--title", required=True)
-    file_p.add_argument("--body-file", required=True)
+    file_body = file_p.add_mutually_exclusive_group(required=True)
+    file_body.add_argument(
+        "--body",
+        help="Inline body text.",
+    )
+    file_body.add_argument(
+        "--body-file",
+        help='Path to markdown file, or "-" for stdin.',
+    )
     file_p.add_argument("--priority", required=True, choices=["High", "Medium", "Low"])
     file_p.add_argument("--status", help="Status column (default: Backlog)")
     file_p.add_argument("--label", action="append", help="Issue label (repeatable)")
@@ -370,7 +394,17 @@ def _cmd_file(args: argparse.Namespace) -> int:
         board.option_id(name, value)
         extra_specs.append((name, value))
 
-    # Create the issue. gh prints the URL on stdout.
+    # Resolve body before any gh call: inline --body, --body-file path, or
+    # --body-file - (stdin). gh issue create still wants a path, so we round-
+    # trip through a temp file. Single resolution seam keeps #97's redactor
+    # ergonomic — one place to scan.
+    body = resolve_body(args.body, args.body_file)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8"
+    ) as tf:
+        tf.write(body)
+        body_tmp_path = tf.name
+
     create_args = [
         "issue",
         "create",
@@ -379,7 +413,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
         "--title",
         args.title,
         "--body-file",
-        args.body_file,
+        body_tmp_path,
     ]
     for label in args.label or []:
         create_args.extend(["--label", label])
@@ -388,6 +422,8 @@ def _cmd_file(args: argparse.Namespace) -> int:
     except GhInvocationError as e:
         print(f"error: gh issue create failed: {e}", file=sys.stderr)
         return 2
+    finally:
+        Path(body_tmp_path).unlink(missing_ok=True)
     if not issue_url.startswith("http"):
         print(f"error: unexpected gh issue create output: {issue_url[:200]}", file=sys.stderr)
         return 2
@@ -544,7 +580,7 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
 
 def _cmd_comment(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
-    body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
+    body = resolve_body(args.body, args.body_file)
 
     # gh issue comment requires a file path, even when we got the body
     # from stdin — write a temp file, invoke, clean up.
