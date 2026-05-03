@@ -26,6 +26,7 @@ Flow:
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why
    - Scope discovered but not filed → propose filing new issues now (can use `/jared-file`-style flow inline)
    - Plans/specs whose issues just closed → propose archival via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
+   - **Doc-sync flag (advisory).** For each touched issue, scan its merged PRs (or unpushed commits) — if code changed but no `.md` outside `docs/sessions/` was touched, surface: *"#N's PR touched code but no doc surface — was a doc update relevant?"* Flag, do not enforce. Most well-maintained projects pair code with doc updates by convention; the flag prompts the human to confirm rather than gates the wrap on it.
 
 4. **Present all drafts consolidated** for user review:
 

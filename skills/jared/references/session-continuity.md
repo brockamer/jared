@@ -26,6 +26,12 @@ One comment per session per touched issue. Template at `assets/session-note.md.t
 **State:** Branch, uncommitted changes, test status, anything operationally fiddly.
 ```
 
+### Anti-pattern: re-stating architecture
+
+Session notes describe what *changed* this session and what's *open* — they are deltas, not snapshots of how the code works. If you find yourself paraphrasing what a function does, what files exist, or how the architecture is laid out, link to `CLAUDE.md` or the source instead. Documentation drift starts when two surfaces describe the same thing — and the surface read less often (a Session note buried in an issue thread) is the one that goes stale.
+
+The test: if a reader unfamiliar with the project can understand the change from the Session note, but would still need to read `CLAUDE.md` to understand *the codebase*, the note is shaped right. If the note tries to do both, trim it.
+
 ### Field rules
 
 - **Progress** is always filled. Even "Abandoned in favor of #<N>" is a progress report.
