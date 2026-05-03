@@ -1,3 +1,7 @@
+---
+**Shipped in #102 on 2026-05-03. Final decisions captured in issue body.**
+---
+
 # PII Pre-Flight Redactor — Design Spec
 
 **Issue:** brockamer/jared#102
