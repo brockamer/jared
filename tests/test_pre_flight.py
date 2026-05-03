@@ -126,3 +126,55 @@ def test_find_claude_shaped_files_ignores_non_claude_files(tmp_path: Path) -> No
     (tmp_path / "README.md").write_text("hi")
     (tmp_path / "notes.md").write_text("hi")
     assert _find_claude_shaped_files(tmp_path) == []
+
+
+def test_pre_flight_check_match_in_CLAUDE_local_flagged(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+    body = (
+        "## Filing a routine bug\n\n"
+        "While testing I noticed the deploy host is internal-foo-7.corp.example "
+        "stops responding under load.\n"
+    )
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert not report.clean
+    assert len(report.matches) == 1
+    m = report.matches[0]
+    assert m.matched_phrase == "the deploy host is internal-foo-7.corp.example"
+    assert m.source_file == tmp_path / "CLAUDE.local.md"
+    assert "internal-foo-7" in m.line_text
+
+
+def test_pre_flight_check_no_match_clean(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+    body = "Wholly unrelated body text about the public weather service.\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert report.clean
+
+
+def test_pre_flight_check_match_in_dot_claude_local_md_flagged(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    local = tmp_path / ".claude" / "local"
+    local.mkdir(parents=True)
+    (local / "ops.md").write_text("credentials live at /opt/secrets/foo.json on the prod host\n")
+    body = "Here's the recipe: credentials live at /opt/secrets/foo.json on the prod host.\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert not report.clean
+    assert report.matches[0].source_file == local / "ops.md"
+
+
+def test_pre_flight_check_no_git_repo_returns_clean(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+    body = "the deploy host is internal-foo-7.corp.example\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert report.clean
+    assert report.scanned_files == []
+
+
+def test_pre_flight_check_records_line_number(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+    body = "line 1\nline 2\nthe deploy host is internal-foo-7.corp.example\nline 4\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert report.matches[0].line_no == 3

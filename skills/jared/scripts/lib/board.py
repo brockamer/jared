@@ -1109,7 +1109,32 @@ def _find_claude_shaped_files(project_root: Path) -> list[Path]:
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     """Scan body against gitignored claude-shaped files; return a structured report.
 
-    Skeleton — returns a clean report unconditionally. Subsequent tasks fill
-    in phrase extraction, file discovery, allowlist filtering, and caching.
+    Pure function — no I/O on caller's behalf, no exit, no print. Caller
+    decides what to do with a non-clean report.
     """
-    return RedactionReport(matches=[], scanned_files=[])
+    files = _find_claude_shaped_files(project_root)
+    if not files:
+        return RedactionReport(matches=[], scanned_files=[])
+
+    # Index every candidate phrase to its source file for diagnostic output.
+    phrase_to_source: dict[str, Path] = {}
+    for f in files:
+        for phrase in _extract_phrases(f):
+            phrase_to_source.setdefault(phrase, f)
+
+    matches: list[RedactionMatch] = []
+    body_lines = body.splitlines()
+    for phrase, source in phrase_to_source.items():
+        if phrase in body:
+            for i, line in enumerate(body_lines, start=1):
+                if phrase in line:
+                    matches.append(
+                        RedactionMatch(
+                            line_no=i,
+                            line_text=line,
+                            matched_phrase=phrase,
+                            source_file=source,
+                        )
+                    )
+                    break  # first hit per phrase is enough
+    return RedactionReport(matches=matches, scanned_files=files)
