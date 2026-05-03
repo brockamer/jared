@@ -362,6 +362,45 @@ def check_native_dependencies(
     return findings
 
 
+def check_off_board_issues(
+    items: list[dict[str, Any]],
+    issues_by_number: dict[int, dict[str, Any]],
+) -> list[str]:
+    """Flag open repo issues that have no corresponding project item.
+
+    The "off-board ghost" pattern (#100): an issue is created on the repo
+    via raw `gh issue create` (or any path that bypasses `jared file` /
+    `jared add-to-board`), so it never lands on the project board. The
+    operator can't see it in the kanban view; Status and Priority are
+    null; it sorts to the bottom and disappears.
+
+    `_cmd_file` makes this hard to produce on purpose, but the fallback
+    path is real: when `jared file` errors opaquely, sessions sometimes
+    drop to plain `gh issue create` to keep moving — leaving an orphan
+    behind. This check is the durable backstop.
+
+    Caller passes `issues_by_number` already filtered to repo-open
+    issues (see `fetch_open_issues_bulk` which uses `--state open`).
+    A board item with content.state=CLOSED still counts as "on the
+    board" — that's a different drift handled by `check_closed_not_done`.
+    """
+    on_board = {
+        (i.get("content") or {}).get("number")
+        for i in items
+        if (i.get("content") or {}).get("number") is not None
+    }
+    findings = []
+    for n, issue in sorted(issues_by_number.items()):
+        if n in on_board:
+            continue
+        title = (issue.get("title") or "")[:80]
+        findings.append(
+            f"#{n}: {title} — Propose: jared add-to-board {n} --priority Medium "
+            "(adjust priority as needed)"
+        )
+    return findings
+
+
 def check_legacy_priority_labels(issues_by_number: dict[int, dict[str, Any]]) -> list[str]:
     findings = []
     for n, issue in issues_by_number.items():
@@ -649,6 +688,14 @@ def main() -> int:
             print(f"  {format_closed_not_done_line(entry)}")
     else:
         print("  None")
+    print()
+
+    print("== Off-board issues (open in repo, missing from project) ==")
+    if not issues_by_number:
+        print("  (skipped — no issue data)")
+    else:
+        for f in check_off_board_issues(items, issues_by_number) or ["None"]:
+            print(f"  {f}")
     print()
 
     print("== Session-note freshness (In Progress, last 3 days) ==")

@@ -54,6 +54,14 @@ Also flag items that have been in Blocked status for more than 7 days — propos
 
 Issues in Done since before the last release — fine to leave, but glance for anything that should have been closed differently (closed as "won't fix" but with no explanatory comment). Add a `wontfix` or `obsolete` label if appropriate.
 
+### 6b. Off-board issues (ghost detection)
+
+Open issues in the repo that have no project item — `gh issue create` ran somewhere outside `jared file` / `jared add-to-board` and the issue never landed on the kanban. The operator can't see it; Status and Priority are null; it sorts to the bottom and disappears.
+
+`sweep.py`'s `check_off_board_issues` intersects `gh issue list --state open` against `gh project item-list` and flags any difference. Each finding renders a `jared add-to-board <N> --priority Medium` recovery line — adjust priority before pasting.
+
+This is the durable backstop for the "any opaque `jared file` failure → fall back to raw `gh issue create` → orphan" pattern (issue #100). Detection is automatic; remediation is per-item with explicit operator approval.
+
 ### 7. Label hygiene
 
 - Deprecated labels (e.g., legacy `priority:` labels when the Priority field is canonical) — strip.
