@@ -1,3 +1,4 @@
+import subprocess as _subprocess
 from io import StringIO
 from pathlib import Path
 
@@ -177,3 +178,113 @@ def test_comment_handles_plain_text_url_response(
     assert "OK:" in captured.out
     assert "42" in captured.out
     assert url in captured.out
+
+
+def _git_init_with_claude_local(tmp_path: Path, claude_local_content: str) -> None:
+    """Same shape as test_cmd_file.py's helper. Duplicated rather than
+    extracted because the two files don't share a private helper module
+    today and adding one for two callers is over-engineering."""
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        check=True,
+    )
+    _subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "CLAUDE.local.md").write_text(claude_local_content)
+
+
+def test_cmd_comment_refuses_on_dirty_pre_flight_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    board_md = write_minimal_board(tmp_path)
+    leaky_phrase = "credentials live at /opt/secrets/foo.json on prod"
+    _git_init_with_claude_local(tmp_path, leaky_phrase + "\n")
+
+    monkeypatch.chdir(tmp_path)
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    calls, _bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body",
+            f"Note: {leaky_phrase}.",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    assert "pre-flight redaction check failed" in captured.err
+    assert not any("issue" in c and "comment" in c for c in calls), (
+        f"redactor must short-circuit before gh; calls: {calls}"
+    )
+
+
+def test_cmd_comment_proceeds_on_clean_pre_flight_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    board_md = write_minimal_board(tmp_path)
+    _git_init_with_claude_local(tmp_path, "credentials live at /opt/secrets/foo.json on prod\n")
+
+    monkeypatch.chdir(tmp_path)
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body",
+            "perfectly safe note with no overlap",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert bodies == ["perfectly safe note with no overlap"]
+
+
+def test_cmd_comment_clean_when_no_claude_local(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Mirror of the test_cmd_file.py guard test: no CLAUDE.local.md → no
+    redactor activity → existing tests stay green. Includes monkeypatch.chdir
+    + cache clear to isolate from pytest's cwd (Task 8 fix-cycle pattern)."""
+    board_md = write_minimal_board(tmp_path)
+
+    monkeypatch.chdir(tmp_path)
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    body_file = tmp_path / "note.md"
+    body_file.write_text("ordinary session note.")
+
+    _calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "comment",
+            "42",
+            "--body-file",
+            str(body_file),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert bodies == ["ordinary session note."]
