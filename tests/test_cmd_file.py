@@ -817,3 +817,49 @@ def test_cmd_file_clean_when_no_claude_local(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     assert any("issue" in c and "create" in c for c in calls)
+
+
+def test_cmd_file_refuses_when_run_from_subdir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The redactor must scan from the project root regardless of which
+    subdirectory the operator invoked jared from. Without _find_project_root,
+    `Path.cwd()` alone would miss the .git/ at the root, return clean, and
+    let leaky bodies through silently — the precise failure mode the
+    redactor exists to prevent.
+    """
+    board_md = _write_full_board(tmp_path)
+    leaky_phrase = "the deploy host is internal-foo-7.corp.example"
+    _git_init_with_claude_local(tmp_path, leaky_phrase + "\n")
+
+    # Operator runs `jared` from a feature subdirectory, not the repo root.
+    subdir = tmp_path / "src" / "feature"
+    subdir.mkdir(parents=True)
+    monkeypatch.chdir(subdir)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            f"Note: {leaky_phrase} is flaky.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    assert "pre-flight redaction check failed" in captured.err
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"redactor must short-circuit before gh; calls: {calls}"
+    )

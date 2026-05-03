@@ -1106,6 +1106,21 @@ def _find_claude_shaped_files(project_root: Path) -> list[Path]:
     return found
 
 
+def _find_project_root(start: Path) -> Path:
+    """Walk up from `start` to the nearest ancestor containing a `.git/` entry.
+
+    Returns the discovered project root if found, else `start.resolve()` so
+    the redactor's no-git short-circuit applies cleanly. Used by the CLI to
+    fix #102's subdir blind spot — `Path.cwd()` alone doesn't find the root
+    when the operator invokes `jared` from a feature subdirectory.
+    """
+    p = start.resolve()
+    for candidate in (p, *p.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return p
+
+
 def _read_tracked_content(project_root: Path) -> str:
     """Concatenate every tracked file's content into one searchable blob.
 
