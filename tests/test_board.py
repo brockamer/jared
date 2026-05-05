@@ -1107,6 +1107,44 @@ def test_board_defaults_when_jared_config_absent(tmp_path: Path) -> None:
     assert board.session_start_checks == []
 
 
+def test_board_parses_model_guidance_kill_switch(tmp_path: Path) -> None:
+    """`model-guidance: disabled` in ## Jared config opts the project out of
+    the Model & execution guidance discipline (#114). The default is enabled,
+    and any value other than the literal `disabled` keeps it enabled — typos
+    fail safe (toward the discipline being on, not off)."""
+    from skills.jared.scripts.lib.board import Board
+
+    header = (
+        "- Project URL: https://github.com/users/brockamer/projects/7\n"
+        "- Project number: 7\n"
+        "- Project ID: PVT_kwHO_xyz\n"
+        "- Owner: brockamer\n"
+        "- Repo: brockamer/findajob\n"
+    )
+
+    def write_board(name: str, jared_config: str) -> Path:
+        board_md = tmp_path / name / "project-board.md"
+        board_md.parent.mkdir(parents=True, exist_ok=True)
+        board_md.write_text(header + ("\n" + jared_config if jared_config else ""))
+        return board_md
+
+    # Section absent — default is enabled.
+    absent = write_board("absent", "")
+    assert Board.from_path(absent).model_guidance_enabled is True
+
+    # Explicit `enabled` — enabled.
+    enabled = write_board("enabled", "## Jared config\n\n- model-guidance: enabled\n")
+    assert Board.from_path(enabled).model_guidance_enabled is True
+
+    # Explicit `disabled` — disabled.
+    disabled = write_board("disabled", "## Jared config\n\n- model-guidance: disabled\n")
+    assert Board.from_path(disabled).model_guidance_enabled is False
+
+    # Typo / unknown value — defaults to enabled (fail-safe toward discipline).
+    typo = write_board("typo", "## Jared config\n\n- model-guidance: maybe\n")
+    assert Board.from_path(typo).model_guidance_enabled is True
+
+
 def _write_full_board_for_add(tmp_path: Path) -> "Path":
     """Write a full board with Status, Priority, and Work Stream fields."""
     from textwrap import dedent
