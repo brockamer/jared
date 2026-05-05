@@ -107,6 +107,50 @@ gh api graphql --cache 1h -f query='
 
 **Pre-flight redaction.** Every `jared file` and `jared comment` runs a pre-flight scan against gitignored claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`). On a hit, the call is refused with a structured diff and exit 2; nothing is posted. Full reference: `references/pii-pre-flight.md`.
 
+## Model & execution guidance — section + kill switch
+
+Every issue body filed through `/jared-file` carries a `## Model & execution guidance` H2 between `## Acceptance criteria` and `## Planning`. Four subsections, all required when the section is present:
+
+```markdown
+## Model & execution guidance
+
+**Cheap (Haiku-class):**
+- <bullet>
+
+**Standard (Sonnet-class):**
+- <bullet>
+
+**Smart (Opus / `advisor()`):**
+- <bullet>
+
+**Subagent dispatch hints:**
+- <bullet — names real Claude Code agents: Explore, general-purpose, claude-code-guide, advisor()>
+
+**Execution sketch:**
+1. <step>
+```
+
+Use abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure. The dispatch-hints subsection names *real* Claude Code primitives so the puller doesn't re-derive them. Full doctrine and rendered example in SKILL.md § "Model & execution guidance".
+
+**Two enforcement points:**
+
+| When | Where | What |
+|---|---|---|
+| File-time | `/jared-file` body composition | Section is part of every new issue body. |
+| Start-time | `/jared-start` step 5a | If the body has no `## Model & execution guidance` H2, generate evaluation, surface in announce, post as Session-note-shaped comment on user approval. |
+
+**Project-level kill switch.** Add this bullet to `## Jared config` in `docs/project-board.md`:
+
+```markdown
+## Jared config
+
+- model-guidance: disabled
+```
+
+`Board.model_guidance_enabled` (parsed by `lib/board.py`) returns False; `/jared-file` skips composing the section, `/jared-start` skips the backstop. Default is enabled. Only the literal value `disabled` flips it off — typos and other values fail safe toward the discipline being on.
+
+**Where the start-time evaluation lands.** Posted as a comment on the issue with header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`, using `jared comment <N> --body-file <path>`. The body is not retroactively amended — comments are append-only and durable, body edits are not. Subject to the standard pre-flight redaction.
+
 ## Operations Jared doesn't wrap today
 
 These remain raw-gh territory; none are used often enough to pull into the CLI.
