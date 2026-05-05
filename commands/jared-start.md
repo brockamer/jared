@@ -52,6 +52,18 @@ Flow:
    - Any plan or spec linked from `## Planning` — read and summarize
    - Git state: current branch, uncommitted changes, last 5 commits touching related files
 
+5a. **Model guidance backstop.** Scan the issue body for an `## Model & execution guidance` H2.
+
+   - If present: load it as part of context; surface its content in step 7's announce so the user can confirm or amend.
+   - If absent AND the project's `docs/project-board.md` does not have `- model-guidance: disabled` in `## Jared config`: generate a fresh evaluation by classifying each acceptance criterion (and the issue summary) into Cheap (Haiku-class) / Standard (Sonnet-class) / Smart (Opus / `advisor()`) tiers, then drafting Subagent dispatch hints and an Execution sketch. Use the same shape the file-time section uses — see SKILL.md § "Model & execution guidance" for the rendered example.
+   - If absent AND the kill switch is set: skip; load no guidance.
+
+   When generated at start-time, the guidance is surfaced in step 7 as a labeled block (`Model & execution guidance (generated at start-time)`) so the user can confirm or amend before step 8.
+
+   On user confirmation in step 8, post the approved guidance as a comment on the issue using the Session-note shape, with the header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`. This makes the evaluation a durable artifact without retroactively amending the body. The `jared comment` CLI handles the post (subject to the standard pre-flight redaction). If the user amends the guidance during step 8, post the amended version, not the originally-generated one.
+
+   The approved-comment post is best-effort: a `gh` failure here surfaces the error but does not block the session start. The issue is already In Progress at this point; the missing comment is recoverable but starting work is not.
+
 6. **Run tied-issues pre-pull analysis.** Run:
 
    ```bash
@@ -74,6 +86,24 @@ Flow:
        - <bullet from "Context you'll need">
        - ...
    ```
+
+   When step 5a generated guidance at start-time (or loaded existing guidance from the body), include a **guidance block** in the announce. The label distinguishes the source so the user knows what they're confirming:
+
+   ```
+   Model & execution guidance (<from issue body | generated at start-time>):
+     Cheap (Haiku-class):
+       - <bullet>
+     Standard (Sonnet-class):
+       - <bullet>
+     Smart (Opus / advisor()):
+       - <bullet>
+     Subagent dispatch hints:
+       - <bullet>
+     Execution sketch:
+       1. <step>
+   ```
+
+   When the kill switch is set, omit the guidance block entirely.
 
    Then the per-issue announcement:
 
@@ -101,8 +131,20 @@ Flow:
    Git: branch <name>, <clean | N modified>, last relevant commit <hash> <msg>
    ```
 
-   The posture block is omitted when no prompt was found in step 1. Up to three visually-separated blocks when all are present: cross-issue posture above, ties block (from step 6) next, issue-specific below.
+   The posture block is omitted when no prompt was found in step 1. The guidance block is omitted when the kill switch is set. Up to four visually-separated blocks when all are present: posture (cross-issue), guidance (model & execution), ties (cross-issue), per-issue announcement.
 
 8. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
+
+   When step 5a generated guidance at start-time and the user confirms, post the (possibly amended) guidance as a comment on the issue:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file <path>
+   ```
+
+   The comment body uses the Session-note shape with header
+   `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`
+   followed by the four-tier block. A `jared comment` failure surfaces the error
+   but does not roll back step 4's move to In Progress. Re-run the comment post
+   manually if needed; the body retains the In Progress status either way.
 
 This replaces the pattern of manually reading the issue, the plan, and a handoff prompt before starting. The board + latest Session note + (when present) the most recent handoff prompt is the handoff.
