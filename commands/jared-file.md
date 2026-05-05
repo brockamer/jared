@@ -26,6 +26,7 @@ Flow:
    - `## Current state` — "Not started."
    - `## Decisions` — "(none yet)"
    - `## Acceptance criteria` — in `<details>` block, list criteria
+   - `## Model & execution guidance` — classify the work into Cheap (Haiku-class) / Standard (Sonnet-class) / Smart (Opus / `advisor()`) tiers, name subagent dispatch hints (`Explore`, `general-purpose`, `claude-code-guide`, `advisor()`), and outline a short Execution sketch. See SKILL.md § "Model & execution guidance" for the rendered example. Skip this section if the project's `docs/project-board.md` has `- model-guidance: disabled` in `## Jared config`.
    - `## Depends on` / `## Blocks` — fill in if applicable, else "(none)"
    - `## Planning` — fill in if a plan/spec already exists, else "(none)"
 
