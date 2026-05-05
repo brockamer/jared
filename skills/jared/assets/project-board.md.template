@@ -103,6 +103,8 @@ Project-level knobs that change Jared's behavior on this board. Each bullet is `
 
 - `session-handoff-prompt: ask` — when `/jared-wrap` finishes, ask whether to draft a session handoff prompt for the next session. Values: `ask` (default), `always`, `never`. Used by `/jared-wrap`. The prompt is written to `tmp/next-session-prompt-<TIMESTAMP>.md` and is `.gitignore`d — ephemeral by design.
 
+- `model-guidance: enabled` — controls whether new issues carry a `## Model & execution guidance` section (file-time composition) and whether `/jared-start` evaluates missing guidance lazily (start-time backstop). Values: `enabled` (default), `disabled`. Used by `/jared-file` and `/jared-start`. See SKILL.md § "Model & execution guidance" for the rendered shape.
+
 ## Session start checks
 
 Operational commands that the session handoff prompt should embed in its "Quick health check on session start" section. Each fenced ```bash block is one check command; the slash command runs `jared next-session-prompt --include-session-checks` to render them. Omit the section if you don't want any.

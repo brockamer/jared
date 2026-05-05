@@ -29,6 +29,9 @@ tests/testbed.env
 # Per-user Claude Code permissions (not versioned)
 .claude/settings.local.json
 
+# Claude Code per-machine runtime state (lock files, scheduled-task state)
+.claude/scheduled_tasks.lock
+
 # Per-user Claude Code project memory (private, not versioned)
 CLAUDE.local.md
 
