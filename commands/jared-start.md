@@ -19,7 +19,7 @@ Flow:
 
    Resolve the target issue:
    - If `$ARGUMENTS` is non-empty: use it. No drift check on the prompt's recommendation.
-   - If `$ARGUMENTS` is empty AND a recommended issue was parsed: drift-check by running `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>`. If the issue is closed on GitHub or its Status is `Done`, the recommendation is stale — output the **posture block** (see step 6) followed by:
+   - If `$ARGUMENTS` is empty AND a recommended issue was parsed: drift-check by running `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>`. If the issue is closed on GitHub or its Status is `Done`, the recommendation is stale — output the **posture block** (see step 8) followed by:
 
      ```
      Handoff prompt recommends #<N>, but #<N> is now <closed|Done>.
@@ -30,7 +30,7 @@ Flow:
 
      Wait for user input, then resume the flow at step 2 with the user-supplied issue. If the recommended issue is pullable, set it as the target and continue.
 
-   - If `$ARGUMENTS` is empty AND no recommended issue was parseable (or no prompt found): ask which issue. When a prompt was found but had no parseable `## To start`, the posture block is still surfaced in step 6.
+   - If `$ARGUMENTS` is empty AND no recommended issue was parseable (or no prompt found): ask which issue. When a prompt was found but had no parseable `## To start`, the posture block is still surfaced in step 8.
 
 2. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` and read the `In Progress (N)` header — that `N` is the current count. If it's already at the project's configured cap (default 3), STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
@@ -52,19 +52,19 @@ Flow:
    - Any plan or spec linked from `## Planning` — read and summarize
    - Git state: current branch, uncommitted changes, last 5 commits touching related files
 
-5a. **Model guidance backstop.** Scan the issue body for an `## Model & execution guidance` H2.
+6. **Model guidance backstop.** Scan the issue body for an `## Model & execution guidance` H2.
 
-   - If present: load it as part of context; surface its content in step 7's announce so the user can confirm or amend.
+   - If present: load it as part of context; surface its content in step 8's announce so the user can confirm or amend.
    - If absent AND the project's `docs/project-board.md` does not have `- model-guidance: disabled` in `## Jared config`: generate a fresh evaluation by classifying each acceptance criterion (and the issue summary) into Cheap (Haiku-class) / Standard (Sonnet-class) / Smart (Opus / `advisor()`) tiers, then drafting Subagent dispatch hints and an Execution sketch. Use the same shape the file-time section uses — see SKILL.md § "Model & execution guidance" for the rendered example.
    - If absent AND the kill switch is set: skip; load no guidance.
 
-   When generated at start-time, the guidance is surfaced in step 7 as a labeled block (`Model & execution guidance (generated at start-time)`) so the user can confirm or amend before step 8.
+   When generated at start-time, the guidance is surfaced in step 8 as a labeled block (`Model & execution guidance (generated at start-time)`) so the user can confirm or amend before step 9.
 
-   On user confirmation in step 8, post the approved guidance as a comment on the issue using the Session-note shape, with the header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`. This makes the evaluation a durable artifact without retroactively amending the body. The `jared comment` CLI handles the post (subject to the standard pre-flight redaction). If the user amends the guidance during step 8, post the amended version, not the originally-generated one.
+   On user confirmation in step 9, post the approved guidance as a comment on the issue using the Session-note shape, with the header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`. This makes the evaluation a durable artifact without retroactively amending the body. The `jared comment` CLI handles the post (subject to the standard pre-flight redaction). If the user amends the guidance during step 9, post the amended version, not the originally-generated one.
 
    The approved-comment post is best-effort: a `gh` failure here surfaces the error but does not block the session start. The issue is already In Progress at this point; the missing comment is recoverable but starting work is not.
 
-6. **Run tied-issues pre-pull analysis.** Run:
+7. **Run tied-issues pre-pull analysis.** Run:
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared ties <N>
@@ -74,7 +74,7 @@ Flow:
 
    The block is **advisory** — never gate the start on tie resolution. Operators may close superseded predecessors, sequence feeders first, fold same-file issues into the target's PR, or ignore the block entirely. Each tie carries a confidence tag (`strong` / `medium` / `weak`) and a heuristic suggested action.
 
-7. **Announce the session plan.** When a prompt was found in step 1, prepend a **posture block**:
+8. **Announce the session plan.** When a prompt was found in step 1, prepend a **posture block**:
 
    ```
    Handoff posture (tmp/next-session-prompt-<TIMESTAMP>.md, <relative-time>):
@@ -87,7 +87,7 @@ Flow:
        - ...
    ```
 
-   When step 5a generated guidance at start-time (or loaded existing guidance from the body), include a **guidance block** in the announce. The label distinguishes the source so the user knows what they're confirming:
+   When step 6 generated guidance at start-time (or loaded existing guidance from the body), include a **guidance block** in the announce. The label distinguishes the source so the user knows what they're confirming:
 
    ```
    Model & execution guidance (<from issue body | generated at start-time>):
@@ -133,9 +133,9 @@ Flow:
 
    The posture block is omitted when no prompt was found in step 1. The guidance block is omitted when the kill switch is set. Up to four visually-separated blocks when all are present: posture (cross-issue), guidance (model & execution), ties (cross-issue), per-issue announcement.
 
-8. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
+9. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
 
-   When step 5a generated guidance at start-time and the user confirms, post the (possibly amended) guidance as a comment on the issue:
+   When step 6 generated guidance at start-time and the user confirms, post the (possibly amended) guidance as a comment on the issue:
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file <path>

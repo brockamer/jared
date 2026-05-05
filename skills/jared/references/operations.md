@@ -147,7 +147,7 @@ Use abstract tier labels (Cheap / Standard / Smart) — model names age faster t
 - model-guidance: disabled
 ```
 
-`Board.model_guidance_enabled` (parsed by `lib/board.py`) returns False; `/jared-file` skips composing the section, `/jared-start` skips the backstop. Default is enabled. Only the literal value `disabled` flips it off — typos and other values fail safe toward the discipline being on.
+The kill switch is doctrinal: `/jared-file` reads this bullet from `docs/project-board.md` and skips composition when it says `disabled`; `/jared-start` does the same for the backstop. Default is enabled. Only the literal value `disabled` flips it off — typos and other values fail safe toward the discipline being on.
 
 **Where the start-time evaluation lands.** Posted as a comment on the issue with header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`, using `jared comment <N> --body-file <path>`. The body is not retroactively amended — comments are append-only and durable, body edits are not. Subject to the standard pre-flight redaction.
 

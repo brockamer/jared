@@ -26,7 +26,7 @@ Flow:
 3. **Reconcile drift.** Before posting, check for:
    - In Progress items that were actually completed → propose closing
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why
-   - Scope discovered but not filed → propose filing new issues now (can use `/jared-file`-style flow inline)
+   - Scope discovered but not filed → propose filing new issues now (can use `/jared-file`-style flow inline). New issue bodies must include the `## Model & execution guidance` section per SKILL.md § "Model & execution guidance" — file-time is the contract; the start-time backstop is a fallback. Skip the section when `- model-guidance: disabled` appears in `## Jared config` of `docs/project-board.md`.
    - Plans/specs whose issues just closed → propose archival via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
    - **Doc-sync flag (advisory).** For each touched issue, scan its merged PRs (or unpushed commits) — if code changed but no `.md` outside `docs/sessions/` was touched, surface: *"#N's PR touched code but no doc surface — was a doc update relevant?"* Flag, do not enforce. Most well-maintained projects pair code with doc updates by convention; the flag prompts the human to confirm rather than gates the wrap on it.
 
