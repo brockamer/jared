@@ -248,6 +248,45 @@ A reader glancing at the board must understand the state of the world. Enforce:
 
 See `references/human-readable-board.md` for title/body templates and `assets/issue-body.md.template` for the default body scaffold.
 
+## Model & execution guidance — every issue declares its tier mix
+
+Every issue body carries a `## Model & execution guidance` section that names which parts of the work are Cheap (Haiku-class), Standard (Sonnet-class), and Smart (Opus / `advisor()`), plus a short Subagent dispatch hints subsection and an Execution sketch. The point: when a session pulls the issue, model selection is a property of the issue, not session-floor knowledge that gets re-derived each time.
+
+**File-time composition is the contract.** When you compose the body of a new issue in `/jared-file`, fill in the four subsections from the template. Use the abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure does. Name real Claude Code primitives in the dispatch hints: `Explore` (Haiku-default, read-only search), `general-purpose` (inherits, multi-step), `claude-code-guide` (Haiku-default, Claude Code questions), and `advisor()` for the senior reviewer pass.
+
+**Start-time backstop.** When `/jared-start` pulls an issue whose body has no `## Model & execution guidance` H2, the start flow generates the evaluation on the fly and surfaces it as part of the proposed-plan announce. User confirmation in step 8 implicitly approves the evaluation; on approval, jared posts it as a Session-note-shaped comment on the issue (timestamped `## Session YYYY-MM-DD — Model & execution guidance (start-time backstop)`). The body is not retroactively amended — comments are append-only and durable, body edits are not. See `commands/jared-start.md` for the exact step ordering.
+
+**Project-level kill switch.** A project that doesn't want this can add `Model guidance: disabled` to the metadata block in `docs/project-board.md`. `Board.model_guidance_enabled` (parsed by `lib/board.py`) returns False; both the file-time composition and the start-time backstop skip when disabled. Default is enabled.
+
+**Rendered example — what a filled-in section looks like:**
+
+```markdown
+## Model & execution guidance
+
+**Cheap (Haiku-class):**
+- Reading existing test fixtures and identifying the patch surface in `lib/board.py`.
+- Generating the placeholder docstring for the new public method.
+
+**Standard (Sonnet-class):**
+- Implementing `Board.parse_optional_field` and wiring it into `_parse`.
+- Writing the unit test for the three input cases (default, explicit, missing).
+
+**Smart (Opus / `advisor()`):**
+- Final review pass before the PR opens — verifying the field-name choice doesn't collide with existing parsing and that the default-False behavior is right.
+
+**Subagent dispatch hints:**
+- Use `Explore` for the initial scan of how other optional fields are parsed in `lib/board.py`.
+- Use `general-purpose` for the implementation phase if the parent session is on Opus and wants to delegate.
+- Call `advisor()` once before the final commit.
+
+**Execution sketch:**
+1. Explore the existing parse pattern for one optional field.
+2. Implement + test the new field in one phase.
+3. Advisor review, then commit + PR.
+```
+
+**This section is informational, not enforced.** Jared doesn't validate that the puller actually used the recommended models — that's session discipline, not board state. Drift is fine; the value is in making the recommendation visible up front and giving the puller a starting point.
+
 ## Bootstrapping a new project
 
 When invoked against a repo that has no `docs/project-board.md`:
