@@ -256,7 +256,7 @@ Every issue body carries a `## Model & execution guidance` section that names wh
 
 **Start-time backstop.** When `/jared-start` pulls an issue whose body has no `## Model & execution guidance` H2, the start flow generates the evaluation on the fly and surfaces it as part of the proposed-plan announce. User confirmation in step 8 implicitly approves the evaluation; on approval, jared posts it as a Session-note-shaped comment on the issue (timestamped `## Session YYYY-MM-DD — Model & execution guidance (start-time backstop)`). The body is not retroactively amended — comments are append-only and durable, body edits are not. See `commands/jared-start.md` for the exact step ordering.
 
-**Project-level kill switch.** A project that doesn't want this can add `- model-guidance: disabled` to the `## Jared config` section of `docs/project-board.md`. `Board.model_guidance_enabled` (parsed by `lib/board.py`) returns False; both the file-time composition and the start-time backstop skip when disabled. Default is enabled.
+**Project-level kill switch.** A project that doesn't want this can add `- model-guidance: disabled` to the `## Jared config` section of `docs/project-board.md`. The kill switch is doctrinal: when `/jared-file` and `/jared-start` are about to compose or generate guidance, they read this bullet from the doc and skip when it says `disabled`. Only the literal value `disabled` flips it off — typos and other values fail safe toward the discipline being on. Default is enabled.
 
 **Rendered example — what a filled-in section looks like:**
 
