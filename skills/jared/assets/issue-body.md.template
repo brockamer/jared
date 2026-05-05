@@ -16,6 +16,31 @@ Not started.
 
 </details>
 
+## Model & execution guidance
+
+**Cheap (Haiku-class):**
+- (parts that are read-only, mechanical, or pattern-matching)
+
+**Standard (Sonnet-class):**
+- (parts that are routine implementation, test writing, refactor)
+
+**Smart (Opus / `advisor()`):**
+- (parts that need design judgment, cross-cutting reasoning, or pre-merge review)
+
+**Subagent dispatch hints:**
+- (which Claude Code agents to call — `Explore`, `general-purpose`, `claude-code-guide`, `advisor()`)
+
+**Execution sketch:**
+1. (first step)
+2. (second step)
+3. (commit / PR boundary)
+
+<!-- Skip this section entirely if the project's docs/project-board.md
+     contains "Model guidance: disabled" in its metadata block. The
+     /jared-start backstop will lazily generate guidance for issues
+     filed before this discipline existed. See SKILL.md § "Model &
+     execution guidance" for the rendered example and rationale. -->
+
 <!--
 Dependencies are tracked natively via GitHub's `blockedBy` API, not in body markup.
 Add an edge with: addBlockedBy(issueId, blockingIssueId). See references/dependencies.md.
