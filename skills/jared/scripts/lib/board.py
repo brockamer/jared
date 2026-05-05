@@ -48,6 +48,9 @@ class Board:
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
     session_handoff_prompt: str = "ask"
     session_start_checks: list[str] = field(default_factory=list)
+    # Default enabled. Only the literal `disabled` value flips it off —
+    # typos and unknown values keep the discipline on (fail-safe). See #114.
+    model_guidance_enabled: bool = True
     # Cached `gh project item-list` result, populated on first board_items()
     # call and reused for the lifetime of this instance. None means uncached.
     _items: list[dict[str, Any]] | None = field(default=None, repr=False)
@@ -129,7 +132,12 @@ class Board:
         assert repo is not None
 
         field_ids, field_options = cls._parse_field_blocks(text)
-        session_handoff_prompt = cls._parse_jared_config(text).get("session-handoff-prompt", "ask")
+        jared_config = cls._parse_jared_config(text)
+        session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
+        # Only the literal `disabled` flips the discipline off; defaults
+        # and any unknown value keep it on. See SKILL.md § "Model & execution
+        # guidance" for the file-time / start-time enforcement points.
+        model_guidance_enabled = jared_config.get("model-guidance", "enabled") != "disabled"
         session_start_checks = cls._parse_session_start_checks(text)
 
         return cls(
@@ -142,6 +150,7 @@ class Board:
             _field_options=field_options,
             session_handoff_prompt=session_handoff_prompt,
             session_start_checks=session_start_checks,
+            model_guidance_enabled=model_guidance_enabled,
             _raw_doc=text,
         )
 
