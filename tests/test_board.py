@@ -1213,6 +1213,56 @@ def test_add_existing_to_board_batches_field_mutations_into_one_graphql_call(
     assert "setStatus" in joined_mutation, joined_mutation
 
 
+def test_add_to_board_retries_when_id_missing_on_first_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """gh project item-add occasionally returns a body with no id on the first
+    call; _add_to_board must retry once and succeed (jared#112)."""
+    from skills.jared.scripts.lib.board import Board
+    from tests.conftest import FakeGhResult
+
+    board_md = _write_full_board_for_add(tmp_path)
+    board = Board.from_path(board_md)
+
+    call_count = 0
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        nonlocal call_count
+        if "item-add" in " ".join(args):
+            call_count += 1
+            if call_count == 1:
+                return FakeGhResult(stdout="{}")  # id absent on first call
+            return FakeGhResult(stdout='{"id": "PVTI_retry_ok"}')
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    item_id = board._add_to_board(99)
+    assert item_id == "PVTI_retry_ok"
+    assert call_count == 2
+
+
+def test_add_to_board_raises_after_retry_still_missing_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """If both the first and retry item-add calls return no id, raise GhInvocationError."""
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+    from tests.conftest import FakeGhResult
+
+    board_md = _write_full_board_for_add(tmp_path)
+    board = Board.from_path(board_md)
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        if "item-add" in " ".join(args):
+            return FakeGhResult(stdout="{}")  # id always absent
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    with pytest.raises(GhInvocationError, match="no id.*after retry"):
+        board._add_to_board(99)
+
+
 def test_tie_stop_words_uses_project_override(tmp_path: Path) -> None:
     """If docs/project-board.md has a `### Tie Analysis` section with a
     `- Label stop-words: x, y, z` bullet, those override the built-in defaults."""
