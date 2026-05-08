@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import import_cli, patch_gh, patch_gh_by_arg
+from tests.conftest import graphql_item_response, import_cli, patch_gh, patch_gh_by_arg
 
 CLI = Path(__file__).parents[1] / "skills" / "jared" / "scripts" / "jared"
 
@@ -98,7 +98,7 @@ def test_cli_field_not_found_is_clean(
     board_md = _write_board_with_priority(tmp_path)
     patch_gh_by_arg(
         monkeypatch,
-        {"item-list": '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}'},
+        {"api graphql": graphql_item_response(project_number=7, item_id="PVTI_aaa")},
     )
     mod = import_cli()
 
@@ -115,7 +115,7 @@ def test_cli_option_not_found_is_clean(
     board_md = _write_board_with_priority(tmp_path)
     patch_gh_by_arg(
         monkeypatch,
-        {"item-list": '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}'},
+        {"api graphql": graphql_item_response(project_number=7, item_id="PVTI_aaa")},
     )
     mod = import_cli()
 
@@ -130,7 +130,10 @@ def test_cli_item_not_found_is_clean(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     board_md = _write_board_with_priority(tmp_path)
-    patch_gh_by_arg(monkeypatch, {"item-list": '{"items": []}'})
+    patch_gh_by_arg(
+        monkeypatch,
+        {"api graphql": '{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}'},
+    )
     mod = import_cli()
 
     rc = mod.main(["--board", str(board_md), "get-item", "999"])

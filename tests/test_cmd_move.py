@@ -3,7 +3,7 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import import_cli, patch_gh_by_arg
+from tests.conftest import graphql_item_response, import_cli, patch_gh_by_arg
 
 
 def _write_board_with_status(tmp_path: Path) -> Path:
@@ -36,7 +36,7 @@ def test_move_sets_status_field(
     calls = patch_gh_by_arg(
         monkeypatch,
         {
-            "item-list": '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}',
+            "api graphql": graphql_item_response(project_number=7, item_id="PVTI_aaa"),
             "item-edit": "{}",
         },
     )

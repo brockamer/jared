@@ -319,12 +319,65 @@ class Board:
         """Drop the cached snapshot. Next `board_items()` call re-fetches."""
         self._items = None
 
+    _ISSUE_PROJECT_ITEM_QUERY = """
+    query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) {
+          projectItems(first: 10) {
+            nodes {
+              id
+              project { number }
+              fieldValues(first: 20) {
+                nodes {
+                  ... on ProjectV2ItemFieldSingleSelectValue {
+                    name
+                    field { ... on ProjectV2SingleSelectField { name } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    def fetch_item_for_issue(self, issue_number: int) -> dict[str, Any] | None:
+        """Fetch this issue's project item via a scoped projectItems query.
+
+        Costs ~1-3 GraphQL points vs ~200-300 for a full item-list scan.
+        Returns a dict with at least 'id' plus any single-select fields
+        lowercased (e.g. 'status', 'priority'), or None if the issue is
+        not on this board. Fix for #109.
+        """
+        owner, repo_name = self.repo.split("/", 1)
+        data = self.run_graphql(
+            self._ISSUE_PROJECT_ITEM_QUERY,
+            owner=owner,
+            repo=repo_name,
+            number=issue_number,
+        )
+        issue = (data.get("data") or {}).get("repository", {}).get("issue") or {}
+        for node in (issue.get("projectItems") or {}).get("nodes", []):
+            if (node.get("project") or {}).get("number") != self.project_number:
+                continue
+            flat: dict[str, Any] = {"id": node.get("id")}
+            for fv in (node.get("fieldValues") or {}).get("nodes", []):
+                field_name = (fv.get("field") or {}).get("name")
+                if field_name:
+                    flat[field_name.lower()] = fv.get("name")
+            return flat
+        return None
+
     def find_item_id(self, issue_number: int) -> str:
-        """Look up the ProjectV2Item id for a given issue number on this board."""
-        for item in self.board_items():
-            content = item.get("content") or {}
-            if content.get("number") == issue_number:
-                return str(item["id"])
+        """Look up the ProjectV2Item id for a given issue number on this board.
+
+        Uses a scoped per-issue projectItems query (~1-3 GraphQL points)
+        instead of a full item-list scan (~200-300 points). Fix for #109.
+        """
+        item = self.fetch_item_for_issue(issue_number)
+        if item and item.get("id"):
+            return str(item["id"])
         raise ItemNotFound(
             f"No project item for issue #{issue_number} in project "
             f"{self.project_number}. Is the issue added to the board?"

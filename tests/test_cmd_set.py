@@ -3,7 +3,7 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import import_cli, patch_gh_by_arg
+from tests.conftest import graphql_item_response, import_cli, patch_gh_by_arg
 
 
 def _write_board_with_priority(tmp_path: Path) -> Path:
@@ -34,7 +34,7 @@ def test_set_invokes_item_edit_with_resolved_ids(
     calls = patch_gh_by_arg(
         monkeypatch,
         {
-            "item-list": '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}',
+            "api graphql": graphql_item_response(project_number=7, item_id="PVTI_aaa"),
             "item-edit": "{}",
         },
     )
@@ -59,7 +59,7 @@ def test_set_unknown_field_exits_nonzero(
     board_md = _write_board_with_priority(tmp_path)
     patch_gh_by_arg(
         monkeypatch,
-        {"item-list": '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}'},
+        {"api graphql": graphql_item_response(project_number=7, item_id="PVTI_aaa")},
     )
 
     mod = import_cli()
@@ -76,7 +76,7 @@ def test_set_unknown_option_exits_nonzero(
     board_md = _write_board_with_priority(tmp_path)
     patch_gh_by_arg(
         monkeypatch,
-        {"item-list": '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}}]}'},
+        {"api graphql": graphql_item_response(project_number=7, item_id="PVTI_aaa")},
     )
 
     mod = import_cli()

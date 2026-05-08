@@ -92,16 +92,13 @@ def test_close_falls_back_to_explicit_move_when_auto_move_lags(
 
     board_md = _write_board_with_status(tmp_path)
     # Board never auto-moves to Done — graphql keeps returning Backlog.
-    # _cmd_set fallback then uses item-list (find_item_id) + item-edit; that
-    # path is out of scope for #22.
+    # _cmd_set fallback now also uses find_item_id → graphql (fix for #109),
+    # so total graphql calls = 3 (polling) + 1 (fallback find_item_id) = 4.
     calls = patch_gh_by_arg(
         monkeypatch,
         {
             "issue close": "",
             "api graphql": _graphql_item_response(project_number=7, status="Backlog"),
-            "item-list": (
-                '{"items": [{"id": "PVTI_aaa", "content": {"number": 42}, "status": "Backlog"}]}'
-            ),
             "item-edit": "{}",
         },
     )
@@ -111,9 +108,9 @@ def test_close_falls_back_to_explicit_move_when_auto_move_lags(
 
     captured = capsys.readouterr()
     assert rc == 0, captured.err
-    # Poll retried 3 times then fell back — 3 graphql calls for the polling.
+    # 3 poll attempts + 1 find_item_id in _cmd_set fallback = 4 graphql calls.
     graphql_calls = [c for c in calls if "graphql" in " ".join(c)]
-    assert len(graphql_calls) == 3
+    assert len(graphql_calls) == 4
     # Fallback path: explicit item-edit to Status=Done
     edit = next((c for c in calls if "item-edit" in c), None)
     assert edit is not None, "expected explicit item-edit fallback"

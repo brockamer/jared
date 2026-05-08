@@ -16,7 +16,7 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import FakeGhResult, import_cli
+from tests.conftest import FakeGhResult, graphql_item_response, import_cli
 
 
 def _write_full_board(tmp_path: Path) -> Path:
@@ -66,9 +66,11 @@ def test_add_to_board_when_issue_not_on_board(
     def fake_run(args: list[str], **kw: object) -> FakeGhResult:
         calls.append(args)
         joined = " ".join(args)
-        if "item-list" in joined:
-            # Membership check: no item for this issue number.
-            return FakeGhResult(stdout='{"items": []}')
+        if "api" in joined and "graphql" in joined and "item-add" not in joined:
+            # fetch_item_for_issue: issue not on board.
+            return FakeGhResult(
+                stdout='{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}'
+            )
         if "item-add" in joined:
             return FakeGhResult(stdout='{"id": "PVTI_new"}')
         return FakeGhResult(stdout="{}")
@@ -93,18 +95,18 @@ def test_add_to_board_when_issue_not_on_board(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
 
-    # find_item_id triggers item-list; issue isn't on board, so we item-add.
+    # fetch_item_for_issue: not on board → item-add.
     assert any("item-add" in " ".join(c) for c in calls)
 
-    # All three fields land in a single graphql mutation — no item-edit calls.
+    # Two graphql calls: one fetch_item_for_issue lookup + one batched field mutation.
     graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
-    assert len(graphql_calls) == 1, (
-        f"expected exactly 1 graphql call, got {len(graphql_calls)}: {calls}"
+    assert len(graphql_calls) == 2, (
+        f"expected exactly 2 graphql calls (lookup + mutations), got {len(graphql_calls)}: {calls}"
     )
-    joined_graphql = " ".join(" ".join(c) for c in graphql_calls)
-    assert "PVTSSF_prio" in joined_graphql and "OPTION_high" in joined_graphql
-    assert "PVTSSF_status" in joined_graphql and "OPTION_up_next" in joined_graphql
-    assert "PVTSSF_ws" in joined_graphql and "OPTION_plan" in joined_graphql
+    mutation_call = " ".join(graphql_calls[1])
+    assert "PVTSSF_prio" in mutation_call and "OPTION_high" in mutation_call
+    assert "PVTSSF_status" in mutation_call and "OPTION_up_next" in mutation_call
+    assert "PVTSSF_ws" in mutation_call and "OPTION_plan" in mutation_call
     assert not any("item-edit" in " ".join(c) for c in calls), (
         "item-edit should be replaced by graphql mutation"
     )
@@ -129,9 +131,10 @@ def test_add_to_board_idempotent_when_issue_already_on_board(
     def fake_run(args: list[str], **kw: object) -> FakeGhResult:
         calls.append(args)
         joined = " ".join(args)
-        if "item-list" in joined:
+        if "api" in joined and "graphql" in joined and "item-add" not in joined:
+            # fetch_item_for_issue: issue already on board.
             return FakeGhResult(
-                stdout=('{"items": [{"id": "PVTI_existing", "content": {"number": 142}}]}')
+                stdout=graphql_item_response(project_number=7, item_id="PVTI_existing")
             )
         # If the helper ever calls item-add here, the test should still
         # complete — but the assertion below catches the regression.
@@ -160,15 +163,15 @@ def test_add_to_board_idempotent_when_issue_already_on_board(
         f"add-to-board should re-use the existing item-id, not call item-add. Calls: {calls}"
     )
 
-    # Fields are set via a single graphql mutation using the discovered item-id.
+    # Two graphql calls: one fetch_item_for_issue lookup + one batched field mutation.
     graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
-    assert len(graphql_calls) == 1, (
-        f"expected exactly 1 graphql call, got {len(graphql_calls)}: {calls}"
+    assert len(graphql_calls) == 2, (
+        f"expected exactly 2 graphql calls (lookup + mutations), got {len(graphql_calls)}: {calls}"
     )
-    joined_graphql = " ".join(" ".join(c) for c in graphql_calls)
-    assert "PVTI_existing" in joined_graphql, joined_graphql
-    assert "PVTSSF_prio" in joined_graphql and "OPTION_med" in joined_graphql
-    assert "PVTSSF_status" in joined_graphql and "OPTION_backlog" in joined_graphql
+    mutation_call = " ".join(graphql_calls[1])
+    assert "PVTI_existing" in mutation_call, mutation_call
+    assert "PVTSSF_prio" in mutation_call and "OPTION_med" in mutation_call
+    assert "PVTSSF_status" in mutation_call and "OPTION_backlog" in mutation_call
     assert not any("item-edit" in " ".join(c) for c in calls), (
         "item-edit should be replaced by graphql mutation"
     )

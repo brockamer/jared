@@ -232,24 +232,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _cmd_get_item(args: argparse.Namespace) -> int:
     board = Board.from_path(Path(args.board))
-    item_id = board.find_item_id(args.issue_number)
+    item = board.fetch_item_for_issue(args.issue_number)
+    if not item or not item.get("id"):
+        from lib.board import ItemNotFound  # type: ignore[import-not-found]
 
-    empty: dict[str, Any] = {}
-    match: dict[str, Any] = next(
-        (
-            item
-            for item in board.board_items()
-            if (item.get("content") or {}).get("number") == args.issue_number
-        ),
-        empty,
-    )
-    excluded = {"id", "content"}
+        raise ItemNotFound(
+            f"No project item for issue #{args.issue_number} in project "
+            f"{board.project_number}. Is the issue added to the board?"
+        )
+    excluded = {"id"}
     output = {
         "issue_number": args.issue_number,
-        "item_id": item_id,
-        "status": match.get("status"),
-        "priority": match.get("priority"),
-        "fields": {k: v for k, v in match.items() if k not in excluded},
+        "item_id": item["id"],
+        "status": item.get("status"),
+        "priority": item.get("priority"),
+        "fields": {k: v for k, v in item.items() if k not in excluded},
     }
     print(json.dumps(output, indent=2))
     return 0
@@ -265,49 +262,6 @@ def _cmd_move(args: argparse.Namespace) -> int:
 _CLOSE_VERIFY_ATTEMPTS = 3
 _CLOSE_VERIFY_SLEEP_SECS = 1.0
 
-_POLL_ITEM_QUERY = """
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    issue(number: $number) {
-      projectItems(first: 10) {
-        nodes {
-          id
-          project { number }
-          fieldValues(first: 20) {
-            nodes {
-              ... on ProjectV2ItemFieldSingleSelectValue {
-                name
-                field { ... on ProjectV2SingleSelectField { name } }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-"""
-
-
-def _extract_item_for_project(data: Any, *, project_number: int) -> dict[str, Any] | None:
-    """Pick the projectItems node belonging to `project_number` and flatten
-    its fieldValues into {"id", "status", ...}. Status comes from the
-    single-select field literally named "Status"."""
-    issue = ((data or {}).get("data") or {}).get("repository", {}).get("issue")
-    if not issue:
-        return None
-    for node in issue.get("projectItems", {}).get("nodes", []):
-        if (node.get("project") or {}).get("number") != project_number:
-            continue
-        flat: dict[str, Any] = {"id": node.get("id")}
-        for fv in (node.get("fieldValues") or {}).get("nodes", []):
-            field_name = (fv.get("field") or {}).get("name")
-            if field_name:
-                flat[field_name.lower()] = fv.get("name")
-        return flat
-    return None
-
-
 def _poll_for_project_item(
     board: Board,
     issue_number: int,
@@ -316,27 +270,19 @@ def _poll_for_project_item(
     attempts: int,
     sleep_secs: float,
 ) -> dict[str, Any] | None:
-    """Poll a single-item GraphQL query until predicate(item) holds or
-    attempts run out.
+    """Poll the issue's projectItems until predicate(item) holds or attempts run out.
 
     GitHub's project operations are eventually-consistent: auto-move on close
-    can lag the next read by hundreds of milliseconds. Fix for #22: query only
-    the issue's projectItems (scoped to this board's project_number) instead
-    of scanning `gh project item-list --limit 500`, which rate-limits under
-    close sprees.
+    can lag the next read by hundreds of milliseconds. Uses the scoped
+    per-issue projectItems query via Board.fetch_item_for_issue (~1-3 GraphQL
+    points) instead of a full item-list scan. Fix for #22/#109.
 
-    Returns a dict with at least `id` and `status` keys (other single-select
-    fields flattened by lowercased name), or None if no match passes the
-    predicate within `attempts` tries. Sleep only happens *between* attempts.
+    Returns a dict with at least `id` plus lowercased single-select fields,
+    or None if no match passes the predicate within `attempts` tries.
+    Sleep only happens *between* attempts.
     """
     for i in range(attempts):
-        data = board.run_graphql(
-            _POLL_ITEM_QUERY,
-            owner=board.owner,
-            repo=board.repo.split("/", 1)[1],
-            number=issue_number,
-        )
-        match = _extract_item_for_project(data, project_number=board.project_number)
+        match = board.fetch_item_for_issue(issue_number)
         if match is not None and predicate(match):
             return match
         if i < attempts - 1:

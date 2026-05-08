@@ -354,23 +354,23 @@ def test_token_scope_diagnostic_mentions_gh_token_scrub_when_set(
 
 def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from skills.jared.scripts.lib.board import Board, ItemNotFound
+    from tests.conftest import FakeGhResult, graphql_item_response
 
     b = Board.from_path(_minimal_board(tmp_path))
 
-    class FakeResult:
-        returncode = 0
-        stdout = (
-            '{"items": ['
-            '{"id": "PVTI_aaa", "content": {"number": 42}},'
-            '{"id": "PVTI_bbb", "content": {"number": 99}}'
-            "]}"
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        # Route by issue number embedded in the -F number=N arg.
+        joined = " ".join(args)
+        if "number=42" in joined:
+            return FakeGhResult(stdout=graphql_item_response(project_number=7, item_id="PVTI_aaa"))
+        if "number=99" in joined:
+            return FakeGhResult(stdout=graphql_item_response(project_number=7, item_id="PVTI_bbb"))
+        # Issue not on board — return empty projectItems.
+        return FakeGhResult(
+            stdout='{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}'
         )
-        stderr = ""
 
-    monkeypatch.setattr(
-        "skills.jared.scripts.lib.board.subprocess.run",
-        lambda *a, **kw: FakeResult(),
-    )
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
 
     assert b.find_item_id(42) == "PVTI_aaa"
     assert b.find_item_id(99) == "PVTI_bbb"
@@ -413,35 +413,34 @@ def test_board_items_caches_within_instance(
     assert len(first) == 2
 
 
-def test_find_item_id_uses_cached_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Two find_item_id calls on the same Board must share one item-list fetch."""
+def test_find_item_id_uses_scoped_query_per_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """find_item_id now issues a scoped projectItems query per call (~1-3 pts)
+    rather than a full item-list scan (~200-300 pts). Fix for #109."""
     from skills.jared.scripts.lib.board import Board
+    from tests.conftest import FakeGhResult, graphql_item_response
 
     b = Board.from_path(_minimal_board(tmp_path))
-
     call_count = {"n": 0}
 
-    class FakeResult:
-        returncode = 0
-        stdout = (
-            '{"items": ['
-            '{"id": "PVTI_aaa", "content": {"number": 42}},'
-            '{"id": "PVTI_bbb", "content": {"number": 99}}'
-            "]}"
-        )
-        stderr = ""
-
-    def fake_run(args: list[str], **kw: object) -> FakeResult:
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
         call_count["n"] += 1
-        return FakeResult()
+        joined = " ".join(args)
+        if "number=42" in joined:
+            return FakeGhResult(stdout=graphql_item_response(project_number=7, item_id="PVTI_aaa"))
+        if "number=99" in joined:
+            return FakeGhResult(stdout=graphql_item_response(project_number=7, item_id="PVTI_bbb"))
+        return FakeGhResult(
+            stdout='{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}'
+        )
 
     monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
 
     assert b.find_item_id(42) == "PVTI_aaa"
     assert b.find_item_id(99) == "PVTI_bbb"
-    assert call_count["n"] == 1, (
-        "find_item_id should reuse the snapshot — saw multiple item-list fetches"
-    )
+    # Two calls — one scoped graphql query per issue, not a shared list-all scan.
+    assert call_count["n"] == 2
 
 
 def test_invalidate_items_forces_refetch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1162,13 +1161,15 @@ def test_add_existing_to_board_batches_field_mutations_into_one_graphql_call(
 
     calls: list[list[str]] = []
 
+    from tests.conftest import graphql_item_response
+
     def fake_run(args: list[str], **kw: object) -> FakeGhResult:
         calls.append(args)
         joined = " ".join(args)
-        if "item-list" in joined:
-            # Issue already on board — find_item_id returns existing item-id.
+        if "api" in joined and "graphql" in joined and "number=99" in joined:
+            # fetch_item_for_issue: issue already on board.
             return FakeGhResult(
-                stdout='{"items": [{"id": "PVTI_abc123", "content": {"number": 99}}]}'
+                stdout=graphql_item_response(project_number=7, item_id="PVTI_abc123")
             )
         return FakeGhResult(stdout="{}")
 
@@ -1190,15 +1191,15 @@ def test_add_existing_to_board_batches_field_mutations_into_one_graphql_call(
         + "\n".join(" ".join(c) for c in item_edit_calls)
     )
 
-    # Exactly one gh api graphql call for all three field mutations.
+    # Two gh api graphql calls: one for fetch_item_for_issue lookup, one for field mutations.
     graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
-    assert len(graphql_calls) == 1, (
-        f"expected exactly 1 gh api graphql call, got {len(graphql_calls)}:\n"
+    assert len(graphql_calls) == 2, (
+        f"expected exactly 2 gh api graphql calls (lookup + mutations), got {len(graphql_calls)}:\n"
         + "\n".join(" ".join(c) for c in graphql_calls)
     )
 
-    # The single mutation carries all three field IDs and their option IDs.
-    joined_mutation = " ".join(graphql_calls[0])
+    # The mutation (second call) carries all three field IDs and their option IDs.
+    joined_mutation = " ".join(graphql_calls[1])
     assert "PVTSSF_prio" in joined_mutation and "OPTION_high" in joined_mutation, joined_mutation
     assert "PVTSSF_status" in joined_mutation and "OPTION_up_next" in joined_mutation, (
         joined_mutation
