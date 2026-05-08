@@ -11,9 +11,9 @@ When editing, remember the consumer is Claude Code itself (reading `SKILL.md` an
 ## Developer setup
 
 ```bash
-python3.11 -m venv .venv
+uv venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"       # installs pytest, ruff, mypy
+uv pip install -e ".[dev]"    # installs pytest, ruff, mypy
 ```
 
 To test plugin changes interactively in Claude Code, install from a local `file://` URL (the plugin cache at `~/.claude/plugins/cache/` is copied at install time, so edits require `/plugin update jared` + `/reload-plugins` to pick up):
