@@ -34,6 +34,13 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     resolve_body,
 )
 
+def _normalize_priority(s: str) -> str:
+    """Normalize --priority input: case-insensitive, 'med' alias for Medium."""
+    norm = s.strip().title()
+    aliases = {"Med": "Medium"}
+    return aliases.get(norm, norm)
+
+
 ALL_SUBCOMMANDS = [
     "get-item",
     "summary",
@@ -134,7 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--body-file",
         help='Path to markdown file, or "-" for stdin.',
     )
-    file_p.add_argument("--priority", required=True, choices=["High", "Medium", "Low"])
+    file_p.add_argument(
+        "--priority",
+        required=True,
+        type=_normalize_priority,
+        choices=["High", "Medium", "Low"],
+    )
     file_p.add_argument("--status", help="Status column (default: Backlog)")
     file_p.add_argument("--label", action="append", help="Issue label (repeatable)")
     file_p.add_argument(
@@ -156,7 +168,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_p.add_argument("issue_number", type=int)
     add_p.add_argument(
-        "--priority", required=True, choices=["High", "Medium", "Low"]
+        "--priority",
+        required=True,
+        type=_normalize_priority,
+        choices=["High", "Medium", "Low"],
     )
     add_p.add_argument("--status", help="Status column (default: Backlog)")
     add_p.add_argument("--label", action="append", help="Issue label (repeatable)")

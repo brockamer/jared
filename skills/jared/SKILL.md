@@ -93,6 +93,7 @@ For any board operation, pick the right tier:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." (--body "..." | --body-file <path or ->) --priority High
+# --priority accepts High/Medium/Low (canonical) or high/medium/low/med (normalized by CLI)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName>
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>
