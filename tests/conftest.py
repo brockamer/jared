@@ -107,6 +107,47 @@ class FakeGhResult:
         self.stderr = stderr
 
 
+def graphql_item_response(
+    *,
+    project_number: int,
+    item_id: str = "PVTI_aaa",
+    status: str | None = None,
+    priority: str | None = None,
+) -> str:
+    """Build a repository.issue.projectItems GraphQL payload for mocking.
+
+    Used by tests that exercise code paths going through find_item_id /
+    fetch_item_for_issue, which now issues a scoped projectItems query
+    instead of a full item-list scan (fix for #109).
+    """
+    import json as _json
+
+    field_nodes = []
+    if status is not None:
+        field_nodes.append({"name": status, "field": {"name": "Status"}})
+    if priority is not None:
+        field_nodes.append({"name": priority, "field": {"name": "Priority"}})
+    return _json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "issue": {
+                        "projectItems": {
+                            "nodes": [
+                                {
+                                    "id": item_id,
+                                    "project": {"number": project_number},
+                                    "fieldValues": {"nodes": field_nodes},
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+
 def patch_gh(
     monkeypatch: pytest.MonkeyPatch,
     stdout: str = "{}",
