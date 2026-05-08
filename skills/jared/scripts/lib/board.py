@@ -356,7 +356,29 @@ class Board:
             ]
         )
         self.invalidate_items()
-        return str(data["id"])
+        item_id = data.get("id") or ""
+        if not item_id:
+            # gh project item-add occasionally returns a body with no `id` on
+            # the first call but succeeds immediately on retry (jared#112).
+            data = self.run_gh(
+                [
+                    "project",
+                    "item-add",
+                    str(self.project_number),
+                    "--owner",
+                    self.owner,
+                    "--url",
+                    url,
+                    "--format",
+                    "json",
+                ]
+            )
+            item_id = str(data.get("id") or "")
+        if not item_id:
+            raise GhInvocationError(
+                f"item-add returned no id for issue {issue_number} after retry"
+            )
+        return item_id
 
     def add_existing_to_board(
         self,
