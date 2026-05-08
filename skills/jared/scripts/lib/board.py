@@ -305,7 +305,7 @@ class Board:
                     "--owner",
                     self.owner,
                     "--limit",
-                    "500",
+                    "2000",
                     "--format",
                     "json",
                 ]

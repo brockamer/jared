@@ -122,7 +122,7 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
             "--owner",
             owner,
             "--limit",
-            "200",
+            "2000",
             "--format",
             "json",
         ]
