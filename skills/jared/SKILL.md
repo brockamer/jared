@@ -184,7 +184,7 @@ After close, Jared asks two questions:
 
 Append a Session note to every In Progress issue (and any issue meaningfully touched this session). Format at `assets/session-note.md.template`. Reconcile any drift: if work is actually done but the issue stayed open, close it now; if an In Progress item was abandoned, move it back to Up Next or Backlog with a note.
 
-This is what replaces `tmp/next-session-prompt-*.md`. The next session reads the Session note, not a throwaway prompt.
+This is what replaces `tmp/next-session-prompt-*.md`. The next session reads the Session note, not a throwaway prompt; `/jared-start` invokes `jared next-session-prompt` to assemble the cross-issue posture on-demand from current board state.
 
 ### Periodically — groom
 
@@ -307,7 +307,7 @@ See `references/new-board.md` for the full bootstrap flow and `assets/project-bo
 - **"It's in a comment on the current issue."** Comments don't drive planning. New scope = new issue.
 - **"The plan doc covers it."** The plan serves the issue, not vice versa. If it's not on the issue, it's not tracked.
 - **Using labels for priority or status.** Labels describe *kind*. Priority and Status are fields.
-- **Hand-rolling a next-session prompt outside `/jared-wrap`.** If you want one, ask `/jared-wrap` for it — the wrap-time prompt is derived from durable records (Session notes, board, memory) and stays ephemeral; a hand-rolled tmp file becomes a parallel source of truth and rots. See `references/session-continuity.md` § "Optional handoff prompt".
+- **Hand-rolling a next-session prompt as a tmp file.** Don't. `/jared-start` invokes `jared next-session-prompt` to assemble the cross-issue posture on-demand from board state — no file ever exists, so there's nothing to hand-roll. A handwritten tmp file becomes a parallel source of truth and rots. See `references/session-continuity.md` § "The posture assembly".
 - **In Progress > WIP limit.** Focus is scattered. Finish or move out.
 - **High-priority Backlog items >14 days old without review.** Promote, downgrade, or close.
 - **Closing an issue without verifying board auto-moved to Done.**
