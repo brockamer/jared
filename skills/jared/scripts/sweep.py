@@ -52,6 +52,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    Board,
     GhInvocationError,
     check_closed_not_done,
 )
@@ -92,15 +93,10 @@ def parse_config(path: Path) -> tuple[str, str]:
 
 
 def find_config() -> Path | None:
-    for candidate in (
-        "docs/project-board.md",
-        "PROJECT_BOARD.md",
-        ".github/project-board.md",
-    ):
-        p = Path(candidate)
-        if p.exists():
-            return p
-    return None
+    """Locate the convention doc using Board's autodiscovery list."""
+    # cast: Board imported with `type: ignore[import-not-found]` is opaque to
+    # mypy here. The classmethod itself is typed as -> Path | None in lib.board.
+    return cast("Path | None", Board.find_default_path())
 
 
 # ---------- gh wrappers ----------

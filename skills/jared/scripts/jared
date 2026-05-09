@@ -34,11 +34,19 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     resolve_body,
 )
 
+
 def _normalize_priority(s: str) -> str:
     """Normalize --priority input: case-insensitive, 'med' alias for Medium."""
     norm = s.strip().title()
     aliases = {"Med": "Medium"}
     return aliases.get(norm, norm)
+
+
+def _load_board(board_arg: str | None) -> Board:
+    """Construct a Board from --board if supplied, else autodiscover."""
+    if board_arg is None:
+        return Board.from_default()
+    return Board.from_path(Path(board_arg))
 
 
 ALL_SUBCOMMANDS = [
@@ -69,8 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--board",
-        default="docs/project-board.md",
-        help="Path to project-board.md (default: docs/project-board.md)",
+        default=None,
+        help=(
+            "Path to project-board.md. When omitted, jared autodiscovers across "
+            f"{', '.join(Board.DEFAULT_CONFIG_PATHS)}."
+        ),
     )
     sub = parser.add_subparsers(
         dest="cmd",
@@ -231,7 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_get_item(args: argparse.Namespace) -> int:
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     item = board.fetch_item_for_issue(args.issue_number)
     if not item or not item.get("id"):
         from lib.board import ItemNotFound  # type: ignore[import-not-found]
@@ -262,6 +273,7 @@ def _cmd_move(args: argparse.Namespace) -> int:
 _CLOSE_VERIFY_ATTEMPTS = 3
 _CLOSE_VERIFY_SLEEP_SECS = 1.0
 
+
 def _poll_for_project_item(
     board: Board,
     issue_number: int,
@@ -291,7 +303,7 @@ def _poll_for_project_item(
 
 
 def _cmd_close(args: argparse.Namespace) -> int:
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
 
     board.run_gh(
         [
@@ -334,7 +346,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
     `jared add-to-board <N> ...` recovery command to stderr so the user can
     finish the filing without retyping the body — see #64.
     """
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     status = args.status or "Backlog"
 
     # Pre-resolve before we touch GitHub: a misconfigured board fails fast
@@ -372,9 +384,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
         print_redaction_diff(report, file=sys.stderr)
         return 2
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", delete=False, encoding="utf-8"
-    ) as tf:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as tf:
         tf.write(body)
         body_tmp_path = tf.name
 
@@ -418,16 +428,14 @@ def _cmd_file(args: argparse.Namespace) -> int:
     except GhInvocationError as e:
         print(f"error: gh issue create failed: {e}", file=sys.stderr)
         print(
-            f"  body staged at: {body_tmp_path} "
-            f"(retry with: --body-file {body_tmp_path})",
+            f"  body staged at: {body_tmp_path} (retry with: --body-file {body_tmp_path})",
             file=sys.stderr,
         )
         return 2
     if not issue_url.startswith("http"):
         print(f"error: unexpected gh issue create output: {issue_url[:200]}", file=sys.stderr)
         print(
-            f"  body staged at: {body_tmp_path} "
-            f"(retry with: --body-file {body_tmp_path})",
+            f"  body staged at: {body_tmp_path} (retry with: --body-file {body_tmp_path})",
             file=sys.stderr,
         )
         return 2
@@ -453,9 +461,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
         OptionNotFound,
         ItemNotFound,
     ) as e:
-        recovery = _build_add_to_board_command(
-            issue_number, args.priority, status, extra_specs
-        )
+        recovery = _build_add_to_board_command(issue_number, args.priority, status, extra_specs)
         print(
             f"error: filed issue #{issue_number} ({issue_url}) but failed to "
             f"finish board setup: {e}",
@@ -513,7 +519,7 @@ def _cmd_add_to_board(args: argparse.Namespace) -> int:
       2. Putting an issue on the board that was created outside `jared file`
          (GitHub UI, raw `gh issue create`, etc.).
     """
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     status = args.status or "Backlog"
 
     fields: list[tuple[str, str]] = []
@@ -534,9 +540,7 @@ def _cmd_add_to_board(args: argparse.Namespace) -> int:
         labels=args.label or None,
         fields=fields,
     )
-    print(
-        f"OK: #{args.issue_number} on board → {status}, Priority={args.priority}"
-    )
+    print(f"OK: #{args.issue_number} on board → {status}, Priority={args.priority}")
     return 0
 
 
@@ -557,7 +561,7 @@ def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
 
 
 def _cmd_blocked_by(args: argparse.Namespace) -> int:
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     try:
         dep_id = _resolve_issue_node_id(board, args.dependent)
         blocker_id = _resolve_issue_node_id(board, args.blocker)
@@ -585,7 +589,7 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
 
 
 def _cmd_comment(args: argparse.Namespace) -> int:
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     body = resolve_body(args.body, args.body_file)
 
     # Pre-flight redaction check (#102): same as _cmd_file.
@@ -619,7 +623,7 @@ def _cmd_comment(args: argparse.Namespace) -> int:
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     item_id = board.find_item_id(args.issue_number)
     field_id = board.field_id(args.field_name)
     option_id = board.option_id(args.field_name, args.value)
@@ -643,7 +647,7 @@ def _cmd_set(args: argparse.Namespace) -> int:
 
 
 def _cmd_summary(args: argparse.Namespace) -> int:
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     data = board.run_gh(
         [
             "project",
@@ -700,10 +704,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
         for entry in stuck_closed:
             cur = entry.get("current_status") or "no Status"
             print(f"  #{entry['number']} [{cur}] {entry['title']}")
-        print(
-            "  Fix: jared set <N> Status Done   "
-            "(or enable the project's auto-archive workflow)"
-        )
+        print("  Fix: jared set <N> Status Done   (or enable the project's auto-archive workflow)")
     print()
     print(f"Up Next (top 3 of {len(up_next_all)}):")
     for it in up_next:
@@ -852,7 +853,7 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     The output's structural contract is what the slash command depends on,
     so changes here are user-visible.
     """
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
     items = _fetch_board_items(board)
     in_progress = [i for i in items if i.get("status") == "In Progress"]
     up_next = [i for i in items if i.get("status") == "Up Next"][:3]
@@ -941,7 +942,7 @@ def _cmd_ties(args: argparse.Namespace) -> int:
         format_ties_block,
     )
 
-    board = Board.from_path(Path(args.board))
+    board = _load_board(args.board)
 
     # Budget pre-flight before any fetch — partial mode is meant to skip
     # body bytes, so we must decide full vs partial *before* fetching.
@@ -964,9 +965,7 @@ def _cmd_ties(args: argparse.Namespace) -> int:
     # Replaces the older Board.get_issue + fetch_open_issues_for_ties pair
     # which paid for body bytes even in partial mode (#81).
     open_issues = board.fetch_open_issues_for_ties(include_bodies=full_mode)
-    target = next(
-        (i for i in open_issues if i.number == args.issue_number), None
-    )
+    target = next((i for i in open_issues if i.number == args.issue_number), None)
     if target is None:
         # fetch_open_issues_for_ties excludes Done; missing → closed,
         # archived, or doesn't exist on this repo.
@@ -1004,9 +1003,7 @@ def _cmd_ties(args: argparse.Namespace) -> int:
     ties = combine(hits, args.threshold, target, open_issues)
 
     if args.format == "human":
-        output = format_ties_block(
-            ties, degraded=not full_mode, diagnostic=diagnostic
-        )
+        output = format_ties_block(ties, degraded=not full_mode, diagnostic=diagnostic)
     else:
         output = _json.dumps([asdict(t) for t in ties], indent=2)
 
