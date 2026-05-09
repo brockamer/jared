@@ -84,7 +84,7 @@ The three rules (every plan/spec cites an issue; issues reverse-link; plans arch
 
 ### 9. Session notes replace tmp handoff prompts
 
-Manual session-handoff prompts (`tmp/next-session-prompt.md`) are a symptom of the board not being trustworthy. Jared's `/jared-wrap` appends structured Session notes on the issues themselves. Next session reads the board, not a tmp file. Pattern dies.
+Manual session-handoff prompts (`tmp/next-session-prompt.md`) are a symptom of the board not being trustworthy. Jared's `/jared-wrap` appends structured Session notes on the issues themselves; `/jared-start` invokes `jared next-session-prompt` to assemble the cross-issue posture on-demand from board state. No file is written, no snapshot is stored, and the recommendation cannot go stale. Pattern dies.
 
 ### 10. Issue body has living sections
 

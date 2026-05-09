@@ -2,7 +2,7 @@
 description: End of session — append Session notes to touched issues, reconcile drift, propose plan archivals, file discovered scope.
 ---
 
-Invoke the Jared skill to wrap the current session. Replaces the `tmp/next-session-prompt*.md` pattern entirely.
+Invoke the Jared skill to wrap the current session. The session record lives on the touched issues as Session-note comments — no `tmp/` file is written, and no handoff prompt is synthesized. The next session uses `/jared-start`, which assembles the posture on-demand from current board state.
 
 Flow:
 
@@ -58,51 +58,6 @@ Flow:
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
 
-6. **Confirm and close out.** Print a one-line summary: "Wrapped N issues, filed N new, archived N plans, reconciled N drift items. Ready for next session."
+6. **Confirm and close out.** Print a one-line summary: *"Wrapped N issues, filed N new, archived N plans, reconciled N drift items. Next session: `/jared-start`."*
 
-7. **Offer the session handoff prompt.** Read the board's `session-handoff-prompt` config (parse `## Jared config` in `docs/project-board.md`):
-
-   - `never` → skip this step entirely.
-   - `always` → produce the prompt without asking.
-   - `ask` (default, or absent) → ask: *"Draft a session-start prompt for the next session? (y/n)"* and only proceed on `y`.
-
-   When producing the prompt:
-
-   1. Generate the board-derived skeleton:
-
-      ```bash
-      ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks
-      ```
-
-      Always pass `--include-session-checks`; the CLI no-ops the section when the board has no `## Session start checks` configured.
-
-   2. Layer **synthesis** on top using this session's conversation context, the Session notes you just posted, and any saved memory entries that surfaced. Fill in the asset template at `${CLAUDE_PLUGIN_ROOT}/skills/jared/assets/next-session-prompt.md.template` (or use it as scaffolding):
-
-      - **Frame** — 1–3 sentences on what shipped, what's load-bearing right now, the strategic posture for next session.
-      - **What's likely to want attention this session** — ordered list with reasoning ("#N first because the binding constraint is X, not Y"). Pulls from Up Next + In Progress + your synthesis. If synthesis is thin (short session, few decisions), fall back to a plain priority-ordered bullet list.
-      - **What NOT to do** — anti-targets with rationale. Sources: scheduled-agent reminders firing in the future, memory entries flagged as session-applicable, explicit user statements during the wrap (e.g. "don't pursue #X yet, we agreed to wait for the agent fire on Y"). Empty if no anti-targets surfaced.
-      - **Context you'll need** — pointers to `CLAUDE.md` / `CLAUDE.local.md`, plan/spec files referenced in active issues' `## Planning` sections, relevant memory entry names.
-      - **Quick health check on session start** — present iff the board has `## Session start checks` configured.
-      - **To start** — call-to-action: *"`/jared-start <#N>` for the issue you decide to pull."*
-
-   3. Write the result to `tmp/next-session-prompt-<YYYY-MM-DD-HHMM>.md` (timestamp = local time). Use `mkdir -p tmp` if `tmp/` doesn't exist. The file is `.gitignore`d (see `.gitignore`) — ephemeral, regenerated each wrap, never authoritative.
-
-   4. **Archive older handoff prompts.** Only the most recent prompt is consulted by `/jared-start` (lex-sort descending, take first), so prior prompts otherwise pile up indefinitely. After the new file is durably written, move every other top-level `tmp/next-session-prompt-*.md` into `tmp/handoff-archive/`. Archive rather than delete — older prompts are a useful session log for tracing context drift, and disk cost is trivial. Run after the new write so a crash mid-archive can never leave the workspace with no prompt.
-
-      ```bash
-      NEW="tmp/next-session-prompt-<NEW-TIMESTAMP>.md"   # the file just written
-      mkdir -p tmp/handoff-archive
-      for f in tmp/next-session-prompt-*.md; do
-        [ -e "$f" ] || continue          # nothing matched the glob
-        [ "$f" = "$NEW" ] && continue    # leave the just-written file alone
-        mv "$f" tmp/handoff-archive/
-      done
-      ```
-
-      Idempotent: running `/jared-wrap` twice in a row leaves exactly one top-level prompt and the rest under `tmp/handoff-archive/`.
-
-   5. End the wrap by telling the user: *"Handoff prompt at `tmp/next-session-prompt-<TIMESTAMP>.md`. Pipe it into your next session and clear when ready."*
-
-   **Important contract.** The prompt is **derived**, not authoritative. Session notes on issues, plans, specs, and memory entries are the durable records. The prompt is a one-shot bridge between sessions and is regenerated next wrap. **Do not edit the prompt to record decisions** — capture them on issues, in plans, or as memory entries. The prompt's footer reminds the reader of this; honor it.
-
-The next session's `/jared` or auto-orientation reads these Session notes directly; the handoff prompt is an optional convenience layered on top.
+The next session's `/jared-start` invokes `jared next-session-prompt` to assemble the posture from current board state — In Progress with each issue's most recent Session-note one-liner, top of Up Next, recently closed. Because the assembly is on-demand, the recommendation cannot go stale and no `tmp/` artifact accumulates.
