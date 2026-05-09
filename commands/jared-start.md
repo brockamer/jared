@@ -8,29 +8,19 @@ Argument parsing: `$ARGUMENTS` may contain `#14`, `14`, a URL, a short string li
 
 Flow:
 
-1. **Look for the most recent handoff prompt.** Glob `tmp/next-session-prompt-*.md`. The filename's `YYYY-MM-DD-HHMM` is monotonic, so lex-sort descending and take the first match. If no match, set `prompt = None` and skip to step 2.
+1. **Assemble the board posture on-demand.** Run:
 
-   When a prompt is found, parse the following sections by `##` headers (omit any missing section — never fabricate):
-   - **Frame** — content under `## Frame`. Condense to 2–3 sentences if longer.
-   - **Anti-targets** — bullets under `## What NOT to do`.
-   - **Context pointers** — bullets under `## Context you'll need`.
-   - **Recommended issue** — within the section under `## To start`, find a fenced code block containing a line matching `/jared-start\s+(\d+)` and capture the number.
-   - **Relative time** — parse the filename's `YYYY-MM-DD-HHMM` and render relative to now ("6h ago", "yesterday", "3d ago"). Fall back to the absolute timestamp on parse failure.
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks
+   ```
+
+   Capture stdout. The CLI walks the live board and emits structured sections — In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Recently closed (7d), and a `## Quick health check` block iff the board has `## Session start checks` configured. Use this output verbatim as the **posture block** in step 8 (no further parsing or condensing required).
 
    Resolve the target issue:
-   - If `$ARGUMENTS` is non-empty: use it. No drift check on the prompt's recommendation.
-   - If `$ARGUMENTS` is empty AND a recommended issue was parsed: drift-check by running `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>`. If the issue is closed on GitHub or its Status is `Done`, the recommendation is stale — output the **posture block** (see step 8) followed by:
+   - If `$ARGUMENTS` is non-empty: use it.
+   - If `$ARGUMENTS` is empty: surface the posture block, then ask: *"Which issue would you like to pull?"* The In Progress and Up Next sections are the menu — In Progress means resuming an interrupted issue; top of Up Next is the natural next pull. Wait for user input.
 
-     ```
-     Handoff prompt recommends #<N>, but #<N> is now <closed|Done>.
-     The prompt's posture is still useful context for whatever you pull next.
-
-     Which issue would you like to pull?
-     ```
-
-     Wait for user input, then resume the flow at step 2 with the user-supplied issue. If the recommended issue is pullable, set it as the target and continue.
-
-   - If `$ARGUMENTS` is empty AND no recommended issue was parseable (or no prompt found): ask which issue. When a prompt was found but had no parseable `## To start`, the posture block is still surfaced in step 8.
+   No drift-check is needed: the posture is computed from current board state at this moment, so the recommendation cannot be stale by construction.
 
 2. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` and read the `In Progress (N)` header — that `N` is the current count. If it's already at the project's configured cap (default 3), STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
@@ -74,18 +64,7 @@ Flow:
 
    The block is **advisory** — never gate the start on tie resolution. Operators may close superseded predecessors, sequence feeders first, fold same-file issues into the target's PR, or ignore the block entirely. Each tie carries a confidence tag (`strong` / `medium` / `weak`) and a heuristic suggested action.
 
-8. **Announce the session plan.** When a prompt was found in step 1, prepend a **posture block**:
-
-   ```
-   Handoff posture (tmp/next-session-prompt-<TIMESTAMP>.md, <relative-time>):
-     Frame: <Frame, condensed to 2-3 sentences>
-     Anti-targets:
-       - <bullet from "What NOT to do">
-       - ...
-     Context pointers:
-       - <bullet from "Context you'll need">
-       - ...
-   ```
+8. **Announce the session plan.** Prepend the **posture block** captured in step 1 verbatim — it's the live board state, the cross-issue context for what's in flight and what's queued.
 
    When step 6 generated guidance at start-time (or loaded existing guidance from the body), include a **guidance block** in the announce. The label distinguishes the source so the user knows what they're confirming:
 
@@ -131,7 +110,7 @@ Flow:
    Git: branch <name>, <clean | N modified>, last relevant commit <hash> <msg>
    ```
 
-   The posture block is omitted when no prompt was found in step 1. The guidance block is omitted when the kill switch is set. Up to four visually-separated blocks when all are present: posture (cross-issue), guidance (model & execution), ties (cross-issue), per-issue announcement.
+   The posture block is always present (the CLI runs in step 1). The guidance block is omitted when the kill switch is set. Up to four visually-separated blocks when all are present: posture (cross-issue), guidance (model & execution), ties (cross-issue), per-issue announcement.
 
 9. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
 
@@ -147,4 +126,4 @@ Flow:
    but does not roll back step 4's move to In Progress. Re-run the comment post
    manually if needed; the body retains the In Progress status either way.
 
-This replaces the pattern of manually reading the issue, the plan, and a handoff prompt before starting. The board + latest Session note + (when present) the most recent handoff prompt is the handoff.
+This replaces the pattern of manually reading the issue, the plan, and a handoff prompt before starting. The handoff *is* current board state plus the issue's latest Session note — assembled on-demand by `jared next-session-prompt`, never stored as a file.
