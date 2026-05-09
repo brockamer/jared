@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from .ties import OpenIssueForTies
@@ -39,6 +39,17 @@ class ItemNotFound(Exception):
 
 @dataclass
 class Board:
+    # Search order for autodiscovery when --board / --config is not supplied.
+    # First entry is the canonical primary location; the rest are graceful
+    # fallbacks for projects that follow common conventions (docs/maintainers/
+    # for OSS contributor docs, root or .github/ for repo-level metadata).
+    DEFAULT_CONFIG_PATHS: ClassVar[tuple[str, ...]] = (
+        "docs/project-board.md",
+        "docs/maintainers/project-board.md",
+        "PROJECT_BOARD.md",
+        ".github/project-board.md",
+    )
+
     project_number: int
     project_id: str
     owner: str
@@ -56,6 +67,40 @@ class Board:
     # constructed via those entry points (e.g. direct dataclass construction
     # in tests that don't need this feature).
     _raw_doc: str = field(default="", repr=False)
+
+    @classmethod
+    def find_default_path(cls, project_root: Path | None = None) -> Path | None:
+        """Return the first existing path from DEFAULT_CONFIG_PATHS, or None.
+
+        Searched relative to `project_root` (defaults to the nearest .git/
+        ancestor of cwd, or cwd if no git root is found). Lets CLI subcommands
+        find the convention doc when it has been relocated to one of the
+        accepted alternative locations (e.g. docs/maintainers/).
+        """
+        root = project_root if project_root is not None else _find_project_root(Path.cwd())
+        for candidate in cls.DEFAULT_CONFIG_PATHS:
+            p = root / candidate
+            if p.exists():
+                return p
+        return None
+
+    @classmethod
+    def from_default(cls, project_root: Path | None = None) -> Board:
+        """Like `from_path`, but autodiscovers the convention doc.
+
+        Raises BoardConfigError listing every attempted path when none is
+        found, so the operator can see exactly where jared looked.
+        """
+        path = cls.find_default_path(project_root)
+        if path is not None:
+            return cls.from_path(path)
+        root = project_root if project_root is not None else _find_project_root(Path.cwd())
+        attempted = "\n".join(f"  - {root / p}" for p in cls.DEFAULT_CONFIG_PATHS)
+        raise BoardConfigError(
+            "No project-board.md found. Tried:\n"
+            f"{attempted}\n"
+            "Run /jared-init to bootstrap the project, or pass --board <path>."
+        )
 
     @classmethod
     def from_path(cls, path: Path) -> Board:
@@ -428,9 +473,7 @@ class Board:
             )
             item_id = str(data.get("id") or "")
         if not item_id:
-            raise GhInvocationError(
-                f"item-add returned no id for issue {issue_number} after retry"
-            )
+            raise GhInvocationError(f"item-add returned no id for issue {issue_number} after retry")
         return item_id
 
     def add_existing_to_board(
