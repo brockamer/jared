@@ -31,6 +31,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    Board,
     GhInvocationError,
 )
 from lib.board import (
@@ -651,8 +652,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default="docs/project-board.md",
-        help="Output path (default: docs/project-board.md)",
+        default=Board.DEFAULT_CONFIG_PATHS[0],
+        help=f"Output path (default: {Board.DEFAULT_CONFIG_PATHS[0]})",
     )
     parser.add_argument("--wip-limit", type=int, default=3)
     parser.add_argument(

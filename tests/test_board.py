@@ -173,6 +173,101 @@ def test_unknown_option_raises(tmp_path: Path) -> None:
         board.option_id("Priority", "Urgent")
 
 
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "docs/project-board.md",
+        "docs/maintainers/project-board.md",
+        "PROJECT_BOARD.md",
+        ".github/project-board.md",
+    ],
+)
+def test_find_default_path_locates_each_candidate(tmp_path: Path, candidate: str) -> None:
+    """find_default_path returns the first existing path among the canonical list."""
+    from skills.jared.scripts.lib.board import Board
+
+    target = tmp_path / candidate
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("placeholder")
+
+    found = Board.find_default_path(project_root=tmp_path)
+    assert found == target
+
+
+def test_find_default_path_returns_none_when_absent(tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board
+
+    assert Board.find_default_path(project_root=tmp_path) is None
+
+
+def test_find_default_path_prefers_earlier_candidate(tmp_path: Path) -> None:
+    """When two candidates exist, the earlier (more canonical) path wins."""
+    from skills.jared.scripts.lib.board import Board
+
+    primary = tmp_path / "docs" / "project-board.md"
+    primary.parent.mkdir(parents=True)
+    primary.write_text("primary")
+    fallback = tmp_path / "docs" / "maintainers" / "project-board.md"
+    fallback.parent.mkdir(parents=True)
+    fallback.write_text("fallback")
+
+    assert Board.find_default_path(project_root=tmp_path) == primary
+
+
+def test_from_default_raises_with_all_paths_listed(tmp_path: Path) -> None:
+    """When no convention doc is found, the error names every candidate so the
+    operator can see exactly where jared looked. Loud failure replaces the prior
+    silent-no-op behavior described in #117."""
+    from skills.jared.scripts.lib.board import Board, BoardConfigError
+
+    with pytest.raises(BoardConfigError) as exc:
+        Board.from_default(project_root=tmp_path)
+
+    msg = str(exc.value)
+    for candidate in Board.DEFAULT_CONFIG_PATHS:
+        assert candidate in msg
+
+
+def test_from_default_returns_board_when_primary_exists(tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+        """)
+    )
+
+    board = Board.from_default(project_root=tmp_path)
+    assert board.project_number == 7
+    assert board.repo == "brockamer/findajob"
+
+
+def test_from_default_falls_back_to_maintainers_path(tmp_path: Path) -> None:
+    """Primary scenario from #117 — convention doc moved into docs/maintainers/."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "maintainers" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+        """)
+    )
+
+    board = Board.from_default(project_root=tmp_path)
+    assert board.project_number == 7
+
+
 def _minimal_board(tmp_path: Path) -> Path:
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
