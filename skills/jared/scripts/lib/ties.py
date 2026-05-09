@@ -15,17 +15,25 @@ from dataclasses import dataclass
 from typing import Literal
 
 SignalName = Literal[
+    # Deterministic signals (six original).
     "cross_ref",
     "blocked_by",
     "milestone",
     "title_tokens",
     "labels",
     "file_paths",
+    # LLM-overlay signals (#80) — produced only by the optional LLM analyzer,
+    # never by the deterministic six. Surfaced in a separate sub-block in
+    # the announce so deterministic and semantic ties don't cross-contaminate.
+    "possibly_already_done",
+    "semantic_overlap",
 ]
-Confidence = Literal["strong", "medium", "weak"]
+Confidence = Literal["strong", "medium", "weak", "llm"]
 # Threshold and Confidence model different roles (filter cutoff vs. signal
 # strength) but share the same domain — Literal members are unordered, so
-# they are the same type. Aliasing makes the relationship explicit.
+# they are the same type. Aliasing makes the relationship explicit. The
+# "llm" value is reserved for the LLM-overlay path; threshold filtering on
+# the deterministic side never produces or accepts it.
 Threshold = Confidence
 
 # Default stop-words for label-intersection signal. Project-board.md may override.
@@ -36,8 +44,10 @@ DEFAULT_LABEL_STOP_WORDS: frozenset[str] = frozenset(
 # Output cap on number of ties surfaced.
 MAX_TIES_DISPLAYED = 8
 
-# Confidence weights for combined_score.
-CONFIDENCE_WEIGHT: dict[Confidence, int] = {"strong": 3, "medium": 2, "weak": 1}
+# Confidence weights for combined_score. "llm" weights as medium-equivalent (2)
+# because semantic ties carry comparable evidence value to single-signal medium
+# deterministic hits — neither is bullet-proof, both deserve operator attention.
+CONFIDENCE_WEIGHT: dict[Confidence, int] = {"strong": 3, "medium": 2, "weak": 1, "llm": 2}
 
 # Score cap so a single candidate firing every signal doesn't dominate sorting.
 MAX_COMBINED_SCORE = 5
@@ -380,6 +390,9 @@ _RELATIONSHIP_LABELS: dict[SignalName, str] = {
     "file_paths": "same-file",
     "title_tokens": "adjacent",
     "labels": "adjacent",
+    # LLM-overlay labels mirror the SignalName for clarity in rendered output.
+    "possibly_already_done": "possibly-already-done",
+    "semantic_overlap": "semantic-overlap",
 }
 
 
