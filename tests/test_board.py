@@ -718,44 +718,6 @@ def test_fetch_blocked_by_edges_paginates(monkeypatch: pytest.MonkeyPatch) -> No
     assert any("c=CUR1" in arg for arg in captured[1])
 
 
-def test_fetch_blocked_by_edges_schema_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """If `blockedBy` raises a Field-doesn't-exist error, retry with `issueDependencies`."""
-    from skills.jared.scripts.lib import board
-
-    call_responses = iter(
-        [
-            # First attempt — blockedBy not on this schema.
-            ("", 1, "Field 'blockedBy' doesn't exist on type 'Issue'"),
-            # Second attempt — issueDependencies works.
-            (
-                (
-                    '{"data": {"repository": {"issues": {'
-                    '"pageInfo": {"hasNextPage": false, "endCursor": null},'
-                    '"nodes": [{"number": 7, "issueDependencies": '
-                    '{"nodes": [{"number": 4, "state": "OPEN"}]}}]'
-                    "}}}}"
-                ),
-                0,
-                "",
-            ),
-        ]
-    )
-
-    class FakeResult:
-        def __init__(self, stdout: str, rc: int, stderr: str) -> None:
-            self.stdout = stdout
-            self.returncode = rc
-            self.stderr = stderr
-
-    def fake_run(args: list[str], **kw: object) -> FakeResult:
-        return FakeResult(*next(call_responses))
-
-    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
-
-    edges = board.fetch_blocked_by_edges("brockamer/findajob")
-    assert edges == {7: [{"number": 4, "state": "OPEN"}]}
-
-
 def test_fetch_blocked_by_edges_passes_cache_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     """cache='60s' threads through to the underlying gh api invocation."""
     from skills.jared.scripts.lib import board

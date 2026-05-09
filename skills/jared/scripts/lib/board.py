@@ -428,9 +428,7 @@ class Board:
             )
             item_id = str(data.get("id") or "")
         if not item_id:
-            raise GhInvocationError(
-                f"item-add returned no id for issue {issue_number} after retry"
-            )
+            raise GhInvocationError(f"item-add returned no id for issue {issue_number} after retry")
         return item_id
 
     def add_existing_to_board(
@@ -782,44 +780,29 @@ def fetch_blocked_by_edges(
     open issues in `repo`. Replaces the per-issue N+1 pattern that
     `dependency-graph.py` used to use.
 
-    Tries the `blockedBy` field first; on a schema error (older repos
-    expose `issueDependencies` under a different name) falls back to
-    `issueDependencies`. Raises if neither is available.
-
     `cache` is forwarded to gh as `--cache <duration>` — pass "60s" for
     advisory uses (sweep, dependency-graph) so re-runs within a minute
     skip the network and the GraphQL points entirely.
     """
     owner, name = repo.split("/", 1)
-    for field_name in ("blockedBy", "issueDependencies"):
-        q = (
-            "query($o:String!,$r:String!,$c:String){repository(owner:$o,name:$r){"
-            f"issues(first:100,after:$c,states:OPEN){{pageInfo{{hasNextPage endCursor}}"
-            f"nodes{{number {field_name}(first:20){{nodes{{number state}}}}}}}}}}}}"
-        )
-        result: dict[int, list[dict[str, Any]]] = {}
-        cursor: str | None = None
-        try:
-            while True:
-                kwargs: dict[str, str] = {"o": owner, "r": name}
-                if cursor:
-                    kwargs["c"] = cursor
-                data = run_graphql(q, cache=cache, **kwargs)["data"]["repository"]["issues"]
-                for node in data["nodes"]:
-                    result[node["number"]] = node[field_name]["nodes"]
-                if not data["pageInfo"]["hasNextPage"]:
-                    break
-                cursor = data["pageInfo"]["endCursor"]
-            return result
-        except GhInvocationError as e:
-            # Schema may expose `issueDependencies` instead of `blockedBy`.
-            # Match the gh error verbiage loosely so future GraphQL phrasing
-            # changes don't silently bypass the fallback.
-            msg = str(e)
-            if "Field" in msg and ("doesn" in msg or "isn't" in msg):
-                continue
-            raise
-    raise RuntimeError("Neither blockedBy nor issueDependencies field is available")
+    q = (
+        "query($o:String!,$r:String!,$c:String){repository(owner:$o,name:$r){"
+        "issues(first:100,after:$c,states:OPEN){pageInfo{hasNextPage endCursor}"
+        "nodes{number blockedBy(first:20){nodes{number state}}}}}}"
+    )
+    result: dict[int, list[dict[str, Any]]] = {}
+    cursor: str | None = None
+    while True:
+        kwargs: dict[str, str] = {"o": owner, "r": name}
+        if cursor:
+            kwargs["c"] = cursor
+        data = run_graphql(q, cache=cache, **kwargs)["data"]["repository"]["issues"]
+        for node in data["nodes"]:
+            result[node["number"]] = node["blockedBy"]["nodes"]
+        if not data["pageInfo"]["hasNextPage"]:
+            break
+        cursor = data["pageInfo"]["endCursor"]
+    return result
 
 
 # ---------- Plan/spec issue-ref parsing ----------
