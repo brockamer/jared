@@ -64,6 +64,25 @@ Flow:
 
    The block is **advisory** — never gate the start on tie resolution. Operators may close superseded predecessors, sequence feeders first, fold same-file issues into the target's PR, or ignore the block entirely. Each tie carries a confidence tag (`strong` / `medium` / `weak`) and a heuristic suggested action.
 
+   **Semantic ties (your judgment, not the CLI's).** The deterministic six analyzers in `jared ties` cover cross-references, blocked-by edges, milestones, file paths, labels, and title tokens. They cannot detect *semantic* relationships — when two issues describe the same scope in different words, or when an open issue's work may already have shipped under another. That judgment belongs in this conversation, not in a Python subprocess: you have the target issue's full body (loaded in step 5), the deterministic ties' digest, and the broader board context.
+
+   After running `jared ties`, scan the open and recently-closed issues for two specific shapes:
+
+   - **possibly-already-done** — another issue substantially covers the target's scope. Look at recent closures (last 7 days surfaced by `jared next-session-prompt`) and the active Backlog.
+   - **semantic-overlap** — another open issue covers meaningfully overlapping scope (not merely milestone-mate or shared-label adjacency — those are deterministic-tier signals already covered).
+
+   When something stands out, render it in a separate sub-block after the deterministic ties, mirroring the deterministic block's `[<confidence>, <label>]` shape with `llm` as the confidence tier:
+
+   ```
+   Semantic ties (advisory):
+     #N [llm, semantic-overlap]   <one-line rationale>
+     #M [llm, possibly-already-done]   <one-line rationale>
+   ```
+
+   Be strict — empty is the right and expected answer when nothing semantic stands out. The `llm` confidence value exists in `lib/ties.py`'s `Confidence` literal precisely so this prose-rendered tag stays consistent with the deterministic block's tagging convention.
+
+   This intentionally lives in the conversational layer rather than as a Python LLM call inside `jared ties`. The active Claude session already has the full context; spending API tokens on a fresh subprocess to redo work the conversation can do natively is duplicative. See `references/llm-assistance.md` (when filed per #123) for the broader doctrine on LLM-in-CLI vs LLM-in-conversation.
+
 8. **Announce the session plan.** Prepend the **posture block** captured in step 1 verbatim — it's the live board state, the cross-issue context for what's in flight and what's queued.
 
    When step 6 generated guidance at start-time (or loaded existing guidance from the body), include a **guidance block** in the announce. The label distinguishes the source so the user knows what they're confirming:
