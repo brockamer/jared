@@ -13,6 +13,11 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+# Optional: enable `jared ties --llm` semantic-tie overlay (#80).
+# anthropic SDK is loaded lazily; non-LLM users do not need it installed.
+llm = [
+    "anthropic>=0.40",
+]
 
 # This project is a Claude Code plugin, not a Python distributable. We use
 # pyproject.toml only for dev-tool config (pytest/ruff/mypy) and to pin
