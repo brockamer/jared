@@ -64,6 +64,8 @@ Flow:
 
    The block is **advisory** — never gate the start on tie resolution. Operators may close superseded predecessors, sequence feeders first, fold same-file issues into the target's PR, or ignore the block entirely. Each tie carries a confidence tag (`strong` / `medium` / `weak`) and a heuristic suggested action.
 
+   **LLM overlay (opt-in).** When `docs/project-board.md` has `### Tie Analysis` -> `- llm-overlay: enabled`, `jared ties` will also run a small Claude API call to surface semantic ties (`possibly-already-done` and `semantic-overlap`) that regex can't detect. These render as a separate `Semantic ties (LLM, advisory):` sub-block after the deterministic block, tagged `[llm, …]`. Cost is bounded per process by `JARED_TIES_LLM_BUDGET` (env var, default 50000 input tokens). The overlay degrades gracefully: missing SDK or budget exhaustion shows up as a one-line diagnostic in the deterministic block, not a hard failure.
+
 8. **Announce the session plan.** Prepend the **posture block** captured in step 1 verbatim — it's the live board state, the cross-issue context for what's in flight and what's queued.
 
    When step 6 generated guidance at start-time (or loaded existing guidance from the body), include a **guidance block** in the announce. The label distinguishes the source so the user knows what they're confirming:

@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
 
@@ -1364,6 +1365,68 @@ def test_tie_stop_words_falls_back_to_defaults(tmp_path: Path) -> None:
     )
     board = Board.from_path(doc)
     assert board.tie_stop_words() == DEFAULT_LABEL_STOP_WORDS
+
+
+def _board_with_tie_section(tmp_path: Path, tie_section_body: str) -> Any:
+    """Build a Board with the given inner content for `### Tie Analysis`."""
+    from skills.jared.scripts.lib.board import Board
+
+    doc = tmp_path / "project-board.md"
+    doc.write_text(
+        "# Project\n\n"
+        "- Project URL: https://github.com/users/x/projects/1\n"
+        "- Project number: 1\n"
+        "- Project ID: PVT_x\n"
+        "- Owner: x\n"
+        "- Repo: x/y\n\n"
+        "### Status\n- Field ID: F1\n- Backlog: A\n- Up Next: B\n"
+        "- In Progress: C\n- Blocked: D\n- Done: E\n\n"
+        "### Priority\n- Field ID: F2\n- High: H\n- Medium: M\n- Low: L\n\n"
+        f"### Tie Analysis\n{tie_section_body}\n"
+    )
+    return Board.from_path(doc)
+
+
+def test_llm_overlay_disabled_when_section_missing(tmp_path: Path) -> None:
+    """No `### Tie Analysis` section at all → overlay off."""
+    from skills.jared.scripts.lib.board import Board
+
+    doc = tmp_path / "project-board.md"
+    doc.write_text(
+        "# Project\n\n"
+        "- Project URL: https://github.com/users/x/projects/1\n"
+        "- Project number: 1\n"
+        "- Project ID: PVT_x\n"
+        "- Owner: x\n"
+        "- Repo: x/y\n\n"
+        "### Status\n- Field ID: F1\n- Backlog: A\n- Up Next: B\n"
+        "- In Progress: C\n- Blocked: D\n- Done: E\n"
+    )
+    board = Board.from_path(doc)
+    assert board.llm_overlay_enabled() is False
+
+
+def test_llm_overlay_disabled_when_bullet_missing(tmp_path: Path) -> None:
+    """Section present but no llm-overlay bullet → overlay off."""
+    board = _board_with_tie_section(tmp_path, "- Label stop-words: chore, wip")
+    assert board.llm_overlay_enabled() is False
+
+
+def test_llm_overlay_enabled_when_bullet_set_to_enabled(tmp_path: Path) -> None:
+    board = _board_with_tie_section(tmp_path, "- llm-overlay: enabled")
+    assert board.llm_overlay_enabled() is True
+
+
+def test_llm_overlay_disabled_when_bullet_set_to_disabled(tmp_path: Path) -> None:
+    """Explicit `disabled` is also off — same as not setting the bullet."""
+    board = _board_with_tie_section(tmp_path, "- llm-overlay: disabled")
+    assert board.llm_overlay_enabled() is False
+
+
+def test_llm_overlay_case_insensitive_value(tmp_path: Path) -> None:
+    """`Enabled` (any case) is accepted — operator-friendly."""
+    board = _board_with_tie_section(tmp_path, "- llm-overlay: Enabled")
+    assert board.llm_overlay_enabled() is True
 
 
 def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) -> None:

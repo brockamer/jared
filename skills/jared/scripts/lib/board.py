@@ -324,6 +324,32 @@ class Board:
         words = [w.strip() for w in bullet_match.group("words").split(",")]
         return frozenset(w for w in words if w)
 
+    def llm_overlay_enabled(self) -> bool:
+        """Whether `### Tie Analysis` opts the project into the LLM overlay.
+
+        Reads `### Tie Analysis` section from project-board.md if present:
+
+            ### Tie Analysis
+            - llm-overlay: enabled
+
+        Returns False (overlay off) when the section is missing, the bullet
+        is missing, or the value is anything other than "enabled". Treats
+        the parser's surface as an explicit opt-in — not a free-text knob.
+        """
+        text = self._raw_doc
+        section_re = re.compile(
+            r"^###\s+Tie Analysis\s*$(?P<body>.*?)(?=^###\s|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = section_re.search(text)
+        if not match:
+            return False
+        bullet_re = re.compile(r"^\s*-\s*llm-overlay:\s*(?P<value>\S+)\s*$", re.MULTILINE)
+        bullet_match = bullet_re.search(match.group("body"))
+        if not bullet_match:
+            return False
+        return bullet_match.group("value").strip().lower() == "enabled"
+
     def run_gh(self, args: list[str], *, cache: str | None = None) -> Any:
         return run_gh(args, cache=cache)
 

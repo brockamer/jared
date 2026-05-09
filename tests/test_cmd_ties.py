@@ -175,5 +175,9 @@ def test_ties_json_format(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     assert rc == 0
     out = capsys.readouterr().out
     parsed = json.loads(out)
-    assert isinstance(parsed, list)
-    assert parsed[0]["related_n"] == 42
+    # Output is wrapped as {"ties": [...], "llm_hits": [...]} so consumers
+    # always see a stable shape regardless of whether --llm ran.
+    assert isinstance(parsed, dict)
+    assert isinstance(parsed["ties"], list)
+    assert parsed["ties"][0]["related_n"] == 42
+    assert parsed["llm_hits"] == []  # --llm not passed, board overlay disabled

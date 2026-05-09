@@ -237,6 +237,53 @@ def test_target_excluded_from_digest() -> None:
     assert f"#{target.number}:" not in digest
 
 
+def test_format_llm_block_empty_returns_empty_string() -> None:
+    """No hits → empty string so the caller suppresses the sub-block entirely."""
+    from skills.jared.scripts.lib import ties_llm
+
+    assert ties_llm.format_llm_block([]) == ""
+
+
+def test_format_llm_block_renders_each_hit_with_rationale() -> None:
+    """Hits render as one line each with rationale; footer note about advisory nature."""
+    from skills.jared.scripts.lib import ties_llm
+    from skills.jared.scripts.lib.ties import SignalHit
+
+    hits = [
+        SignalHit(
+            related_n=82,
+            name="semantic_overlap",
+            confidence="llm",
+            evidence="both describe the same scoring change",
+        ),
+        SignalHit(
+            related_n=76,
+            name="possibly_already_done",
+            confidence="llm",
+            evidence="76's ETag work may already cover this",
+        ),
+    ]
+    block = ties_llm.format_llm_block(hits)
+
+    assert block.startswith("Semantic ties (LLM, advisory):")
+    assert "#82 [llm, semantic-overlap]" in block
+    assert "both describe the same scoring change" in block
+    assert "#76 [llm, possibly-already-done]" in block
+    assert "76's ETag work may already cover this" in block
+    assert "Haiku" in block  # footer mentions provenance
+
+
+def test_format_llm_block_handles_empty_rationale() -> None:
+    from skills.jared.scripts.lib import ties_llm
+    from skills.jared.scripts.lib.ties import SignalHit
+
+    hits = [
+        SignalHit(related_n=82, name="semantic_overlap", confidence="llm", evidence=""),
+    ]
+    block = ties_llm.format_llm_block(hits)
+    assert "(no rationale)" in block
+
+
 def test_digest_clipped_to_max_issues() -> None:
     """Boards larger than MAX_OPEN_ISSUES_IN_DIGEST get truncated to bound input."""
     from skills.jared.scripts.lib import ties_llm

@@ -236,6 +236,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["human", "json"],
         default="human",
     )
+    ties_p.add_argument(
+        "--llm",
+        action="store_true",
+        help=(
+            "Run the optional LLM-overlay analyzer for semantic ties. Off by "
+            "default. Forces on regardless of project-board.md. Requires the "
+            "anthropic SDK; cost bounded by JARED_TIES_LLM_BUDGET."
+        ),
+    )
     ties_p.set_defaults(func=_cmd_ties)
 
     return parser
@@ -1002,10 +1011,36 @@ def _cmd_ties(args: argparse.Namespace) -> int:
 
     ties = combine(hits, args.threshold, target, open_issues)
 
+    # LLM overlay: opt-in via --llm flag or per-project via
+    # `### Tie Analysis` -> `- llm-overlay: enabled` in docs/project-board.md.
+    # Ad-hoc --llm wins over project-board.md (use it to spot-check).
+    llm_hits: list[Any] = []
+    if args.llm or board.llm_overlay_enabled():
+        from lib.ties_llm import (  # type: ignore[import-not-found]
+            LlmAnalysisError,
+            analyze_semantic_ties,
+            format_llm_block,
+        )
+
+        try:
+            llm_hits = analyze_semantic_ties(target, open_issues)
+        except LlmAnalysisError as e:
+            piece = f"(LLM overlay skipped: {e})"
+            diagnostic = f"{diagnostic} {piece}".strip() if diagnostic else piece
+
     if args.format == "human":
         output = format_ties_block(ties, degraded=not full_mode, diagnostic=diagnostic)
+        if llm_hits:
+            llm_output = format_llm_block(llm_hits)
+            output = f"{output}\n\n{llm_output}" if output else llm_output
     else:
-        output = _json.dumps([asdict(t) for t in ties], indent=2)
+        # JSON shape is stable: always wrap with both `ties` and `llm_hits`,
+        # so consumers don't need to branch on whether --llm was active.
+        out_obj = {
+            "ties": [asdict(t) for t in ties],
+            "llm_hits": [asdict(h) for h in llm_hits],
+        }
+        output = _json.dumps(out_obj, indent=2)
 
     if output:
         print(output)

@@ -233,6 +233,34 @@ def _build_user_message(target: OpenIssueForTies, digest: str) -> str:
     )
 
 
+_LLM_LABEL_DISPLAY: dict[str, str] = {
+    "possibly_already_done": "possibly-already-done",
+    "semantic_overlap": "semantic-overlap",
+}
+
+
+def format_llm_block(hits: list[SignalHit]) -> str:
+    """Render LLM-overlay hits as a separate sub-block under deterministic ties.
+
+    Empty input → empty string (caller suppresses the block). Otherwise the
+    output mirrors the deterministic block's shape (`#N [confidence, label]`)
+    and appends the model's rationale on the same line, then a footer note
+    flagging that this is heuristic and lower-confidence than deterministic.
+    """
+    if not hits:
+        return ""
+    lines: list[str] = ["Semantic ties (LLM, advisory):"]
+    for hit in hits:
+        label = _LLM_LABEL_DISPLAY.get(hit.name, hit.name)
+        rationale = hit.evidence.strip() or "(no rationale)"
+        lines.append(f"  #{hit.related_n} [llm, {label}]   {rationale}")
+    lines.append(
+        "  (Semantic check from Haiku — review carefully; treat as one signal "
+        "among many. Operator decides.)"
+    )
+    return "\n".join(lines)
+
+
 def _parse_response(text: str, target_number: int) -> list[SignalHit]:
     """Parse the JSON-schema-validated text block into SignalHit objects."""
     from .ties import SignalHit
