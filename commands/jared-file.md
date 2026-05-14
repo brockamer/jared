@@ -26,7 +26,7 @@ Flow:
    - `## Current state` — "Not started."
    - `## Decisions` — "(none yet)"
    - `## Acceptance criteria` — in `<details>` block, list criteria
-   - `## Model & execution guidance` — classify the work into Cheap (Haiku-class) / Standard (Sonnet-class) / Smart (Opus / `advisor()`) tiers, name subagent dispatch hints (`Explore`, `general-purpose`, `claude-code-guide`, `advisor()`), and outline a short Execution sketch. See SKILL.md § "Model & execution guidance" for the rendered example. Skip this section if the project's `docs/project-board.md` has `- model-guidance: disabled` in `## Jared config`.
+   - `## Model & execution guidance` — classify the work into imperative-shaped tiers using `USE`-led headers: **Cheap-tier work (USE a Haiku subagent)**, **Standard-tier work (USE a Sonnet subagent)**, **Smart-tier moments (USE `advisor()`)**. Name subagent dispatches with per-line `USE` framing (e.g., `` `feature-dev:code-explorer` — USE to trace how X ships ``). Outline a short Execution sketch. The imperative framing is load-bearing: descriptive labels (e.g., "Cheap (Haiku-class)") drift out of context as sessions grow; verb-led directives ("USE a Haiku subagent") hold at dispatch time. See SKILL.md § "Model & execution guidance" for the rendered example. Skip this section if the project's `docs/project-board.md` has `- model-guidance: disabled` in `## Jared config`.
    - `## Depends on` / `## Blocks` — fill in if applicable, else "(none)"
    - `## Planning` — fill in if a plan/spec already exists, else "(none)"
 
