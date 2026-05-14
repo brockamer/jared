@@ -18,17 +18,17 @@ Not started.
 
 ## Model & execution guidance
 
-**Cheap (Haiku-class):**
+**Cheap-tier work (USE a Haiku subagent):**
 - (parts that are read-only, mechanical, or pattern-matching)
 
-**Standard (Sonnet-class):**
+**Standard-tier work (USE a Sonnet subagent):**
 - (parts that are routine implementation, test writing, refactor)
 
-**Smart (Opus / `advisor()`):**
+**Smart-tier moments (USE `advisor()`):**
 - (parts that need design judgment, cross-cutting reasoning, or pre-merge review)
 
-**Subagent dispatch hints:**
-- (which Claude Code agents to call — `Explore`, `general-purpose`, `claude-code-guide`, `advisor()`)
+**Subagent dispatches (USE these for the noted task):**
+- `agent-name` — USE to <do X>  (real Claude Code agents: `Explore`, `general-purpose`, `claude-code-guide`)
 
 **Execution sketch:**
 1. (first step)
