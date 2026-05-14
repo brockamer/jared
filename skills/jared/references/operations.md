@@ -114,30 +114,30 @@ Every issue body filed through `/jared-file` carries a `## Model & execution gui
 ```markdown
 ## Model & execution guidance
 
-**Cheap (Haiku-class):**
+**Cheap-tier work (USE a Haiku subagent):**
 - <bullet>
 
-**Standard (Sonnet-class):**
+**Standard-tier work (USE a Sonnet subagent):**
 - <bullet>
 
-**Smart (Opus / `advisor()`):**
+**Smart-tier moments (USE `advisor()`):**
 - <bullet>
 
-**Subagent dispatch hints:**
-- <bullet — names real Claude Code agents: Explore, general-purpose, claude-code-guide, advisor()>
+**Subagent dispatches (USE these for the noted task):**
+- `agent-name` — USE to <do X>  (real Claude Code agents: Explore, general-purpose, claude-code-guide; `advisor()` for the senior reviewer pass)
 
 **Execution sketch:**
 1. <step>
 ```
 
-Use abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure. The dispatch-hints subsection names *real* Claude Code primitives so the puller doesn't re-derive them. Full doctrine and rendered example in SKILL.md § "Model & execution guidance".
+Headers are imperative (verb-led directives) — `Cheap-tier work (USE a Haiku subagent)`, not `Cheap (Haiku-class)`. The descriptive shape reads as a category and drifts out of context as the session grows; the imperative shape reads as an instruction and holds at dispatch time. Per-line subagent dispatches use the same `USE` framing. Use abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure. Full doctrine and rendered example in SKILL.md § "Model & execution guidance".
 
 **Two enforcement points:**
 
 | When | Where | What |
 |---|---|---|
 | File-time | `/jared-file` body composition | Section is part of every new issue body. |
-| Start-time | `/jared-start` step 5a | If the body has no `## Model & execution guidance` H2, generate evaluation, surface in announce, post as Session-note-shaped comment on user approval. |
+| Start-time | `/jared-start` step 6 | If the body has no `## Model & execution guidance` H2, generate evaluation, surface in announce, post as Session-note-shaped comment on user approval. |
 
 **Project-level kill switch.** Add this bullet to `## Jared config` in `docs/project-board.md`:
 
