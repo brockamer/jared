@@ -36,10 +36,10 @@ Not started.
 3. (commit / PR boundary)
 
 <!-- Skip this section entirely if the project's docs/project-board.md
-     contains "Model guidance: disabled" in its metadata block. The
-     /jared-start backstop will lazily generate guidance for issues
-     filed before this discipline existed. See SKILL.md § "Model &
-     execution guidance" for the rendered example and rationale. -->
+     contains "- model-guidance: disabled" in the ## Jared config
+     section. The /jared-start backstop will lazily generate guidance
+     for issues filed before this discipline existed. See SKILL.md §
+     "Model & execution guidance" for the rendered example and rationale. -->
 
 <!--
 Dependencies are tracked natively via GitHub's `blockedBy` API, not in body markup.

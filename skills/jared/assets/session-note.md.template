@@ -18,7 +18,7 @@
      A "no" answer requires a one-line "why" beneath that bullet. "N/A" is
      correct when no work of that tier happened in this session. -->
 
-## Guidance audit (#<N>)
+## Guidance audit (#N)
 
 - Cheap-tier mechanical work: dispatched to Haiku subagents?  [yes / no / N/A]
 - Smart-tier decisions: routed through `advisor()`?           [yes / no / N/A]

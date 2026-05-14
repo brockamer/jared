@@ -137,7 +137,7 @@ Headers are imperative (verb-led directives) — `Cheap-tier work (USE a Haiku s
 | When | Where | What |
 |---|---|---|
 | File-time | `/jared-file` body composition | Section is part of every new issue body. |
-| Start-time | `/jared-start` step 5a | If the body has no `## Model & execution guidance` H2, generate evaluation, surface in announce, post as Session-note-shaped comment on user approval. |
+| Start-time | `/jared-start` step 6 | If the body has no `## Model & execution guidance` H2, generate evaluation, surface in announce, post as Session-note-shaped comment on user approval. |
 
 **Project-level kill switch.** Add this bullet to `## Jared config` in `docs/project-board.md`:
 
