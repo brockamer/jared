@@ -251,9 +251,11 @@ See `references/human-readable-board.md` for title/body templates and `assets/is
 
 ## Model & execution guidance — every issue declares its tier mix
 
-Every issue body carries a `## Model & execution guidance` section that names which parts of the work are Cheap (Haiku-class), Standard (Sonnet-class), and Smart (Opus / `advisor()`), plus a short Subagent dispatch hints subsection and an Execution sketch. The point: when a session pulls the issue, model selection is a property of the issue, not session-floor knowledge that gets re-derived each time.
+Every issue body carries a `## Model & execution guidance` section that names which parts of the work are cheap-tier (USE a Haiku subagent), standard-tier (USE a Sonnet subagent), and smart-tier (USE `advisor()`), plus a short Subagent dispatches subsection and an Execution sketch. The point: when a session pulls the issue, model selection is a property of the issue, not session-floor knowledge that gets re-derived each time.
 
-**File-time composition is the contract.** When you compose the body of a new issue in `/jared-file`, fill in the four subsections from the template. Use the abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure does. Name real Claude Code primitives in the dispatch hints: `Explore` (Haiku-default, read-only search), `general-purpose` (inherits, multi-step), `claude-code-guide` (Haiku-default, Claude Code questions), and `advisor()` for the senior reviewer pass.
+**Framing is imperative, not descriptive.** Tier labels are verb-led directives — `Cheap-tier work (USE a Haiku subagent)`, not `Cheap (Haiku-class)`. The descriptive shape reads as a category and drifts out of context as the session grows; the imperative shape reads as an instruction and holds at dispatch time. Per-line subagent dispatches use the same `USE` framing: `` `feature-dev:code-explorer` — USE to trace how X ships `` rather than `` `feature-dev:code-explorer` to trace how X ships ``.
+
+**File-time composition is the contract.** When you compose the body of a new issue in `/jared-file`, fill in the four subsections from the template. Use the abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure does. Name real Claude Code primitives in the dispatch lines: `Explore` (Haiku-default, read-only search), `general-purpose` (inherits, multi-step), `claude-code-guide` (Haiku-default, Claude Code questions), and `advisor()` for the senior reviewer pass.
 
 **Start-time backstop.** When `/jared-start` pulls an issue whose body has no `## Model & execution guidance` H2, the start flow generates the evaluation on the fly and surfaces it as part of the proposed-plan announce. User confirmation in step 8 implicitly approves the evaluation; on approval, jared posts it as a Session-note-shaped comment on the issue (timestamped `## Session YYYY-MM-DD — Model & execution guidance (start-time backstop)`). The body is not retroactively amended — comments are append-only and durable, body edits are not. See `commands/jared-start.md` for the exact step ordering.
 
@@ -264,21 +266,21 @@ Every issue body carries a `## Model & execution guidance` section that names wh
 ```markdown
 ## Model & execution guidance
 
-**Cheap (Haiku-class):**
+**Cheap-tier work (USE a Haiku subagent):**
 - Reading existing test fixtures and identifying the patch surface in `lib/board.py`.
 - Generating the placeholder docstring for the new public method.
 
-**Standard (Sonnet-class):**
+**Standard-tier work (USE a Sonnet subagent):**
 - Implementing `Board.parse_optional_field` and wiring it into `_parse`.
 - Writing the unit test for the three input cases (default, explicit, missing).
 
-**Smart (Opus / `advisor()`):**
+**Smart-tier moments (USE `advisor()`):**
 - Final review pass before the PR opens — verifying the field-name choice doesn't collide with existing parsing and that the default-False behavior is right.
 
-**Subagent dispatch hints:**
-- Use `Explore` for the initial scan of how other optional fields are parsed in `lib/board.py`.
-- Use `general-purpose` for the implementation phase if the parent session is on Opus and wants to delegate.
-- Call `advisor()` once before the final commit.
+**Subagent dispatches (USE these for the noted task):**
+- `Explore` — USE for the initial scan of how other optional fields are parsed in `lib/board.py`.
+- `general-purpose` — USE for the implementation phase if the parent session is on Opus and wants to delegate.
+- `advisor()` — USE once before the final commit for the senior reviewer pass.
 
 **Execution sketch:**
 1. Explore the existing parse pattern for one optional field.

@@ -23,6 +23,24 @@ Flow:
 
    **Pre-flight redaction.** Session notes and `## Current state` updates posted via `jared comment` are scanned by the same pre-flight as `jared file`. Drafts referencing private content from `CLAUDE.local.md` will be refused on post — fix the draft, don't fight the redactor. See `references/pii-pre-flight.md`.
 
+   **Guidance audit append.** If this issue carries `## Model & execution guidance` (in its body OR in a prior `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)` comment), append a `## Guidance audit (#N)` H2 to the Session-note draft as a sibling section to `## Session YYYY-MM-DD` — not a bold-labeled field inside it. One comment per wrap, two H2s inside. Three default questions, honest self-report:
+
+   ```
+   ## Guidance audit (#N)
+
+   - Cheap-tier mechanical work: dispatched to Haiku subagents?  [yes / no / N/A]
+   - Smart-tier decisions: routed through `advisor()`?           [yes / no / N/A]
+   - Subagent dispatches: used the prescribed agents?            [yes / no / N/A]
+   ```
+
+   A `no` answer requires a one-line "why" appended beneath that bullet (e.g., `no — skipped because the spec was already complete after exploration and dispatching would have added latency without quality gain`). `N/A` is appropriate when no work of that tier happened in this session.
+
+   **Skip the audit append when:**
+   - `docs/project-board.md`'s `## Jared config` contains `- model-guidance: disabled`, OR
+   - The touched issue has no `## Model & execution guidance` H2 anywhere (no body section, no start-time backstop comment).
+
+   The audit's value isn't the recorded data — it's the trigger. Asking the question at wrap-time is what corrected behavior in the 2026-05-13 findajob#150 session that surfaced this discipline; codifying the question removes the dependency on the operator noticing the gap. See SKILL.md § "Model & execution guidance" for the file-time framing the audit reflects against.
+
 3. **Reconcile drift.** Before posting, check for:
    - In Progress items that were actually completed → propose closing
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why
