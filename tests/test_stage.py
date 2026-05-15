@@ -349,7 +349,7 @@ class TestStageProposals:
     def test_almost_ready_surfaces_pullable_but_blocked(self) -> None:
         stage = import_stage()
         items = [
-            _item(number=1, blocked_by_native=[2]),     # blocked by #2 (open)
+            _item(number=1, blocked_by_native=[2]),  # blocked by #2 (open)
             _item(number=2, status="Done", state="OPEN"),  # blocker still open
         ]
         result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
