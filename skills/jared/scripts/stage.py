@@ -12,8 +12,10 @@ full design rationale.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any
 
 
@@ -44,6 +46,45 @@ _ACCEPTANCE_SECTION = re.compile(
 )
 _BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##|\Z)", re.DOTALL)
 _ISSUE_REF = re.compile(r"#(\d+)")
+
+_PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
+
+
+def priority_rank(priority: str | None) -> int:
+    """0=High, 1=Medium, 2=Low, 3=unknown/missing (sorts last)."""
+    return _PRIORITY_RANK.get(priority or "", 3)
+
+
+def milestone_proximity_days(item: dict[str, Any], *, today: date) -> float:
+    """Days from `today` until item's milestone.due_on. No milestone or no
+    due_on → math.inf (sorts last in tier).
+    """
+    milestone = item.get("milestone") or {}
+    due_on = milestone.get("due_on") if isinstance(milestone, dict) else None
+    if not due_on:
+        return math.inf
+    try:
+        due_date = datetime.fromisoformat(due_on.replace("Z", "+00:00")).date()
+    except (ValueError, AttributeError):
+        return math.inf
+    return float((due_date - today).days)
+
+
+def days_in_backlog(item: dict[str, Any], *, today: date) -> int:
+    """Days since item entered Status=Backlog.
+
+    Fallback to (today - created_at).days when transition history isn't
+    available — acceptable approximation since most items don't migrate
+    columns repeatedly. See spec § Filter semantics.
+    """
+    created_at = item.get("createdAt") or item.get("created_at")
+    if not created_at:
+        return 0
+    try:
+        created_date = datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+    except (ValueError, AttributeError):
+        return 0
+    return (today - created_date).days
 
 
 def _blocker_refs(item: dict[str, Any]) -> set[int]:
