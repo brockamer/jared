@@ -198,6 +198,19 @@ Run the sweep (`scripts/sweep.py` for the mechanical pass, `references/board-swe
 
 For a structural review — shape of the board, phasing, milestone hygiene, long-horizon arc — see `references/structural-review.md`. Trigger this when the project has shifted enough that the board may not reflect the new direction (big pivot, major release cut, new strategic horizon opens up).
 
+### Periodically — stage (forward-looking complement to groom)
+
+`/jared-stage` evaluates the Backlog under fixed criteria and proposes the next N items to promote to Up Next, sized to keep Up Next at the WIP cap. Same advisory pattern as `/jared-groom` (Jared proposes; you approve), but the focus is forward-looking — what should we work on next — rather than grooming's backward-looking sweep for drift.
+
+Trigger when:
+- Up Next is empty or thin (the natural pull cadence)
+- A complex piece just shipped and you want to reset the pipeline
+- You want a scheduled daily nudge — set up `/schedule jared-stage daily at 9am`
+
+The eval is deterministic: pullable + dependency-ready Backlog items are ranked by Priority > milestone proximity > age in Backlog; Blocked items are re-evaluated for closed blockers and proposed back to Backlog when unblocked. See `commands/jared-stage.md` and `docs/superpowers/specs/2026-05-14-jared-stage-design.md` for the full algorithm.
+
+Critically, `/jared-stage` never applies changes without operator approval — even on scheduled fires (the `--report-only` flag suppresses the approval prompt; the operator re-runs interactively to apply). The discipline preserves "Jared mirrors decisions, doesn't make them" while removing the "remembering to evaluate" burden.
+
 ## Plan and spec integration — issues are the permanent record
 
 Plans and specs (Superpowers-style `docs/superpowers/plans/` and `specs/`, or equivalent) are *working artifacts*. They serve their purpose during brainstorming and execution, then become historical. **The issue is the permanent record.**
