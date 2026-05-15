@@ -14,9 +14,22 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
+
+# Extend sys.path so `from lib.board import …` resolves when this script is
+# loaded directly (CLI) or via SourceFileLoader in tests.  Mirrors the pattern
+# used by sweep.py and dependency-graph.py.
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    fetch_blocked_by_edges as _fetch_blocked_by_edges,
+)
 
 
 @dataclass(frozen=True)
@@ -310,3 +323,44 @@ def stage_proposals(
         real_world_still_blocked=real_world_still_blocked,
         almost_ready=almost_ready,
     )
+
+
+def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
+    """Fetch all open items from the board and normalise to stage.py's dict shape.
+
+    Pure functions in this module take dicts with these keys:
+      number, status, priority, title, body, state, milestone, createdAt,
+      blocked_by_native (list[int]).
+
+    One bulk call to fetch_blocked_by_edges covers all issues so callers
+    never trigger the N+1 per-issue pattern.  Items with no content.number
+    (draft cards, legacy entries) are skipped.
+    """
+    raw_items: list[dict[str, Any]] = board.board_items()
+
+    # One paginated GraphQL call → {issue_number: [{number, state}, …]}
+    edges_map: dict[int, list[dict[str, Any]]] = _fetch_blocked_by_edges(board.repo)
+
+    normalised: list[dict[str, Any]] = []
+    for raw in raw_items:
+        content: dict[str, Any] = raw.get("content") or {}
+        number: int | None = content.get("number")
+        if number is None:
+            continue
+        blocked_by_native: list[int] = [
+            edge["number"] for edge in edges_map.get(number, [])
+        ]
+        normalised.append(
+            {
+                "number": number,
+                "status": raw.get("status"),
+                "priority": raw.get("priority"),
+                "title": content.get("title", ""),
+                "body": content.get("body", ""),
+                "state": content.get("state", "OPEN"),
+                "milestone": content.get("milestone"),
+                "createdAt": content.get("createdAt") or content.get("created_at"),
+                "blocked_by_native": blocked_by_native,
+            }
+        )
+    return normalised

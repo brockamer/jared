@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import is_dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
-from tests.conftest import import_stage
+import pytest
+
+from tests.conftest import import_stage, patch_gh_by_arg, write_minimal_board
 
 
 def test_stage_module_imports() -> None:
@@ -399,3 +402,66 @@ class TestRender:
             report_only=True,
         )
         assert "Approve?" not in out
+
+
+class TestFetchItemsForStage:
+    def test_returns_items_with_status_priority_body_milestone(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        write_minimal_board(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        items_json = json.dumps(
+            {
+                "items": [
+                    {
+                        "content": {
+                            "number": 1,
+                            "title": "Test",
+                            "body": "Summary.",
+                            "state": "OPEN",
+                            "milestone": {
+                                "title": "M1",
+                                "due_on": "2026-07-01T00:00:00Z",
+                            },
+                            "createdAt": "2026-05-01T00:00:00Z",
+                        },
+                        "status": "Backlog",
+                        "priority": "Medium",
+                    },
+                ]
+            }
+        )
+        # fetch_blocked_by_edges uses run_graphql → "api graphql …"
+        # Return empty edges (no open blockers for issue #1).
+        edges_json = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        }
+                    }
+                }
+            }
+        )
+        patch_gh_by_arg(
+            monkeypatch,
+            responses={"item-list": items_json, "graphql": edges_json},
+        )
+
+        stage = import_stage()
+        from skills.jared.scripts.lib.board import Board
+
+        board = Board.from_path(tmp_path / "docs" / "project-board.md")
+        items = stage.fetch_items_for_stage(board)
+
+        assert len(items) == 1
+        assert items[0]["number"] == 1
+        assert items[0]["status"] == "Backlog"
+        assert items[0]["priority"] == "Medium"
+        assert items[0]["body"] == "Summary."
+        assert items[0]["milestone"] is not None
+        assert items[0]["milestone"]["title"] == "M1"
+        assert items[0]["blocked_by_native"] == []
