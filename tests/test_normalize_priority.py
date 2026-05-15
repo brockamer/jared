@@ -57,9 +57,7 @@ def test_file_parser_accepts_med_alias(cli: ModuleType) -> None:
 
 def test_add_to_board_parser_accepts_lowercase(cli: ModuleType) -> None:
     parser = cli.build_parser()
-    args = parser.parse_args(
-        ["--board", "x", "add-to-board", "42", "--priority", "low"]
-    )
+    args = parser.parse_args(["--board", "x", "add-to-board", "42", "--priority", "low"])
     assert args.priority == "Low"
 
 
