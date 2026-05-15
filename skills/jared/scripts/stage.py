@@ -42,6 +42,35 @@ _ACCEPTANCE_SECTION = re.compile(
     r"##\s+Acceptance criteria\s*\n+<details>\s*\n+<summary>Expand</summary>(.*?)</details>",
     re.DOTALL,
 )
+_BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##|\Z)", re.DOTALL)
+_ISSUE_REF = re.compile(r"#(\d+)")
+
+
+def _blocker_refs(item: dict[str, Any]) -> set[int]:
+    """Union of native edges + #N references parsed from ## Blocked by body section."""
+    native: set[int] = set(item.get("blocked_by_native", []) or [])
+    body = item.get("body", "") or ""
+    section = _BLOCKED_BY_SECTION.search(body)
+    body_refs: set[int] = set()
+    if section:
+        body_refs = {int(m.group(1)) for m in _ISSUE_REF.finditer(section.group(1))}
+    return native | body_refs
+
+
+def has_no_open_blockers(item: dict[str, Any], items: list[dict[str, Any]]) -> bool:
+    """True if every blocker reference points to a closed (Done) issue."""
+    refs = _blocker_refs(item)
+    if not refs:
+        return True
+    by_number = {i["number"]: i for i in items if "number" in i}
+    for ref in refs:
+        blocker = by_number.get(ref)
+        if blocker is None:
+            # Unknown blocker reference — treat as still blocked (conservative).
+            return False
+        if blocker.get("state", "").upper() != "CLOSED":
+            return False
+    return True
 
 
 def is_pullable(item: dict[str, Any]) -> bool:
