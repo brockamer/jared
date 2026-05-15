@@ -76,6 +76,6 @@ Flow:
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
 
-6. **Confirm and close out.** Print a one-line summary: *"Wrapped N issues, filed N new, archived N plans, reconciled N drift items. Next session: `/jared-start`."*
+6. **Confirm and close out.** Print a one-line summary: *"Wrapped N issues, filed N new, archived N plans, reconciled N drift items. Next session: `/jared-start` to pull, or `/jared-stage` to see staging proposals."*
 
 The next session's `/jared-start` invokes `jared next-session-prompt` to assemble the posture from current board state — In Progress with each issue's most recent Session-note one-liner, top of Up Next, recently closed. Because the assembly is on-demand, the recommendation cannot go stale and no `tmp/` artifact accumulates.
