@@ -165,3 +165,63 @@ def is_pullable(item: dict[str, Any]) -> bool:
         if line.strip().startswith("-") and not _PLACEHOLDER_CRITERIA.match(line)
     ]
     return len(real_bullets) >= 1
+
+
+def _count_status(items: list[dict[str, Any]], status: str) -> int:
+    return sum(1 for i in items if i.get("status") == status)
+
+
+def stage_proposals(
+    items: list[dict[str, Any]],
+    *,
+    up_next_cap: int = 3,
+    today: date,
+) -> StageProposals:
+    """Compute one /jared-stage evaluation pass over the given items.
+
+    Pure function: no I/O. The caller (typically main()) fetches items
+    via lib/board.py and passes them in.
+    """
+    slots_available = max(0, up_next_cap - _count_status(items, "Up Next"))
+    backlog = [i for i in items if i.get("status") == "Backlog"]
+    deferred: list[DeferredItem] = []
+
+    pullable = [i for i in backlog if is_pullable(i)]
+    not_pullable = [i for i in backlog if not is_pullable(i)]
+    for item in not_pullable:
+        deferred.append(DeferredItem(item, "not pullable — no acceptance criteria"))
+
+    dep_ready = [i for i in pullable if has_no_open_blockers(i, items)]
+    dep_blocked = [i for i in pullable if not has_no_open_blockers(i, items)]
+
+    def rank_key(it: dict[str, Any]) -> tuple[int, float, int]:
+        return (
+            priority_rank(it.get("priority")),
+            milestone_proximity_days(it, today=today),
+            -days_in_backlog(it, today=today),
+        )
+
+    ranked = sorted(dep_ready, key=rank_key)
+    promotions = ranked[:slots_available]
+    for item in ranked[slots_available:]:
+        deferred.append(DeferredItem(item, deferred_reason(item, today=today)))
+
+    unblocked: list[dict[str, Any]] = []
+    real_world_still_blocked: list[dict[str, Any]] = []
+    for item in [i for i in items if i.get("status") == "Blocked"]:
+        if not has_no_open_blockers(item, items):
+            continue
+        if has_real_world_annotation(item):
+            real_world_still_blocked.append(item)
+        else:
+            unblocked.append(item)
+
+    almost_ready = sorted(dep_blocked, key=rank_key)[:3]
+
+    return StageProposals(
+        promotions=promotions,
+        deferred=deferred,
+        unblocked=unblocked,
+        real_world_still_blocked=real_world_still_blocked,
+        almost_ready=almost_ready,
+    )

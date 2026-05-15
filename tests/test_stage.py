@@ -225,3 +225,131 @@ class TestDeferredReason:
         # Medium with a real milestone — only loses to age or slot cap
         item = {"priority": "Medium", "milestone": {"due_on": "2026-07-01T00:00:00Z"}}
         assert stage.deferred_reason(item, today=date.today()) == "ranked below slot cap"
+
+
+def _item(
+    *,
+    number: int,
+    status: str = "Backlog",
+    priority: str = "Medium",
+    title: str = "Test",
+    body: str | None = None,
+    milestone_due: str | None = "2026-07-01T00:00:00Z",
+    state: str = "OPEN",
+    created_days_ago: int = 7,
+    blocked_by_native: list[int] | None = None,
+) -> dict[str, Any]:
+    """Build a stub item dict for stage_proposals tests."""
+    default_body = (
+        "Summary paragraph.\n\n"
+        "## Acceptance criteria\n\n"
+        "<details>\n<summary>Expand</summary>\n\n"
+        "- Real criterion\n\n"
+        "</details>"
+    )
+    created = datetime.now(UTC).timestamp() - created_days_ago * 86400
+    return {
+        "number": number,
+        "status": status,
+        "priority": priority,
+        "title": title,
+        "body": body if body is not None else default_body,
+        "milestone": ({"due_on": milestone_due} if milestone_due else None),
+        "state": state,
+        "createdAt": datetime.fromtimestamp(created, tz=UTC).isoformat(),
+        "blocked_by_native": blocked_by_native or [],
+    }
+
+
+class TestStageProposals:
+    def test_empty_backlog_produces_empty_proposals(self) -> None:
+        stage = import_stage()
+        result = stage.stage_proposals([], up_next_cap=3, today=date.today())
+        assert result.promotions == []
+        assert result.deferred == []
+        assert result.unblocked == []
+
+    def test_three_pullable_dep_ready_items_promoted_to_full_cap(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, priority="High"),
+            _item(number=2, priority="Medium"),
+            _item(number=3, priority="Low"),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert [p["number"] for p in result.promotions] == [1, 2, 3]
+        assert result.deferred == []
+
+    def test_priority_dominates_milestone(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, priority="Low", milestone_due="2026-06-01T00:00:00Z"),
+            _item(number=2, priority="High", milestone_due="2027-01-01T00:00:00Z"),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=1, today=date.today())
+        assert result.promotions[0]["number"] == 2
+
+    def test_milestone_proximity_breaks_priority_tie(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, priority="Medium", milestone_due="2027-01-01T00:00:00Z"),
+            _item(number=2, priority="Medium", milestone_due="2026-06-01T00:00:00Z"),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=1, today=date.today())
+        assert result.promotions[0]["number"] == 2
+
+    def test_up_next_full_yields_no_promotions(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, status="Up Next"),
+            _item(number=2, status="Up Next"),
+            _item(number=3, status="Up Next"),
+            _item(number=4, status="Backlog", priority="High"),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert result.promotions == []
+
+    def test_unpullable_item_deferred_with_reason(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, body="Real summary.\n\n## Decisions\n\n(none)\n"),  # no ## Acceptance
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert result.promotions == []
+        assert len(result.deferred) == 1
+        assert result.deferred[0].item["number"] == 1
+        assert "not pullable" in result.deferred[0].reason
+
+    def test_blocked_item_with_closed_blocker_returns_to_backlog(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, status="Blocked", blocked_by_native=[2]),
+            _item(number=2, status="Done", state="CLOSED"),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert len(result.unblocked) == 1
+        assert result.unblocked[0]["number"] == 1
+
+    def test_blocked_item_with_real_world_annotation_stays_blocked(self) -> None:
+        stage = import_stage()
+        body = (
+            "Summary.\n\n"
+            "## Acceptance criteria\n\n<details>\n<summary>Expand</summary>\n\n"
+            "- Real criterion\n\n</details>\n\n"
+            "## Blocked by\n\nWaiting on next live findajob session.\n"
+        )
+        items = [_item(number=1, status="Blocked", body=body)]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert result.unblocked == []
+        assert len(result.real_world_still_blocked) == 1
+
+    def test_almost_ready_surfaces_pullable_but_blocked(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, blocked_by_native=[2]),     # blocked by #2 (open)
+            _item(number=2, status="Done", state="OPEN"),  # blocker still open
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert result.promotions == []
+        assert len(result.almost_ready) == 1
+        assert result.almost_ready[0]["number"] == 1
