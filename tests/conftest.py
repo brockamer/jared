@@ -77,6 +77,17 @@ def import_sweep() -> ModuleType:
     return mod
 
 
+def import_stage() -> ModuleType:
+    """Load `stage.py` as a module. Same SourceFileLoader trick as the others."""
+    path = SKILL_SCRIPTS / "stage.py"
+    loader = SourceFileLoader("stage", str(path))
+    spec = importlib.util.spec_from_loader("stage", loader)
+    assert spec is not None
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
 def write_minimal_board(tmp_path: Path) -> Path:
     """Write a minimal valid docs/project-board.md into tmp_path/docs/.
 
