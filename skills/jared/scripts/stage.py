@@ -130,6 +130,19 @@ def has_no_open_blockers(item: dict[str, Any], items: list[dict[str, Any]]) -> b
     return True
 
 
+def deferred_reason(item: dict[str, Any], *, today: date) -> str:
+    """One-line reason this Backlog item didn't make the slot cut.
+
+    Picks the most-specific applicable signal. Output is advisory text,
+    not a contract — implementation may refine the wording.
+    """
+    if priority_rank(item.get("priority")) == 2:
+        return "Low tier"
+    if milestone_proximity_days(item, today=today) == math.inf:
+        return "no milestone with due date"
+    return "ranked below slot cap"
+
+
 def is_pullable(item: dict[str, Any]) -> bool:
     """An item is pullable if its body has a real summary + non-placeholder
     acceptance criteria. See spec § "Filter semantics"."""
