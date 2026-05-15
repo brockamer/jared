@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import is_dataclass
+from datetime import UTC, date, datetime
 from typing import Any
 
 from tests.conftest import import_stage
@@ -167,3 +169,41 @@ class TestHasRealWorldAnnotation:
         stage = import_stage()
         item = {"body": "Summary.\n\n## Decisions\n\n(none)\n"}
         assert stage.has_real_world_annotation(item) is False
+
+
+class TestRankingHelpers:
+    def test_priority_rank_canonical_order(self) -> None:
+        stage = import_stage()
+        assert stage.priority_rank("High") == 0
+        assert stage.priority_rank("Medium") == 1
+        assert stage.priority_rank("Low") == 2
+
+    def test_priority_rank_unknown_sorts_last(self) -> None:
+        stage = import_stage()
+        assert stage.priority_rank(None) == 3
+        assert stage.priority_rank("") == 3
+        assert stage.priority_rank("Whatever") == 3
+
+    def test_milestone_proximity_days_with_future_due(self) -> None:
+        stage = import_stage()
+        future = date.today().toordinal() + 30
+        future_iso = date.fromordinal(future).isoformat()
+        item = {"milestone": {"due_on": f"{future_iso}T00:00:00Z"}}
+        assert stage.milestone_proximity_days(item, today=date.today()) == 30
+
+    def test_milestone_proximity_days_no_milestone(self) -> None:
+        stage = import_stage()
+        assert stage.milestone_proximity_days({}, today=date.today()) == math.inf
+
+    def test_milestone_proximity_days_no_due_on(self) -> None:
+        stage = import_stage()
+        item = {"milestone": {"title": "Phase 2"}}
+        assert stage.milestone_proximity_days(item, today=date.today()) == math.inf
+
+    def test_days_in_backlog_uses_created_at_fallback(self) -> None:
+        stage = import_stage()
+        # Item created 14 days ago
+        created = datetime.now(UTC).timestamp() - 14 * 86400
+        item = {"createdAt": datetime.fromtimestamp(created, tz=UTC).isoformat()}
+        days = stage.days_in_backlog(item, today=date.today())
+        assert 13 <= days <= 15  # allow 1d slack for test timing
