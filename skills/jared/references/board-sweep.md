@@ -50,6 +50,8 @@ Also flag items that have been in Blocked status for more than 7 days — propos
 - High-priority Backlog items >14 days old: propose promote / downgrade / close.
 - Any Backlog item >60 days old without activity: propose closing as obsolete unless the user has specific plans for it.
 
+**See also:** `/jared-stage` is the forward-looking complement to grooming — it evaluates the Backlog under priority + milestone criteria and proposes Up Next promotions. Use `/jared-stage` when you want to pick the next item; use `/jared-groom` when you want to check for drift.
+
 ### 6. Done hygiene
 
 Issues in Done since before the last release — fine to leave, but glance for anything that should have been closed differently (closed as "won't fix" but with no explanatory comment). Add a `wontfix` or `obsolete` label if appropriate.
