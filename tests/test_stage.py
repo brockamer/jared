@@ -207,3 +207,21 @@ class TestRankingHelpers:
         item = {"createdAt": datetime.fromtimestamp(created, tz=UTC).isoformat()}
         days = stage.days_in_backlog(item, today=date.today())
         assert 13 <= days <= 15  # allow 1d slack for test timing
+
+
+class TestDeferredReason:
+    def test_low_tier_reason(self) -> None:
+        stage = import_stage()
+        item = {"priority": "Low", "milestone": {"due_on": "2026-07-01T00:00:00Z"}}
+        assert stage.deferred_reason(item, today=date.today()) == "Low tier"
+
+    def test_no_milestone_reason(self) -> None:
+        stage = import_stage()
+        item = {"priority": "Medium"}
+        assert stage.deferred_reason(item, today=date.today()) == "no milestone with due date"
+
+    def test_below_slot_cap_reason(self) -> None:
+        stage = import_stage()
+        # Medium with a real milestone — only loses to age or slot cap
+        item = {"priority": "Medium", "milestone": {"due_on": "2026-07-01T00:00:00Z"}}
+        assert stage.deferred_reason(item, today=date.today()) == "ranked below slot cap"
