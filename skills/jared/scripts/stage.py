@@ -167,6 +167,91 @@ def is_pullable(item: dict[str, Any]) -> bool:
     return len(real_bullets) >= 1
 
 
+def _format_milestone(item: dict[str, Any], *, today: date) -> str:
+    milestone = item.get("milestone") or {}
+    if not isinstance(milestone, dict):
+        return "(no milestone)"
+    title = milestone.get("title") or "(unknown)"
+    due_on = milestone.get("due_on")
+    if not due_on:
+        return f"{title} (no due date)"
+    try:
+        due_date = datetime.fromisoformat(due_on.replace("Z", "+00:00")).date()
+        delta = (due_date - today).days
+        return f"{title} (due {due_date.isoformat()}, {delta}d)"
+    except (ValueError, AttributeError):
+        return f"{title} (no due date)"
+
+
+def render(
+    proposals: StageProposals,
+    *,
+    now: datetime,
+    today: date | None = None,
+    report_only: bool = False,
+) -> str:
+    """Format StageProposals as the stdout block documented in the spec."""
+    if today is None:
+        today = now.date()
+    lines: list[str] = []
+    lines.append(f"/jared-stage — proposals {now.strftime('%Y-%m-%d %H:%M')}")
+    lines.append("")
+    lines.append("== Backlog → Up Next ==")
+    lines.append("")
+    if proposals.promotions:
+        lines.append("Promote:")
+        for item in proposals.promotions:
+            pri = item.get("priority", "?")
+            title = item.get("title", "")
+            lines.append(f"  #{item['number']} [{pri}] {title}")
+            lines.append(f"        {_format_milestone(item, today=today)}")
+    else:
+        lines.append("(no promotions this pass)")
+    lines.append("")
+    if proposals.deferred:
+        lines.append("Deferred (this pass):")
+        for d in proposals.deferred:
+            it = d.item
+            lines.append(
+                f"  #{it['number']} [{it.get('priority', '?')}] "
+                f"{it.get('title', '')} — {d.reason}"
+            )
+        lines.append("")
+    lines.append("== Blocked revisit ==")
+    lines.append("")
+    if proposals.unblocked:
+        lines.append("Unblocked (propose moving to Backlog):")
+        for it in proposals.unblocked:
+            lines.append(f"  #{it['number']} {it.get('title', '')}")
+    else:
+        lines.append(
+            "Unblocked: (none — all Blocked items still have open blockers"
+            " or real-world annotations)"
+        )
+    lines.append("")
+    if proposals.real_world_still_blocked:
+        lines.append("Still Blocked, real-world annotation — check manually:")
+        for it in proposals.real_world_still_blocked:
+            lines.append(f"  #{it['number']} {it.get('title', '')}")
+    lines.append("")
+    lines.append("== Almost ready (advisory) ==")
+    lines.append("")
+    if proposals.almost_ready:
+        lines.append("Pullable but blocked by open issue(s):")
+        for it in proposals.almost_ready:
+            lines.append(f"  #{it['number']} [{it.get('priority', '?')}] {it.get('title', '')}")
+    else:
+        lines.append("(none — no Backlog items have open native or body-ref blockers)")
+    lines.append("")
+    if not report_only:
+        lines.append("──────────────────────────────────────────────────")
+        lines.append("Approve? (y / <issue numbers> / skip)")
+        lines.append("  y               apply all proposed promotions + unblocks")
+        lines.append("  <numbers>       apply only those (e.g., \"y #1 #4\")")
+        lines.append("  skip            apply nothing; output is record only")
+    return "\n".join(lines)
+
+
 def _count_status(items: list[dict[str, Any]], status: str) -> int:
     return sum(1 for i in items if i.get("status") == status)
 
