@@ -57,6 +57,22 @@ def _blocker_refs(item: dict[str, Any]) -> set[int]:
     return native | body_refs
 
 
+def has_real_world_annotation(item: dict[str, Any]) -> bool:
+    """True if `## Blocked by` body has substantive text after stripping #N refs.
+
+    Heuristic: ≥10 non-whitespace characters remain after removing `#\\d+` matches.
+    Surfaces patterns like #60's "waiting on next non-trivial findajob session"
+    where the blocker is a real-world event, not another issue.
+    """
+    body = item.get("body", "") or ""
+    section = _BLOCKED_BY_SECTION.search(body)
+    if not section:
+        return False
+    stripped = _ISSUE_REF.sub("", section.group(1))
+    non_whitespace = "".join(stripped.split())
+    return len(non_whitespace) >= 10
+
+
 def has_no_open_blockers(item: dict[str, Any], items: list[dict[str, Any]]) -> bool:
     """True if every blocker reference points to a closed (Done) issue."""
     refs = _blocker_refs(item)

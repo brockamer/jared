@@ -138,3 +138,32 @@ class TestHasNoOpenBlockers:
         target = {"number": 1, "body": "Summary.\n", "blocked_by_native": [999]}
         # #999 not present in the items list — conservative: treat as still blocked.
         assert stage.has_no_open_blockers(target, self._items(target)) is False
+
+
+class TestHasRealWorldAnnotation:
+    def test_only_issue_refs_no_annotation(self) -> None:
+        stage = import_stage()
+        item = {"body": "Summary.\n\n## Blocked by\n\n#42, #51\n"}
+        assert stage.has_real_world_annotation(item) is False
+
+    def test_substantial_prose_is_annotation(self) -> None:
+        stage = import_stage()
+        item = {
+            "body": (
+                "Summary.\n\n"
+                "## Blocked by\n\n"
+                "Waiting on next non-trivial findajob session — no code change unblocks it.\n"
+            )
+        }
+        assert stage.has_real_world_annotation(item) is True
+
+    def test_short_text_after_stripping_refs_is_not_annotation(self) -> None:
+        stage = import_stage()
+        item = {"body": "Summary.\n\n## Blocked by\n\nWaiting on #42\n"}
+        # "Waiting on " stripped of #42 = "Waiting on " — under 10 non-whitespace chars
+        assert stage.has_real_world_annotation(item) is False
+
+    def test_no_blocked_by_section_returns_false(self) -> None:
+        stage = import_stage()
+        item = {"body": "Summary.\n\n## Decisions\n\n(none)\n"}
+        assert stage.has_real_world_annotation(item) is False
