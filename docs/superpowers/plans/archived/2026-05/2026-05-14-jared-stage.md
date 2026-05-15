@@ -1,6 +1,14 @@
+---
+**Shipped in #128 on 2026-05-15. Final decisions captured in issue body.**
+---
+
 # /jared-stage Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+## Issue
+
+- #128
 
 **Goal:** Implement `/jared-stage`, an advisory + scheduled command that proposes Backlog → Up Next promotions and Blocked revisits, per `docs/superpowers/specs/2026-05-14-jared-stage-design.md` (issue #128).
 

@@ -1,9 +1,15 @@
+---
+**Shipped in #128 on 2026-05-15. Final decisions captured in issue body.**
+---
+
 # Design — `/jared-stage`: continuous staging discipline
 
 **Date:** 2026-05-14
 **Status:** Approved (awaiting user review of this spec before implementation plan)
 
-## Issue: #128
+## Issue
+
+- #128
 
 ## Problem
 
