@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import is_dataclass
+from typing import Any
 
 from tests.conftest import import_stage
 
@@ -78,3 +79,56 @@ class TestIsPullable:
             )
         }
         assert stage.is_pullable(item) is False
+
+
+class TestHasNoOpenBlockers:
+    def _items(self, *defs: dict[str, Any]) -> list[dict[str, Any]]:
+        return list(defs)
+
+    def test_no_blockers_at_all(self) -> None:
+        stage = import_stage()
+        item = {"number": 1, "body": "Summary.\n", "blocked_by_native": []}
+        assert stage.has_no_open_blockers(item, self._items(item)) is True
+
+    def test_native_blocker_closed(self) -> None:
+        stage = import_stage()
+        target = {"number": 1, "body": "Summary.\n", "blocked_by_native": [2]}
+        blocker = {"number": 2, "state": "CLOSED"}
+        assert stage.has_no_open_blockers(target, self._items(target, blocker)) is True
+
+    def test_native_blocker_open(self) -> None:
+        stage = import_stage()
+        target = {"number": 1, "body": "Summary.\n", "blocked_by_native": [2]}
+        blocker = {"number": 2, "state": "OPEN"}
+        assert stage.has_no_open_blockers(target, self._items(target, blocker)) is False
+
+    def test_body_ref_blocker_open(self) -> None:
+        stage = import_stage()
+        target = {
+            "number": 1,
+            "body": "Summary.\n\n## Blocked by\n\nWaiting on #2.\n",
+            "blocked_by_native": [],
+        }
+        blocker = {"number": 2, "state": "OPEN"}
+        assert stage.has_no_open_blockers(target, self._items(target, blocker)) is False
+
+    def test_body_ref_blocker_closed(self) -> None:
+        stage = import_stage()
+        target = {
+            "number": 1,
+            "body": "Summary.\n\n## Blocked by\n\nWaiting on #2.\n",
+            "blocked_by_native": [],
+        }
+        blocker = {"number": 2, "state": "CLOSED"}
+        assert stage.has_no_open_blockers(target, self._items(target, blocker)) is True
+
+    def test_mixed_native_and_body_one_open(self) -> None:
+        stage = import_stage()
+        target = {
+            "number": 1,
+            "body": "Summary.\n\n## Blocked by\n\nWaiting on #3.\n",
+            "blocked_by_native": [2],
+        }
+        b2 = {"number": 2, "state": "CLOSED"}
+        b3 = {"number": 3, "state": "OPEN"}
+        assert stage.has_no_open_blockers(target, self._items(target, b2, b3)) is False
