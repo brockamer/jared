@@ -353,3 +353,49 @@ class TestStageProposals:
         assert result.promotions == []
         assert len(result.almost_ready) == 1
         assert result.almost_ready[0]["number"] == 1
+
+
+class TestRender:
+    def test_render_empty_proposals_has_all_section_headers(self) -> None:
+        stage = import_stage()
+        result = stage.stage_proposals([], up_next_cap=3, today=date.today())
+        out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+        # Every section header must be present even when its content is empty
+        assert "/jared-stage — proposals 2026-05-14 16:45" in out
+        assert "== Backlog → Up Next ==" in out
+        assert "== Blocked revisit ==" in out
+        assert "== Almost ready (advisory) ==" in out
+        assert "Approve? (y / <issue numbers> / skip)" in out
+
+    def test_render_promotion_shows_issue_metadata(self) -> None:
+        stage = import_stage()
+        items = [_item(number=42, priority="High", title="Add foo")]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+        assert "#42" in out
+        assert "[High]" in out
+        assert "Add foo" in out
+
+    def test_render_deferred_shows_reason(self) -> None:
+        stage = import_stage()
+        items = [
+            _item(number=1, priority="High"),
+            _item(number=2, priority="High"),
+            _item(number=3, priority="High"),
+            _item(number=4, priority="Low"),  # deferred
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+        assert "Deferred (this pass):" in out
+        assert "#4" in out
+        assert "Low tier" in out
+
+    def test_render_report_only_omits_approve_prompt(self) -> None:
+        stage = import_stage()
+        result = stage.stage_proposals([], up_next_cap=3, today=date.today())
+        out = stage.render(
+            result,
+            now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC),
+            report_only=True,
+        )
+        assert "Approve?" not in out
