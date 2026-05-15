@@ -144,6 +144,28 @@ class TestHasNoOpenBlockers:
         # #999 not present in the items list — conservative: treat as still blocked.
         assert stage.has_no_open_blockers(target, self._items(target)) is False
 
+    def test_h3_subsection_blocker_still_counted(self) -> None:
+        # Regression: the section-terminator lookahead must reject H3 (`\n###`)
+        # so blockers nested under H3 sub-headings of `## Blocked by` are not
+        # silently dropped. See #130.
+        stage = import_stage()
+        target = {
+            "number": 1,
+            "body": (
+                "Summary.\n\n"
+                "## Blocked by\n\n"
+                "Foo #2.\n\n"
+                "### Sub-context\n\n"
+                "Bar #3.\n\n"
+                "## Acceptance criteria\n\n"
+                "- something\n"
+            ),
+            "blocked_by_native": [],
+        }
+        b2 = {"number": 2, "state": "CLOSED"}
+        b3 = {"number": 3, "state": "OPEN"}
+        assert stage.has_no_open_blockers(target, self._items(target, b2, b3)) is False
+
 
 class TestHasRealWorldAnnotation:
     def test_only_issue_refs_no_annotation(self) -> None:
@@ -172,6 +194,25 @@ class TestHasRealWorldAnnotation:
         stage = import_stage()
         item = {"body": "Summary.\n\n## Decisions\n\n(none)\n"}
         assert stage.has_real_world_annotation(item) is False
+
+    def test_annotation_only_inside_h3_subsection(self) -> None:
+        # Regression: when prose annotation lives only inside an H3 sub-block,
+        # the buggy regex truncates at the H3 and the heuristic returns False.
+        # The fixed regex captures past the H3 so the annotation is detected.
+        # See #130.
+        stage = import_stage()
+        item = {
+            "body": (
+                "Summary.\n\n"
+                "## Blocked by\n\n"
+                "#42\n\n"
+                "### Context\n\n"
+                "Waiting on the next non-trivial findajob session.\n\n"
+                "## Acceptance criteria\n\n"
+                "- something\n"
+            )
+        }
+        assert stage.has_real_world_annotation(item) is True
 
 
 class TestRankingHelpers:
