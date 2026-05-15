@@ -12,11 +12,12 @@ full design rationale.
 
 from __future__ import annotations
 
+import argparse
 import math
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+from lib.board import Board  # type: ignore[import-not-found]  # noqa: E402
+from lib.board import (  # noqa: E402
     fetch_blocked_by_edges as _fetch_blocked_by_edges,
 )
 
@@ -336,6 +338,8 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
     (draft cards, legacy entries) are skipped.
     """
     raw_items: list[dict[str, Any]] = board.board_items()
+    if not raw_items:
+        return []
 
     # One paginated GraphQL call → {issue_number: [{number, state}, …]}
     edges_map: dict[int, list[dict[str, Any]]] = _fetch_blocked_by_edges(board.repo)
@@ -361,3 +365,35 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
             }
         )
     return normalised
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="stage",
+        description="Propose Backlog→Up Next promotions and Blocked revisits.",
+    )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Emit proposals only; suppress the 'Approve?' prompt (for scheduled fires).",
+    )
+    parser.add_argument(
+        "--up-next-cap",
+        type=int,
+        default=3,
+        help="Maximum items allowed in Up Next column (default: 3).",
+    )
+    args = parser.parse_args(argv)
+
+    board = Board.from_path(Path("docs/project-board.md"))
+    items = fetch_items_for_stage(board)
+    today = date.today()
+    proposals = stage_proposals(items, up_next_cap=args.up_next_cap, today=today)
+    now = datetime.now(UTC).astimezone()
+    output = render(proposals, now=now, today=today, report_only=args.report_only)
+    print(output)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

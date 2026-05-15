@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import import_stage, patch_gh_by_arg, write_minimal_board
+from tests.conftest import import_stage, patch_gh, patch_gh_by_arg, write_minimal_board
 
 
 def test_stage_module_imports() -> None:
@@ -465,3 +465,41 @@ class TestFetchItemsForStage:
         assert items[0]["milestone"] is not None
         assert items[0]["milestone"]["title"] == "M1"
         assert items[0]["blocked_by_native"] == []
+
+
+class TestMain:
+    def test_main_with_no_args_emits_proposals_block(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: Any
+    ) -> None:
+        write_minimal_board(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        patch_gh(monkeypatch, stdout='{"items": []}')
+        stage = import_stage()
+        rc = stage.main([])
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "/jared-stage — proposals" in captured.out
+        assert "== Backlog → Up Next ==" in captured.out
+        assert "Approve?" in captured.out  # interactive mode
+
+    def test_main_report_only_omits_approve_prompt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: Any
+    ) -> None:
+        write_minimal_board(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        patch_gh(monkeypatch, stdout='{"items": []}')
+        stage = import_stage()
+        rc = stage.main(["--report-only"])
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "Approve?" not in captured.out
+
+    def test_main_up_next_cap_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: Any
+    ) -> None:
+        write_minimal_board(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        patch_gh(monkeypatch, stdout='{"items": []}')
+        stage = import_stage()
+        rc = stage.main(["--up-next-cap", "5"])
+        assert rc == 0
