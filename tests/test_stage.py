@@ -132,3 +132,9 @@ class TestHasNoOpenBlockers:
         b2 = {"number": 2, "state": "CLOSED"}
         b3 = {"number": 3, "state": "OPEN"}
         assert stage.has_no_open_blockers(target, self._items(target, b2, b3)) is False
+
+    def test_unknown_blocker_ref_treated_as_still_blocked(self) -> None:
+        stage = import_stage()
+        target = {"number": 1, "body": "Summary.\n", "blocked_by_native": [999]}
+        # #999 not present in the items list — conservative: treat as still blocked.
+        assert stage.has_no_open_blockers(target, self._items(target)) is False
