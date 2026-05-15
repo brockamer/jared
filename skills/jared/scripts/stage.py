@@ -60,6 +60,7 @@ _ACCEPTANCE_SECTION = re.compile(
     re.DOTALL,
 )
 _BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##(?!#)|\Z)", re.DOTALL)
+_ACCEPTANCE_HEADING_ANY = re.compile(r"^##\s+Acceptance\b", re.MULTILINE)
 _ISSUE_REF = re.compile(r"#(\d+)")
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
@@ -182,6 +183,34 @@ def is_pullable(item: dict[str, Any]) -> bool:
     return len(real_bullets) >= 1
 
 
+def not_pullable_reason(item: dict[str, Any]) -> str:
+    """Classify why an item failed is_pullable. Mirrors is_pullable's checks.
+
+    Surfaces the specific remediation each failure mode needs, so the smoke
+    output doubles as a normalisation hint instead of a uniform "no acceptance
+    criteria" line for every failure shape. Precondition: is_pullable(item)
+    is False — callers filter first.
+    """
+    body = item.get("body", "") or ""
+    if not body.strip():
+        return "not pullable — empty body"
+
+    first_para = body.split("\n\n", 1)[0].strip()
+    if not first_para or first_para == _TEMPLATE_FIRST_PARA:
+        return "not pullable — placeholder summary"
+
+    if _ACCEPTANCE_SECTION.search(body):
+        return "not pullable — acceptance section uses placeholder bullets"
+
+    if _ACCEPTANCE_HEADING_ANY.search(body):
+        return (
+            "not pullable — non-canonical acceptance section; normalize to "
+            "'## Acceptance criteria' wrapped in <details><summary>Expand</summary>"
+        )
+
+    return "not pullable — no acceptance section"
+
+
 def _format_milestone(item: dict[str, Any], *, today: date) -> str:
     milestone = item.get("milestone") or {}
     if not isinstance(milestone, dict):
@@ -288,7 +317,7 @@ def stage_proposals(
     pullable = [i for i in backlog if is_pullable(i)]
     not_pullable = [i for i in backlog if not is_pullable(i)]
     for item in not_pullable:
-        deferred.append(DeferredItem(item, "not pullable — no acceptance criteria"))
+        deferred.append(DeferredItem(item, not_pullable_reason(item)))
 
     dep_ready = [i for i in pullable if has_no_open_blockers(i, items)]
     dep_blocked = [i for i in pullable if not has_no_open_blockers(i, items)]
