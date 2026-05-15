@@ -226,8 +226,7 @@ def render(
         for d in proposals.deferred:
             it = d.item
             lines.append(
-                f"  #{it['number']} [{it.get('priority', '?')}] "
-                f"{it.get('title', '')} — {d.reason}"
+                f"  #{it['number']} [{it.get('priority', '?')}] {it.get('title', '')} — {d.reason}"
             )
         lines.append("")
     lines.append("== Blocked revisit ==")
@@ -260,7 +259,7 @@ def render(
         lines.append("──────────────────────────────────────────────────")
         lines.append("Approve? (y / <issue numbers> / skip)")
         lines.append("  y               apply all proposed promotions + unblocks")
-        lines.append("  <numbers>       apply only those (e.g., \"y #1 #4\")")
+        lines.append('  <numbers>       apply only those (e.g., "y #1 #4")')
         lines.append("  skip            apply nothing; output is record only")
     return "\n".join(lines)
 
@@ -347,9 +346,7 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
         number: int | None = content.get("number")
         if number is None:
             continue
-        blocked_by_native: list[int] = [
-            edge["number"] for edge in edges_map.get(number, [])
-        ]
+        blocked_by_native: list[int] = [edge["number"] for edge in edges_map.get(number, [])]
         normalised.append(
             {
                 "number": number,
