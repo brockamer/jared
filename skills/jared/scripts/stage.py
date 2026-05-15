@@ -12,6 +12,7 @@ full design rationale.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,3 +34,35 @@ class StageProposals:
     unblocked: list[dict[str, Any]] = field(default_factory=list)
     real_world_still_blocked: list[dict[str, Any]] = field(default_factory=list)
     almost_ready: list[dict[str, Any]] = field(default_factory=list)
+
+
+_TEMPLATE_FIRST_PARA = "One-sentence summary of what this issue is about and why it matters."
+_PLACEHOLDER_CRITERIA = re.compile(r"^\s*-\s*Criterion\s*\d+\s*$", re.MULTILINE)
+_ACCEPTANCE_SECTION = re.compile(
+    r"##\s+Acceptance criteria\s*\n+<details>\s*\n+<summary>Expand</summary>(.*?)</details>",
+    re.DOTALL,
+)
+
+
+def is_pullable(item: dict[str, Any]) -> bool:
+    """An item is pullable if its body has a real summary + non-placeholder
+    acceptance criteria. See spec § "Filter semantics"."""
+    body = item.get("body", "") or ""
+    if not body.strip():
+        return False
+
+    first_para = body.split("\n\n", 1)[0].strip()
+    if not first_para or first_para == _TEMPLATE_FIRST_PARA:
+        return False
+
+    match = _ACCEPTANCE_SECTION.search(body)
+    if not match:
+        return False
+
+    criteria_block = match.group(1)
+    real_bullets = [
+        line.strip()
+        for line in criteria_block.splitlines()
+        if line.strip().startswith("-") and not _PLACEHOLDER_CRITERIA.match(line)
+    ]
+    return len(real_bullets) >= 1
