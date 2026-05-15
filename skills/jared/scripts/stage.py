@@ -59,7 +59,7 @@ _ACCEPTANCE_SECTION = re.compile(
     r"##\s+Acceptance criteria\s*\n+<details>\s*\n+<summary>Expand</summary>(.*?)</details>",
     re.DOTALL,
 )
-_BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##|\Z)", re.DOTALL)
+_BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##(?!#)|\Z)", re.DOTALL)
 _ISSUE_REF = re.compile(r"#(\d+)")
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
@@ -385,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    board = Board.from_path(Path("docs/project-board.md"))
+    board = Board.from_default()
     items = fetch_items_for_stage(board)
     today = date.today()
     proposals = stage_proposals(items, up_next_cap=args.up_next_cap, today=today)
