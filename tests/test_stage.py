@@ -86,6 +86,94 @@ class TestIsPullable:
         assert stage.is_pullable(item) is False
 
 
+class TestNotPullableReason:
+    """`not_pullable_reason` should give the operator a self-describing
+    remediation hint per failure mode — not a uniform "no acceptance criteria"
+    line. Covers each branch in order so a regression on one is caught locally."""
+
+    def test_empty_body(self) -> None:
+        stage = import_stage()
+        assert stage.not_pullable_reason({"body": ""}) == "not pullable — empty body"
+
+    def test_placeholder_summary(self) -> None:
+        stage = import_stage()
+        item = {
+            "body": (
+                "One-sentence summary of what this issue is about and why it matters.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Expand</summary>\n\n"
+                "- Real criterion\n\n"
+                "</details>"
+            )
+        }
+        assert stage.not_pullable_reason(item) == "not pullable — placeholder summary"
+
+    def test_placeholder_bullets(self) -> None:
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Expand</summary>\n\n"
+                "- Criterion 1\n"
+                "- Criterion 2\n\n"
+                "</details>"
+            )
+        }
+        assert (
+            stage.not_pullable_reason(item)
+            == "not pullable — acceptance section uses placeholder bullets"
+        )
+
+    def test_non_canonical_heading_short_form(self) -> None:
+        """`## Acceptance` (no `criteria` suffix), no <details> wrapper."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance\n\n"
+                "- Real criterion 1\n"
+                "- Real criterion 2\n"
+            )
+        }
+        reason = stage.not_pullable_reason(item)
+        assert "non-canonical" in reason
+        assert "## Acceptance criteria" in reason
+        assert "<details>" in reason
+
+    def test_non_canonical_missing_details_wrapper(self) -> None:
+        """Canonical `## Acceptance criteria` heading but no <details> wrapper."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n\n"
+                "- Real criterion 1\n"
+                "- Real criterion 2\n"
+            )
+        }
+        assert "non-canonical" in stage.not_pullable_reason(item)
+
+    def test_no_acceptance_section_at_all(self) -> None:
+        stage = import_stage()
+        item = {"body": "Real summary.\n\n## Decisions\n\n(none)\n"}
+        assert stage.not_pullable_reason(item) == "not pullable — no acceptance section"
+
+    def test_prose_mention_of_acceptance_in_backticks_not_counted(self) -> None:
+        """Backticked prose like `` `## Acceptance` `` must not trigger the
+        non-canonical branch — only line-start headings do. Otherwise issue
+        #131's own body (which discusses the variant in prose) would self-report
+        as non-canonical."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Body mentions `## Acceptance` in prose, not as a heading.\n\n"
+                "## Decisions\n\n(none)\n"
+            )
+        }
+        assert stage.not_pullable_reason(item) == "not pullable — no acceptance section"
+
+
 class TestHasNoOpenBlockers:
     def _items(self, *defs: dict[str, Any]) -> list[dict[str, Any]]:
         return list(defs)
@@ -362,7 +450,7 @@ class TestStageProposals:
         assert result.promotions == []
         assert len(result.deferred) == 1
         assert result.deferred[0].item["number"] == 1
-        assert "not pullable" in result.deferred[0].reason
+        assert result.deferred[0].reason == "not pullable — no acceptance section"
 
     def test_blocked_item_with_closed_blocker_returns_to_backlog(self) -> None:
         stage = import_stage()
