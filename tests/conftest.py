@@ -24,6 +24,7 @@ Board class (e.g., a classmethod), patch it on both module objects
 from __future__ import annotations
 
 import importlib.util
+import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from textwrap import dedent
@@ -78,12 +79,18 @@ def import_sweep() -> ModuleType:
 
 
 def import_stage() -> ModuleType:
-    """Load `stage.py` as a module. Same SourceFileLoader trick as the others."""
+    """Load `stage.py` as a module. Same SourceFileLoader trick as the others.
+
+    Registers the module in sys.modules before exec_module so that Python
+    3.14's dataclass machinery can resolve string annotations (from
+    ``from __future__ import annotations``) via cls.__module__ lookups.
+    """
     path = SKILL_SCRIPTS / "stage.py"
     loader = SourceFileLoader("stage", str(path))
     spec = importlib.util.spec_from_loader("stage", loader)
     assert spec is not None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["stage"] = mod
     loader.exec_module(mod)
     return mod
 
