@@ -1007,50 +1007,6 @@ def fetch_blocked_by_edges(
     return result
 
 
-def fetch_milestone_map(
-    repo: str,
-    *,
-    cache: str | None = None,
-) -> dict[int, dict[str, Any]]:
-    """One paginated GraphQL call → `{issue_number: {"title", "due_on"}}` for all
-    open issues in `repo` that have a milestone set.
-
-    `gh project item-list` does not include milestone data; stage.py's
-    `_format_milestone` and `milestone_proximity_days` depend on this companion
-    fetch to populate the milestone field on each item. Mirrors
-    `fetch_blocked_by_edges`'s pagination pattern.
-
-    Issues with no milestone are omitted from the result; callers should treat
-    a missing key as "no milestone." The GraphQL `dueOn` field is normalised to
-    snake_case `due_on` at this boundary so stage.py's pure functions keep
-    their existing snake_case access pattern.
-    """
-    owner, name = repo.split("/", 1)
-    q = (
-        "query($o:String!,$r:String!,$c:String){repository(owner:$o,name:$r){"
-        "issues(first:100,after:$c,states:OPEN){pageInfo{hasNextPage endCursor}"
-        "nodes{number milestone{title dueOn}}}}}"
-    )
-    result: dict[int, dict[str, Any]] = {}
-    cursor: str | None = None
-    while True:
-        kwargs: dict[str, str] = {"o": owner, "r": name}
-        if cursor:
-            kwargs["c"] = cursor
-        data = run_graphql(q, cache=cache, **kwargs)["data"]["repository"]["issues"]
-        for node in data["nodes"]:
-            milestone = node.get("milestone")
-            if milestone:
-                result[node["number"]] = {
-                    "title": milestone.get("title"),
-                    "due_on": milestone.get("dueOn"),
-                }
-        if not data["pageInfo"]["hasNextPage"]:
-            break
-        cursor = data["pageInfo"]["endCursor"]
-    return result
-
-
 # ---------- Plan/spec issue-ref parsing ----------
 #
 # Shared between archive-plan.py and sweep.py so the two scripts can't
