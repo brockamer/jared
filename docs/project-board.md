@@ -97,6 +97,25 @@ Suggested defaults (create via `gh label create` as needed):
 Project-specific scope labels (e.g., `infra`, `frontend`, `customer-facing`) belong here
 too — add them as needed.
 
+## Project workflows — recommended settings
+
+GitHub Projects v2 ships several auto-status workflows. Most are useful with
+Jared's discipline, but **"Pull request linked to issue" must be disabled** on
+a Jared-stewarded board.
+
+| Workflow | Recommended | Why |
+|---|---|---|
+| `Item added to project` | off | `jared file` sets Status explicitly. |
+| `Item closed` | on | Auto-moves Done when an item is closed. |
+| `Pull request linked to issue` | **off** | Sets Status=`In Progress` whenever a PR is linked — including retroactively when a *later* PR's commit body contains `closes #N` / `fixes #N` in prose. Reverts the Status that `jared close` just set. See #156. |
+| `Pull request merged` | on | Sets Status=Done on closing PR merge. |
+| `Auto-close issue` | on | Closes the issue when its PR merges. |
+| `Auto-add sub-issues to project` | on | Convenience. |
+
+To inspect or toggle workflows: open the project's *Workflows* tab in the GitHub UI, or use the GraphQL `deleteProjectV2Workflow` mutation (irreversible via API; re-create from the UI).
+
+**Discipline reminder:** when describing past PRs in commit bodies, avoid the closing keywords `closes #N` / `fixes #N` / `resolves #N` in narrative prose — GitHub's auto-link parser doesn't distinguish parentheticals from directives. Refer to past PRs by number alone (`PR #152`) or paraphrase (`addressed in #152`). Reserve closing keywords for the current PR's own intent, on a dedicated line.
+
 ## Triage checklist — new issue
 
 When a new issue is filed:
