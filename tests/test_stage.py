@@ -183,7 +183,47 @@ class TestNotPullableReason:
         }
         assert (
             stage.not_pullable_reason(item)
-            == "not pullable — acceptance section uses placeholder bullets"
+            == "not pullable — acceptance section has no `-`-prefixed bullets "
+            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+        )
+
+    def test_numbered_list_bullets_fail(self) -> None:
+        """`1.`/`2.`-prefixed bullets fail is_pullable — no `-` lines."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Expand</summary>\n\n"
+                "1. First criterion\n"
+                "2. Second criterion\n\n"
+                "</details>"
+            )
+        }
+        assert stage.is_pullable(item) is False
+        assert (
+            stage.not_pullable_reason(item)
+            == "not pullable — acceptance section has no `-`-prefixed bullets "
+            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+        )
+
+    def test_prose_only_acceptance_fails(self) -> None:
+        """Prose paragraph (no bullets at all) fails is_pullable."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Expand</summary>\n\n"
+                "Goals deferred until dependencies land; criteria will be concretized then.\n\n"
+                "</details>"
+            )
+        }
+        assert stage.is_pullable(item) is False
+        assert (
+            stage.not_pullable_reason(item)
+            == "not pullable — acceptance section has no `-`-prefixed bullets "
+            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
         )
 
     def test_non_canonical_heading_short_form(self) -> None:
