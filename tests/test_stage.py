@@ -457,6 +457,7 @@ def _item(
     state: str = "OPEN",
     created_days_ago: int = 7,
     blocked_by_native: list[int] | None = None,
+    labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a stub item dict for stage_proposals tests."""
     default_body = (
@@ -477,7 +478,36 @@ def _item(
         "state": state,
         "createdAt": datetime.fromtimestamp(created, tz=UTC).isoformat(),
         "blocked_by_native": blocked_by_native or [],
+        "labels": labels or [],
     }
+
+
+class TestIsEpic:
+    """#146: items with the `epic` label are durably parent-shaped — exempt
+    from the not-pullable → Deferred surfacing."""
+
+    def test_epic_labeled_item_is_epic(self) -> None:
+        stage = import_stage()
+        assert stage.is_epic({"labels": ["epic"]}) is True
+
+    def test_epic_label_alongside_others(self) -> None:
+        stage = import_stage()
+        assert stage.is_epic({"labels": ["documentation", "epic"]}) is True
+
+    def test_non_epic_labels_are_not_epic(self) -> None:
+        stage = import_stage()
+        assert stage.is_epic({"labels": ["enhancement"]}) is False
+        assert stage.is_epic({"labels": ["bug"]}) is False
+
+    def test_no_labels_is_not_epic(self) -> None:
+        stage = import_stage()
+        assert stage.is_epic({}) is False
+        assert stage.is_epic({"labels": []}) is False
+
+    def test_labels_none_is_not_epic(self) -> None:
+        """Defensive: labels=None (e.g., absent from upstream) shouldn't crash."""
+        stage = import_stage()
+        assert stage.is_epic({"labels": None}) is False
 
 
 class TestStageProposals:
@@ -538,6 +568,52 @@ class TestStageProposals:
         assert len(result.deferred) == 1
         assert result.deferred[0].item["number"] == 1
         assert result.deferred[0].reason == "not pullable — no acceptance section"
+
+    def test_epic_labeled_unpullable_item_is_not_deferred(self) -> None:
+        """#146: epic-labeled items legitimately lack acceptance criteria.
+
+        They're durably parent-shaped (roadmaps, checklists, strategic
+        anchors). The Deferred section should suppress them rather than
+        re-reporting the same noise on every pass.
+        """
+        stage = import_stage()
+        items = [
+            _item(
+                number=1,
+                body="Roadmap parent issue.\n\n## Decisions\n\n(none)\n",  # no AC
+                labels=["epic"],
+            ),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert result.deferred == []
+
+    def test_epic_filter_doesnt_affect_pullable_items(self) -> None:
+        """An epic-labeled item that happens to have AC still routes normally.
+
+        We don't block promotion of epics with AC — the filter only suppresses
+        them from the Deferred noise. If someone reshapes an epic into a
+        pullable work unit, that's intentional and shouldn't be hidden.
+        """
+        stage = import_stage()
+        items = [_item(number=1, priority="High", labels=["epic"])]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        # Epic-labeled and pullable: still promoted normally.
+        assert [p["number"] for p in result.promotions] == [1]
+        assert result.deferred == []
+
+    def test_non_epic_unpullable_item_still_deferred(self) -> None:
+        """Regression guard: the epic filter must not over-fire on plain labels."""
+        stage = import_stage()
+        items = [
+            _item(
+                number=1,
+                body="Real summary.\n\n## Decisions\n\n(none)\n",
+                labels=["enhancement"],  # NOT an epic
+            ),
+        ]
+        result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
+        assert len(result.deferred) == 1
+        assert result.deferred[0].item["number"] == 1
 
     def test_blocked_item_with_closed_blocker_returns_to_backlog(self) -> None:
         stage = import_stage()
