@@ -58,47 +58,24 @@ def _graphql_item_response(*, project_number: int, status: str, item_id: str = "
     )
 
 
-def test_close_succeeds_when_board_auto_moves(
+def test_close_always_sets_status_done_defense_in_depth(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    board_md = _write_board_with_status(tmp_path)
-    calls = patch_gh_by_arg(
-        monkeypatch,
-        {
-            "issue close": "",
-            "api graphql": _graphql_item_response(project_number=7, status="Done"),
-        },
-    )
-
-    mod = import_cli()
-    rc = mod.main(["--board", str(board_md), "close", "42"])
-
-    captured = capsys.readouterr()
-    assert rc == 0, captured.err
-    # Must have invoked gh issue close
-    assert any("issue" in c and "close" in c for c in calls)
-    # Polling must use graphql, NOT the wide item-list scan that #22 fixes.
-    assert not any("item-list" in " ".join(c) for c in calls)
-    # Must NOT have invoked item-edit — auto-move handled it
-    assert not any("item-edit" in c for c in calls)
-    assert "#42" in captured.out
-
-
-def test_close_falls_back_to_explicit_move_when_auto_move_lags(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # No sleeping in tests — global time.sleep -> no-op for the retry loop.
+    """After `jared close <N>`, item-edit Status=Done MUST run unconditionally
+    — even when the board's auto-move workflow appears to have already moved
+    the item to Done. Defense-in-depth for #137: GitHub's project auto-move
+    has an observable false-positive mode where the GraphQL poll claims
+    Status=Done but the field hasn't actually changed (#135 reproduction).
+    The explicit set after close is the source of truth.
+    """
     monkeypatch.setattr("time.sleep", lambda _s: None)
-
     board_md = _write_board_with_status(tmp_path)
-    # Board never auto-moves to Done — graphql keeps returning Backlog.
-    # _cmd_set fallback now also uses find_item_id → graphql (fix for #109),
-    # so total graphql calls = 3 (polling) + 1 (fallback find_item_id) = 4.
     calls = patch_gh_by_arg(
         monkeypatch,
         {
             "issue close": "",
-            "api graphql": _graphql_item_response(project_number=7, status="Backlog"),
+            # Even if GraphQL says Done, the CLI must still item-edit Status=Done.
+            "api graphql": _graphql_item_response(project_number=7, status="Done"),
             "item-edit": "{}",
         },
     )
@@ -108,25 +85,24 @@ def test_close_falls_back_to_explicit_move_when_auto_move_lags(
 
     captured = capsys.readouterr()
     assert rc == 0, captured.err
-    # 3 poll attempts + 1 find_item_id in _cmd_set fallback = 4 graphql calls.
-    graphql_calls = [c for c in calls if "graphql" in " ".join(c)]
-    assert len(graphql_calls) == 4
-    # Fallback path: explicit item-edit to Status=Done
     edit = next((c for c in calls if "item-edit" in c), None)
-    assert edit is not None, "expected explicit item-edit fallback"
+    assert edit is not None, "expected explicit item-edit even when graphql claims Done"
     joined = " ".join(edit)
     assert "PVTSSF_status" in joined
     assert "OPTION_done" in joined
 
 
-def test_close_filters_graphql_to_current_project(
+def test_close_targets_correct_project_when_issue_on_multiple_boards(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Issue may belong to multiple ProjectV2 items; only the one whose
-    project.number matches the board counts as the auto-move target."""
+    """Issue may belong to multiple ProjectV2 items; the post-close set
+    must resolve to the item on the board configured in project-board.md,
+    never a sibling project's item. Scoping happens in `Board.find_item_id`
+    → `fetch_item_for_issue` which filters by `project.number`.
+    """
     board_md = _write_board_with_status(tmp_path)
-    # Same issue attached to two projects: Done on project 99 (unrelated),
-    # Backlog on project 7 (our board). Fixture must return Backlog.
+    # Same issue attached to two projects: project 99 (unrelated, PVTI_other),
+    # project 7 (our board, PVTI_ours). The item-edit must reference PVTI_ours.
     multi_project_response = json.dumps(
         {
             "data": {
@@ -165,16 +141,12 @@ def test_close_filters_graphql_to_current_project(
             }
         }
     )
-    monkeypatch.setattr("time.sleep", lambda _s: None)
 
     calls = patch_gh_by_arg(
         monkeypatch,
         {
             "issue close": "",
             "api graphql": multi_project_response,
-            "item-list": (
-                '{"items": [{"id": "PVTI_ours", "content": {"number": 42}, "status": "Backlog"}]}'
-            ),
             "item-edit": "{}",
         },
     )
@@ -184,6 +156,9 @@ def test_close_filters_graphql_to_current_project(
 
     captured = capsys.readouterr()
     assert rc == 0, captured.err
-    # Must have fallen back — project 99's Done doesn't satisfy the predicate
-    # because we scope to project_number=7.
-    assert any("item-edit" in c for c in calls)
+    edit = next((c for c in calls if "item-edit" in c), None)
+    assert edit is not None, "expected item-edit on board-scoped item"
+    joined = " ".join(edit)
+    # The mutation must reference our board's item-id, never the sibling project's.
+    assert "PVTI_ours" in joined
+    assert "PVTI_other" not in joined
