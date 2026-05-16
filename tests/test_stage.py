@@ -700,12 +700,13 @@ class TestFetchItemsForStage:
     def test_returns_items_with_status_priority_body_milestone(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        """Milestone arrives via fetch_milestone_map, not gh project item-list.
+        """Milestone arrives at the top level of each raw item (#153).
 
-        Earlier versions of this test placed `milestone` inside `content` — a
-        contract `gh project item-list --format json` does not honour (see #145).
-        The fix routes milestone through a dedicated GraphQL companion fetch;
-        the test must mock that contract, not the wrong one.
+        `gh project item-list --format json` returns `milestone` parallel to
+        `content`, `status`, `priority`, `labels` — not nested inside `content`.
+        The shape is `{title, dueOn, description}` (camelCase). stage.py
+        normalises `dueOn` → `due_on` at the boundary so pure functions keep
+        their snake_case access pattern.
         """
         write_minimal_board(tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -723,6 +724,11 @@ class TestFetchItemsForStage:
                         },
                         "status": "Backlog",
                         "priority": "Medium",
+                        "milestone": {
+                            "title": "M1",
+                            "dueOn": "2026-07-01T00:00:00Z",
+                            "description": "first milestone",
+                        },
                     },
                 ]
             }
@@ -740,36 +746,9 @@ class TestFetchItemsForStage:
                 }
             }
         )
-        # fetch_milestone_map → issue #1 has milestone "M1", dueOn 2026-07-01.
-        milestone_json = json.dumps(
-            {
-                "data": {
-                    "repository": {
-                        "issues": {
-                            "pageInfo": {"hasNextPage": False, "endCursor": None},
-                            "nodes": [
-                                {
-                                    "number": 1,
-                                    "milestone": {
-                                        "title": "M1",
-                                        "dueOn": "2026-07-01T00:00:00Z",
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                }
-            }
-        )
-        # The two GraphQL calls are discriminated by query content — blockedBy
-        # vs milestone{ — so patch_gh_by_arg can route them distinctly.
         patch_gh_by_arg(
             monkeypatch,
-            responses={
-                "item-list": items_json,
-                "blockedBy": edges_json,
-                "milestone{": milestone_json,
-            },
+            responses={"item-list": items_json, "blockedBy": edges_json},
         )
 
         stage = import_stage()
@@ -785,14 +764,17 @@ class TestFetchItemsForStage:
         assert items[0]["body"] == "Summary."
         assert items[0]["milestone"] is not None
         assert items[0]["milestone"]["title"] == "M1"
-        # dueOn was normalised to snake_case due_on at the lib/board.py boundary.
+        # dueOn normalised to snake_case due_on at the boundary.
         assert items[0]["milestone"]["due_on"] == "2026-07-01T00:00:00Z"
+        # The extra `description` field is dropped — stage.py only consumes
+        # title + due_on. Keep the contract minimal.
+        assert "description" not in items[0]["milestone"]
         assert items[0]["blocked_by_native"] == []
 
     def test_items_with_no_milestone_have_milestone_none(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        """Issues absent from the milestone-map get milestone=None on the item."""
+        """When the raw item has no milestone key, the normalised item.milestone is None."""
         write_minimal_board(tmp_path)
         monkeypatch.chdir(tmp_path)
 
@@ -827,11 +809,7 @@ class TestFetchItemsForStage:
         )
         patch_gh_by_arg(
             monkeypatch,
-            responses={
-                "item-list": items_json,
-                "blockedBy": empty_graphql,
-                "milestone{": empty_graphql,
-            },
+            responses={"item-list": items_json, "blockedBy": empty_graphql},
         )
 
         stage = import_stage()

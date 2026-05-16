@@ -32,9 +32,6 @@ from lib.board import Board  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # noqa: E402
     fetch_blocked_by_edges as _fetch_blocked_by_edges,
 )
-from lib.board import (  # noqa: E402
-    fetch_milestone_map as _fetch_milestone_map,
-)
 
 
 @dataclass(frozen=True)
@@ -385,29 +382,35 @@ def stage_proposals(
     )
 
 
+def _normalise_milestone(raw_milestone: Any) -> dict[str, Any] | None:
+    """gh project item-list returns milestone as `{title, dueOn, description}`
+    at the top level of each raw item. Normalise to `{title, due_on}` so
+    stage.py's pure functions keep their existing snake_case access pattern.
+    Items with no milestone come through as None.
+    """
+    if not isinstance(raw_milestone, dict):
+        return None
+    return {"title": raw_milestone.get("title"), "due_on": raw_milestone.get("dueOn")}
+
+
 def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
     """Fetch all open items from the board and normalise to stage.py's dict shape.
 
     Pure functions in this module take dicts with these keys:
       number, status, priority, title, body, state, milestone, createdAt,
-      blocked_by_native (list[int]).
+      blocked_by_native (list[int]), labels (list[str]).
 
-    One bulk call to fetch_blocked_by_edges covers all issues so callers
-    never trigger the N+1 per-issue pattern.  Items with no content.number
-    (draft cards, legacy entries) are skipped.
+    `gh project item-list` returns most fields at the top level of each raw
+    item — including `milestone`, `labels`, `status`, `priority`. The one
+    exception is blocked-by edges, which need a separate paginated GraphQL
+    pass via fetch_blocked_by_edges. Items with no content.number (draft
+    cards, legacy entries) are skipped.
     """
     raw_items: list[dict[str, Any]] = board.board_items()
     if not raw_items:
         return []
 
-    # Two bulk GraphQL companion fetches — `gh project item-list` returns
-    # neither blocked-by edges nor milestones, so stage.py composes each item
-    # from three sources:
-    #   1. board.board_items() — Status, Priority, content basics (cached)
-    #   2. fetch_blocked_by_edges — issueDependencies graph (paginated)
-    #   3. fetch_milestone_map    — milestone {title, due_on} (paginated, #145)
     edges_map: dict[int, list[dict[str, Any]]] = _fetch_blocked_by_edges(board.repo)
-    milestone_map: dict[int, dict[str, Any]] = _fetch_milestone_map(board.repo)
 
     normalised: list[dict[str, Any]] = []
     for raw in raw_items:
@@ -424,7 +427,7 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
                 "title": content.get("title", ""),
                 "body": content.get("body", ""),
                 "state": content.get("state", "OPEN"),
-                "milestone": milestone_map.get(number),
+                "milestone": _normalise_milestone(raw.get("milestone")),
                 "createdAt": content.get("createdAt") or content.get("created_at"),
                 "blocked_by_native": blocked_by_native,
                 "labels": raw.get("labels") or [],
