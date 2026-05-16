@@ -106,4 +106,4 @@ Use `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared <subcommand>`. **Never har
 
 ## Versioning
 
-Semantic versioning in `.claude-plugin/plugin.json` (currently `0.2.0-dev`). Git tag `v<x.y.z>` per release. `pyproject.toml` version tracks the plugin version but isn't published as a package.
+Semantic versioning in `.claude-plugin/plugin.json` and mirrored in `pyproject.toml`. Git tag `v<x.y.z>` per release. `pyproject.toml` configures dev tooling and pins venv deps but isn't published as a package — the version field exists for parity, not distribution. Check `.claude-plugin/plugin.json` for the current version rather than relying on this paragraph (which used to hardcode it).
