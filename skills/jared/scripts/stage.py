@@ -216,7 +216,10 @@ def not_pullable_reason(item: dict[str, Any]) -> str:
         return "not pullable — placeholder summary"
 
     if _ACCEPTANCE_SECTION.search(body):
-        return "not pullable — acceptance section uses placeholder bullets"
+        return (
+            "not pullable — acceptance section has no `-`-prefixed bullets "
+            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+        )
 
     if _ACCEPTANCE_HEADING_ANY.search(body):
         return (
