@@ -84,3 +84,57 @@ def get_item_list(
     if time.time() - fetched_at > ttl_seconds:
         return None
     return items
+
+
+def _etag_cache_path(
+    repo: str,
+    number: int,
+    cache_dir: Path | None = None,
+) -> Path:
+    base = cache_dir if cache_dir is not None else _default_cache_dir()
+    return base / "etags" / repo / f"{number}.json"
+
+
+def get_issue_etag(
+    repo: str,
+    number: int,
+    *,
+    cache_dir: Path | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    """Return (etag, body) for a cached REST issue response, or None.
+
+    Companion to `fetch_issue_state_rest`'s conditional-GET layer (#147).
+    Stores etag and body together in one JSON file so a reader can never
+    observe a stale-etag/fresh-body pair — `os.replace` is the single
+    atomicity boundary, matching `set_item_list`'s pattern. Returns None
+    when the file is missing, malformed, or the body isn't a dict.
+    """
+    path = _etag_cache_path(repo, number, cache_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    etag = payload.get("etag")
+    body = payload.get("body")
+    if not isinstance(etag, str) or not etag or not isinstance(body, dict):
+        return None
+    return etag, body
+
+
+def set_issue_etag(
+    repo: str,
+    number: int,
+    *,
+    etag: str,
+    body: dict[str, Any],
+    cache_dir: Path | None = None,
+) -> None:
+    """Atomically write the (ETag, JSON body) pair for a REST issue response."""
+    path = _etag_cache_path(repo, number, cache_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"etag": etag, "body": body}
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload))
+    os.replace(tmp, path)
