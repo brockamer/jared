@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from . import cache
+
 if TYPE_CHECKING:
     from .ties import OpenIssueForTies
 
@@ -331,38 +333,52 @@ class Board:
         return run_gh_raw(args, cache=cache)
 
     def board_items(self) -> list[dict[str, Any]]:
-        """Cached `gh project item-list` result for this Board instance.
+        """Cached `gh project item-list` result, shared across processes.
 
-        Refreshes on first call; subsequent calls reuse the in-memory copy
-        for the rest of the process. Callers that mutate the board within
-        the same process must call `invalidate_items()` before reading
-        again, or stale entries will leak through.
+        Three layers (#52):
+          1. In-process: `self._items`, lifetime of this Board instance.
+          2. On-disk: JSON at `${JARED_CACHE_DIR:-${TMPDIR}/jared-cache}/<N>.json`,
+             shared across all jared processes within `JARED_CACHE_TTL_SECONDS`.
+          3. Fresh fetch via `gh project item-list` — GraphQL-billed.
 
-        `gh project item-list` is GraphQL-billed, so reusing the snapshot
-        is what saves the points — not just the wall-clock time.
+        Callers that mutate the board within the same process must call
+        `invalidate_items()` before reading again, or stale entries leak.
+        Mutating-CLI subcommands invalidate the disk cache too so other
+        processes refetch on their next read.
+
+        Opt-out: `JARED_NO_CACHE=1` skips both cache layers.
         """
-        if self._items is None:
-            data = self.run_gh(
-                [
-                    "project",
-                    "item-list",
-                    str(self.project_number),
-                    "--owner",
-                    self.owner,
-                    "--limit",
-                    "2000",
-                    "--format",
-                    "json",
-                ]
-            )
-            self._items = data.get("items", [])
-        # Narrow Optional after the populate-if-None branch above.
-        assert self._items is not None
+        if self._items is not None:
+            return self._items
+        no_cache = os.environ.get("JARED_NO_CACHE") == "1"
+        if not no_cache:
+            ttl = int(os.environ.get("JARED_CACHE_TTL_SECONDS", "60"))
+            cached = cache.get_item_list(self.project_number, ttl_seconds=ttl)
+            if cached is not None:
+                self._items = cached
+                return self._items
+        data = self.run_gh(
+            [
+                "project",
+                "item-list",
+                str(self.project_number),
+                "--owner",
+                self.owner,
+                "--limit",
+                "2000",
+                "--format",
+                "json",
+            ]
+        )
+        self._items = data.get("items", [])
+        if not no_cache:
+            cache.set_item_list(self.project_number, items=self._items)
         return self._items
 
     def invalidate_items(self) -> None:
-        """Drop the cached snapshot. Next `board_items()` call re-fetches."""
+        """Drop both in-process and on-disk snapshot caches."""
         self._items = None
+        cache.invalidate_item_list(self.project_number)
 
     _ISSUE_PROJECT_ITEM_QUERY = """
     query($owner: String!, $repo: String!, $number: Int!) {
@@ -662,6 +678,40 @@ def run_gh(args: list[str], *, cache: str | None = None) -> Any:
         return json.loads(stdout)
     except json.JSONDecodeError as e:
         raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
+
+
+def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
+    """Return (state, closed_at) for an issue via the REST API (#54).
+
+    Uses `gh api repos/<repo>/issues/<n>` so the call hits the REST `core`
+    rate-limit bucket (5000/hr) instead of the `graphql` bucket. For batch
+    state checks (archive-plan.py scanning many plans, dependency-graph.py
+    open-state filters), this removes the calls from GraphQL pressure
+    entirely.
+
+    State is mapped to GraphQL's `IssueState`/`PullRequestState` enum so
+    existing consumers continue to work unchanged:
+
+      - "MERGED" when the issue is a PR with a non-null `merged_at`
+        (REST otherwise reports state="closed" for merged PRs, losing
+        the merged-vs-closed-unmerged distinction archive-plan needs).
+      - "CLOSED" / "OPEN" mapped from REST's lowercase `state`.
+      - "UNKNOWN" on any gh failure (missing repo, 404, network).
+    """
+    try:
+        data = run_gh(["api", f"repos/{repo}/issues/{number}"])
+    except GhInvocationError:
+        return "UNKNOWN", None
+    state = data.get("state")
+    if not isinstance(state, str):
+        return "UNKNOWN", None
+    closed_at = data.get("closed_at")
+    if closed_at is not None and not isinstance(closed_at, str):
+        closed_at = None
+    pr = data.get("pull_request")
+    if isinstance(pr, dict) and pr.get("merged_at"):
+        return "MERGED", closed_at
+    return state.upper(), closed_at
 
 
 def _child_env() -> dict[str, str]:
