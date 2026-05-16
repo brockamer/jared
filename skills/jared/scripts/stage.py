@@ -32,6 +32,9 @@ from lib.board import Board  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # noqa: E402
     fetch_blocked_by_edges as _fetch_blocked_by_edges,
 )
+from lib.board import (  # noqa: E402
+    fetch_milestone_map as _fetch_milestone_map,
+)
 
 
 @dataclass(frozen=True)
@@ -212,8 +215,15 @@ def not_pullable_reason(item: dict[str, Any]) -> str:
 
 
 def _format_milestone(item: dict[str, Any], *, today: date) -> str:
-    milestone = item.get("milestone") or {}
-    if not isinstance(milestone, dict):
+    """Render an item's milestone for the stage output line.
+
+    Pre-#145 this function fell through to "(unknown) (no due date)" for items
+    without a milestone — the exact string that triggered the original bug
+    report. Now: None / empty-dict / non-dict all return "(no milestone)"
+    honestly. Title-only and full milestones render their respective shapes.
+    """
+    milestone = item.get("milestone")
+    if not isinstance(milestone, dict) or not milestone:
         return "(no milestone)"
     title = milestone.get("title") or "(unknown)"
     due_on = milestone.get("due_on")
@@ -370,8 +380,14 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
     if not raw_items:
         return []
 
-    # One paginated GraphQL call → {issue_number: [{number, state}, …]}
+    # Two bulk GraphQL companion fetches — `gh project item-list` returns
+    # neither blocked-by edges nor milestones, so stage.py composes each item
+    # from three sources:
+    #   1. board.board_items() — Status, Priority, content basics (cached)
+    #   2. fetch_blocked_by_edges — issueDependencies graph (paginated)
+    #   3. fetch_milestone_map    — milestone {title, due_on} (paginated, #145)
     edges_map: dict[int, list[dict[str, Any]]] = _fetch_blocked_by_edges(board.repo)
+    milestone_map: dict[int, dict[str, Any]] = _fetch_milestone_map(board.repo)
 
     normalised: list[dict[str, Any]] = []
     for raw in raw_items:
@@ -388,7 +404,7 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
                 "title": content.get("title", ""),
                 "body": content.get("body", ""),
                 "state": content.get("state", "OPEN"),
-                "milestone": content.get("milestone"),
+                "milestone": milestone_map.get(number),
                 "createdAt": content.get("createdAt") or content.get("created_at"),
                 "blocked_by_native": blocked_by_native,
             }

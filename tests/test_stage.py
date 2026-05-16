@@ -396,6 +396,37 @@ class TestRankingHelpers:
         days = stage.days_in_backlog(item, today=date.today())
         assert 13 <= days <= 15  # allow 1d slack for test timing
 
+    def test_format_milestone_renders_title_and_due_date(self) -> None:
+        """#145: with a populated milestone, render `<title> (due YYYY-MM-DD, Nd)`."""
+        stage = import_stage()
+        item = {
+            "milestone": {
+                "title": "Phase 2 — perf settled",
+                "due_on": "2026-05-31T00:00:00Z",
+            }
+        }
+        result = stage._format_milestone(item, today=date(2026, 5, 16))
+        assert result == "Phase 2 — perf settled (due 2026-05-31, 15d)"
+
+    def test_format_milestone_no_milestone_returns_placeholder(self) -> None:
+        stage = import_stage()
+        result = stage._format_milestone({}, today=date(2026, 5, 16))
+        assert result == "(no milestone)"
+
+    def test_format_milestone_missing_due_on(self) -> None:
+        """Title-only milestone (no due_on) renders title plus '(no due date)'."""
+        stage = import_stage()
+        item = {"milestone": {"title": "Unscheduled"}}
+        result = stage._format_milestone(item, today=date(2026, 5, 16))
+        assert result == "Unscheduled (no due date)"
+
+    def test_format_milestone_missing_title(self) -> None:
+        """Due_on-only milestone (no title) falls through to (unknown)."""
+        stage = import_stage()
+        item = {"milestone": {"due_on": "2026-05-31T00:00:00Z"}}
+        result = stage._format_milestone(item, today=date(2026, 5, 16))
+        assert result == "(unknown) (due 2026-05-31, 15d)"
+
 
 class TestDeferredReason:
     def test_low_tier_reason(self) -> None:
@@ -593,6 +624,13 @@ class TestFetchItemsForStage:
     def test_returns_items_with_status_priority_body_milestone(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
+        """Milestone arrives via fetch_milestone_map, not gh project item-list.
+
+        Earlier versions of this test placed `milestone` inside `content` — a
+        contract `gh project item-list --format json` does not honour (see #145).
+        The fix routes milestone through a dedicated GraphQL companion fetch;
+        the test must mock that contract, not the wrong one.
+        """
         write_minimal_board(tmp_path)
         monkeypatch.chdir(tmp_path)
 
@@ -605,10 +643,6 @@ class TestFetchItemsForStage:
                             "title": "Test",
                             "body": "Summary.",
                             "state": "OPEN",
-                            "milestone": {
-                                "title": "M1",
-                                "due_on": "2026-07-01T00:00:00Z",
-                            },
                             "createdAt": "2026-05-01T00:00:00Z",
                         },
                         "status": "Backlog",
@@ -617,8 +651,7 @@ class TestFetchItemsForStage:
                 ]
             }
         )
-        # fetch_blocked_by_edges uses run_graphql → "api graphql …"
-        # Return empty edges (no open blockers for issue #1).
+        # fetch_blocked_by_edges → empty (no open blockers for issue #1).
         edges_json = json.dumps(
             {
                 "data": {
@@ -631,9 +664,36 @@ class TestFetchItemsForStage:
                 }
             }
         )
+        # fetch_milestone_map → issue #1 has milestone "M1", dueOn 2026-07-01.
+        milestone_json = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [
+                                {
+                                    "number": 1,
+                                    "milestone": {
+                                        "title": "M1",
+                                        "dueOn": "2026-07-01T00:00:00Z",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        )
+        # The two GraphQL calls are discriminated by query content — blockedBy
+        # vs milestone{ — so patch_gh_by_arg can route them distinctly.
         patch_gh_by_arg(
             monkeypatch,
-            responses={"item-list": items_json, "graphql": edges_json},
+            responses={
+                "item-list": items_json,
+                "blockedBy": edges_json,
+                "milestone{": milestone_json,
+            },
         )
 
         stage = import_stage()
@@ -649,7 +709,63 @@ class TestFetchItemsForStage:
         assert items[0]["body"] == "Summary."
         assert items[0]["milestone"] is not None
         assert items[0]["milestone"]["title"] == "M1"
+        # dueOn was normalised to snake_case due_on at the lib/board.py boundary.
+        assert items[0]["milestone"]["due_on"] == "2026-07-01T00:00:00Z"
         assert items[0]["blocked_by_native"] == []
+
+    def test_items_with_no_milestone_have_milestone_none(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Issues absent from the milestone-map get milestone=None on the item."""
+        write_minimal_board(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        items_json = json.dumps(
+            {
+                "items": [
+                    {
+                        "content": {
+                            "number": 2,
+                            "title": "Unmilestoned",
+                            "body": "Summary.",
+                            "state": "OPEN",
+                            "createdAt": "2026-05-01T00:00:00Z",
+                        },
+                        "status": "Backlog",
+                        "priority": "Low",
+                    },
+                ]
+            }
+        )
+        empty_graphql = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        }
+                    }
+                }
+            }
+        )
+        patch_gh_by_arg(
+            monkeypatch,
+            responses={
+                "item-list": items_json,
+                "blockedBy": empty_graphql,
+                "milestone{": empty_graphql,
+            },
+        )
+
+        stage = import_stage()
+        from skills.jared.scripts.lib.board import Board
+
+        board = Board.from_path(tmp_path / "docs" / "project-board.md")
+        items = stage.fetch_items_for_stage(board)
+
+        assert len(items) == 1
+        assert items[0]["milestone"] is None
 
 
 class TestMain:
