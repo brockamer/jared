@@ -43,6 +43,9 @@ from lib.board import (
     fetch_blocked_by_edges as board_fetch_blocked_by_edges,
 )
 from lib.board import (
+    fetch_issue_state_rest as board_fetch_issue_state_rest,
+)
+from lib.board import (
     graphql_budget as board_graphql_budget,
 )
 from lib.board import (
@@ -71,11 +74,13 @@ def fetch_open_issues(repo: str, milestone: str | None) -> list[dict[str, Any]]:
 
 
 def fetch_issue_state(repo: str, number: int) -> str:
-    try:
-        data = board_run_gh(["issue", "view", str(number), "--repo", repo, "--json", "state"])
-        return cast(str, data.get("state", "UNKNOWN"))
-    except GhInvocationError:
-        return "UNKNOWN"
+    """Return state for an issue via REST (`core` bucket — #54).
+
+    Delegates to `lib.board.fetch_issue_state_rest`, dropping the per-issue
+    GraphQL pressure when this script fans out across unknown dependency edges.
+    """
+    state, _ = board_fetch_issue_state_rest(repo, number)
+    return cast(str, state)
 
 
 def fetch_all_native_dependencies(repo: str) -> dict[int, list[int]] | None:

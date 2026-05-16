@@ -26,12 +26,13 @@ import datetime as dt
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
-    GhInvocationError,
+    fetch_issue_state_rest as board_fetch_issue_state_rest,
 )
 from lib.board import (
     parse_referenced_issues as board_parse_referenced_issues,
@@ -56,14 +57,12 @@ DEFAULT_PLAN_DIRS = [
 
 
 def issue_state(repo: str, number: int) -> tuple[str, str | None]:
-    """Return (state, closed_at) for an issue."""
-    try:
-        data = board_run_gh(
-            ["issue", "view", str(number), "--repo", repo, "--json", "state,closedAt"]
-        )
-        return data.get("state", "UNKNOWN"), data.get("closedAt")
-    except GhInvocationError:
-        return "UNKNOWN", None
+    """Return (state, closed_at) for an issue via REST (`core` bucket — #54).
+
+    Delegates to `lib.board.fetch_issue_state_rest` so this script's per-plan
+    fan-out no longer pressures the GraphQL budget.
+    """
+    return cast("tuple[str, str | None]", board_fetch_issue_state_rest(repo, number))
 
 
 def fetch_issue_body(repo: str, number: int) -> str:
