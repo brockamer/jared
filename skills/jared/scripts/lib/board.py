@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import os
@@ -680,14 +681,12 @@ def run_gh(args: list[str], *, cache: str | None = None) -> Any:
         raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
 
 
-def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
-    """Return (state, closed_at) for an issue via the REST API (#54).
+_HTTP_STATUS_RE = re.compile(r"HTTP/[\d.]+\s+(\d+)")
+_ETAG_HEADER_RE = re.compile(r"^Etag:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
-    Uses `gh api repos/<repo>/issues/<n>` so the call hits the REST `core`
-    rate-limit bucket (5000/hr) instead of the `graphql` bucket. For batch
-    state checks (archive-plan.py scanning many plans, dependency-graph.py
-    open-state filters), this removes the calls from GraphQL pressure
-    entirely.
+
+def _parse_issue_state_payload(data: dict[str, Any]) -> tuple[str, str | None]:
+    """Extract (state, closed_at) from a REST /repos/.../issues/<n> JSON body.
 
     State is mapped to GraphQL's `IssueState`/`PullRequestState` enum so
     existing consumers continue to work unchanged:
@@ -696,12 +695,8 @@ def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
         (REST otherwise reports state="closed" for merged PRs, losing
         the merged-vs-closed-unmerged distinction archive-plan needs).
       - "CLOSED" / "OPEN" mapped from REST's lowercase `state`.
-      - "UNKNOWN" on any gh failure (missing repo, 404, network).
+      - "UNKNOWN" on a payload missing or with a non-string `state`.
     """
-    try:
-        data = run_gh(["api", f"repos/{repo}/issues/{number}"])
-    except GhInvocationError:
-        return "UNKNOWN", None
     state = data.get("state")
     if not isinstance(state, str):
         return "UNKNOWN", None
@@ -712,6 +707,118 @@ def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
     if isinstance(pr, dict) and pr.get("merged_at"):
         return "MERGED", closed_at
     return state.upper(), closed_at
+
+
+def _fetch_issue_rest_with_etag(repo: str, number: int) -> dict[str, Any] | None:
+    """Fetch the REST issue body with ETag/conditional GET (#147).
+
+    With a cached ETag the call sends `If-None-Match`; a 304 resolves to the
+    cached body without consuming REST `core` (GitHub doesn't count 304s
+    against the primary bucket). Misses and first calls go through `-i` so
+    the response ETag can be captured for the next call.
+
+    Cannot use `run_gh*` here: `gh api -i` exits non-zero on 304 even on
+    success, and stripping stdout would mangle the headers/body separator.
+    Calls `subprocess.run` directly and parses the HTTP status line itself.
+    Returns the parsed JSON body on success, or None on any failure mode.
+    """
+    cached = cache.get_issue_etag(repo, number)
+    args = ["gh", "api", "-i", f"repos/{repo}/issues/{number}"]
+    if cached is not None:
+        cached_etag, _cached_body = cached
+        args.extend(["-H", f"If-None-Match: {cached_etag}"])
+
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_child_env(),
+    )
+
+    status = _extract_http_status(result.stdout, result.stderr)
+    if status is None:
+        return None
+
+    if status == 304:
+        if cached is None:
+            return None
+        _cached_etag, cached_body = cached
+        return cached_body
+
+    if status != 200:
+        return None
+
+    body = _parse_etag_response_body(result.stdout)
+    if body is None:
+        return None
+    new_etag = _extract_etag_header(result.stdout)
+    if new_etag:
+        with contextlib.suppress(OSError):
+            cache.set_issue_etag(repo, number, etag=new_etag, body=body)
+    return body
+
+
+def _extract_http_status(stdout: str, stderr: str) -> int | None:
+    """Find the first `HTTP/<v> <code>` status line in stdout (then stderr)."""
+    for blob in (stdout, stderr):
+        for line in blob.splitlines():
+            m = _HTTP_STATUS_RE.match(line)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def _extract_etag_header(stdout: str) -> str | None:
+    m = _ETAG_HEADER_RE.search(stdout)
+    return m.group(1).strip() if m else None
+
+
+def _parse_etag_response_body(stdout: str) -> dict[str, Any] | None:
+    """Split `gh api -i` stdout on the headers/body boundary and parse JSON.
+
+    Accepts both `\\r\\n\\r\\n` and `\\n\\n` separators since `gh api -i`
+    can emit either depending on how the output stream is buffered.
+    """
+    separator = "\r\n\r\n" if "\r\n\r\n" in stdout else "\n\n"
+    parts = stdout.split(separator, 1)
+    if len(parts) < 2:
+        return None
+    try:
+        body = json.loads(parts[1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    return body
+
+
+def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
+    """Return (state, closed_at) for an issue via the REST API (#54).
+
+    Uses `gh api repos/<repo>/issues/<n>` so the call hits the REST `core`
+    rate-limit bucket (5000/hr) instead of the `graphql` bucket. For batch
+    state checks (archive-plan.py scanning many plans, dependency-graph.py
+    open-state filters), this removes the calls from GraphQL pressure
+    entirely.
+
+    Adds ETag/conditional GET on top (#147): when caching is enabled the
+    first call captures the response ETag, and subsequent calls send
+    `If-None-Match` so a 304 short-circuits to the cached body without
+    consuming REST `core`. `JARED_NO_CACHE=1` bypasses the ETag layer and
+    falls back to the unconditional `gh api` flow.
+    """
+    if os.environ.get("JARED_NO_CACHE") == "1":
+        try:
+            data = run_gh(["api", f"repos/{repo}/issues/{number}"])
+        except GhInvocationError:
+            return "UNKNOWN", None
+        return _parse_issue_state_payload(data)
+
+    data = _fetch_issue_rest_with_etag(repo, number)
+    if data is None:
+        return "UNKNOWN", None
+    return _parse_issue_state_payload(data)
 
 
 def _child_env() -> dict[str, str]:

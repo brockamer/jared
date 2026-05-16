@@ -1,4 +1,9 @@
-"""Tests for fetch_issue_state_rest — REST migration for per-issue state checks (#54)."""
+"""Tests for fetch_issue_state_rest — REST migration for per-issue state checks (#54).
+
+These tests cover the unconditional REST path with `JARED_NO_CACHE=1` set so
+the FakeResult fixtures return raw JSON bodies (no HTTP status line). The
+ETag/conditional GET layer (#147) is covered in test_issue_state_etag.py.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ import pytest
 def test_fetch_issue_state_rest_returns_closed_with_closed_at(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
     from skills.jared.scripts.lib import board
 
     captured_args: list[list[str]] = []
@@ -35,6 +41,7 @@ def test_fetch_issue_state_rest_returns_closed_with_closed_at(
 
 
 def test_fetch_issue_state_rest_returns_open_with_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
     from skills.jared.scripts.lib import board
 
     class FakeResult:
@@ -58,6 +65,7 @@ def test_fetch_issue_state_rest_returns_merged_for_merged_pr(
     """REST returns state="closed" for merged PRs; the helper must surface
     the merged-vs-closed-unmerged distinction via `pull_request.merged_at`
     so archive-plan's `## Shipped` predicate (merged-only) keeps working."""
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
     from skills.jared.scripts.lib import board
 
     class FakeResult:
@@ -82,6 +90,7 @@ def test_fetch_issue_state_rest_returns_closed_for_unmerged_pr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A PR that was closed without merging must NOT report as MERGED."""
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
     from skills.jared.scripts.lib import board
 
     class FakeResult:
@@ -104,6 +113,7 @@ def test_fetch_issue_state_rest_returns_closed_for_unmerged_pr(
 def test_fetch_issue_state_rest_returns_unknown_on_gh_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
     from skills.jared.scripts.lib import board
 
     class FakeResult:

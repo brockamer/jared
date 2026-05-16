@@ -57,6 +57,73 @@ def test_different_projects_use_separate_cache_files(tmp_path: Path) -> None:
     assert cache.get_item_list(project_number=5, cache_dir=tmp_path) == [{"b": 2}]
 
 
+def test_issue_etag_set_then_get_round_trips(tmp_path: Path) -> None:
+    cache.set_issue_etag(
+        "brockamer/jared",
+        52,
+        etag='W/"abc123"',
+        body={"state": "closed", "number": 52},
+        cache_dir=tmp_path,
+    )
+    result = cache.get_issue_etag("brockamer/jared", 52, cache_dir=tmp_path)
+    assert result == ('W/"abc123"', {"state": "closed", "number": 52})
+
+
+def test_issue_etag_returns_none_when_absent(tmp_path: Path) -> None:
+    assert cache.get_issue_etag("brockamer/jared", 99, cache_dir=tmp_path) is None
+
+
+def test_issue_etag_handles_repo_with_slash_in_path(tmp_path: Path) -> None:
+    """The repo name 'owner/name' must produce a nested directory, not a literal slash."""
+    cache.set_issue_etag(
+        "brockamer/jared",
+        52,
+        etag='"abc"',
+        body={"state": "open"},
+        cache_dir=tmp_path,
+    )
+    expected = tmp_path / "etags" / "brockamer" / "jared" / "52.json"
+    assert expected.exists()
+
+
+def test_issue_etag_returns_none_on_corrupted_json(tmp_path: Path) -> None:
+    path = tmp_path / "etags" / "brockamer" / "jared" / "52.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{not valid")
+    assert cache.get_issue_etag("brockamer/jared", 52, cache_dir=tmp_path) is None
+
+
+def test_issue_etag_returns_none_when_etag_missing(tmp_path: Path) -> None:
+    """A payload missing the 'etag' field must not resolve to a stale hit."""
+    import json as _json
+
+    path = tmp_path / "etags" / "brockamer" / "jared" / "52.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(_json.dumps({"body": {"state": "open"}}))
+    assert cache.get_issue_etag("brockamer/jared", 52, cache_dir=tmp_path) is None
+
+
+def test_issue_etag_different_issues_use_separate_files(tmp_path: Path) -> None:
+    cache.set_issue_etag(
+        "brockamer/jared",
+        52,
+        etag='"a"',
+        body={"n": 52},
+        cache_dir=tmp_path,
+    )
+    cache.set_issue_etag(
+        "brockamer/jared",
+        53,
+        etag='"b"',
+        body={"n": 53},
+        cache_dir=tmp_path,
+    )
+    a = cache.get_issue_etag("brockamer/jared", 52, cache_dir=tmp_path)
+    b = cache.get_issue_etag("brockamer/jared", 53, cache_dir=tmp_path)
+    assert a == ('"a"', {"n": 52})
+    assert b == ('"b"', {"n": 53})
+
+
 def _minimal_board(tmp_path: Path) -> Path:
     p = tmp_path / "docs" / "project-board.md"
     p.parent.mkdir(parents=True)

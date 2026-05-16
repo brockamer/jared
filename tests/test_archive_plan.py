@@ -28,6 +28,7 @@ def _merged_pr_json(closed_at: str) -> str:
         f'"pull_request": {{"merged_at": "{closed_at}"}}}}'
     )
 
+
 REPO_ROOT = Path(__file__).parents[1]
 SCRIPT_PATH = REPO_ROOT / "skills" / "jared" / "scripts" / "archive-plan.py"
 
@@ -42,6 +43,15 @@ def _import_archive_plan() -> ModuleType:
 
 
 ap = _import_archive_plan()
+
+
+@pytest.fixture(autouse=True)
+def _bypass_etag_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`patch_gh_by_arg` returns raw JSON bodies, not HTTP-formatted responses.
+    Bypass the ETag/conditional-GET layer (#147) so `fetch_issue_state_rest`
+    goes through the unconditional REST path that parses those bodies directly.
+    """
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
 
 
 def _write_plan(tmp_path: Path, filename: str, refs: list[int]) -> Path:
