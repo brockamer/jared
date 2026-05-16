@@ -56,7 +56,7 @@ class StageProposals:
 _TEMPLATE_FIRST_PARA = "One-sentence summary of what this issue is about and why it matters."
 _PLACEHOLDER_CRITERIA = re.compile(r"^\s*-\s*Criterion\s*\d+\s*$", re.MULTILINE)
 _ACCEPTANCE_SECTION = re.compile(
-    r"##\s+Acceptance criteria\s*\n+<details>\s*\n+<summary>Expand</summary>(.*?)</details>",
+    r"##\s+Acceptance criteria\s*\n+<details>(.*?)</details>",
     re.DOTALL,
 )
 _BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##(?!#)|\Z)", re.DOTALL)
