@@ -37,6 +37,20 @@ SKILL_SCRIPTS = REPO_ROOT / "skills" / "jared" / "scripts"
 CLI_PATH = SKILL_SCRIPTS / "jared"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_jared_cache(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Point the on-disk snapshot cache (#52) at a per-test tmp dir.
+
+    Without this, tests would share `${TMPDIR}/jared-cache/` across runs and
+    leak board snapshots between tests. Tests that want to disable caching
+    entirely can additionally set `JARED_NO_CACHE=1` via monkeypatch.
+    """
+    cache_dir = tmp_path_factory.mktemp("jared-cache")
+    monkeypatch.setenv("JARED_CACHE_DIR", str(cache_dir))
+
+
 def import_cli() -> ModuleType:
     """Load the extension-less `jared` CLI script as a module.
 

@@ -24,9 +24,9 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
     ItemNotFound,
     OptionNotFound,
+    _find_project_root,
     check_closed_not_done,
     fetch_recent_comments_batch,
-    _find_project_root,
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
@@ -605,20 +605,7 @@ def _cmd_set(args: argparse.Namespace) -> int:
 
 def _cmd_summary(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
-    data = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
-    items: list[dict[str, Any]] = data.get("items", [])
+    items: list[dict[str, Any]] = board.board_items()
 
     def by_status(status: str) -> list[dict[str, Any]]:
         return [i for i in items if i.get("status") == status]
@@ -713,26 +700,11 @@ def _now_local_iso() -> str:
 
 
 def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
-    """Mirror of _cmd_summary's item-list call.
+    """Wrapper that delegates to Board.board_items() (Phase 1 of #52).
 
-    Kept inline rather than refactored into Board to keep this phase's
-    diff narrow; if a third caller appears, lift to Board.list_items().
+    Kept as a thin alias so call sites in this file read naturally.
     """
-    data = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
-    items: list[dict[str, Any]] = data.get("items", [])
-    return items
+    return board.board_items()
 
 
 def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
