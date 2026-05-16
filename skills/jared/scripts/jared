@@ -24,9 +24,9 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     GhInvocationError,
     ItemNotFound,
     OptionNotFound,
+    _find_project_root,
     check_closed_not_done,
     fetch_recent_comments_batch,
-    _find_project_root,
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
@@ -95,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
     get_item.set_defaults(func=_cmd_get_item)
 
     summary = sub.add_parser("summary", help="One-screen board status summary.")
+    summary.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Bypass the on-disk snapshot cache for this read (#52).",
+    )
     summary.set_defaults(func=_cmd_summary)
 
     set_p = sub.add_parser("set", help="Set a single-select field on an issue.")
@@ -216,6 +221,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Include the Quick health check section using "
             "`## Session start checks` from docs/project-board.md."
         ),
+    )
+    nsp.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Bypass the on-disk snapshot cache for this read (#52).",
     )
     nsp.set_defaults(func=_cmd_next_session_prompt)
 
@@ -540,6 +550,10 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
         print(f"error: {mutation_name} failed: {e}", file=sys.stderr)
         return 2
 
+    # blocked-by edges live outside the gh project item-list snapshot
+    # (they're a native GitHub issue dependency), but follow the discipline
+    # from #52's body — any board-state mutation invalidates the cache.
+    board.invalidate_items()
     action = "removed" if args.remove else "added"
     print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}")
     return 0
@@ -599,26 +613,21 @@ def _cmd_set(args: argparse.Namespace) -> int:
             option_id,
         ]
     )
+    # Project-field mutation invalidates the on-disk snapshot so other
+    # processes (and the conversational layer) see fresh state on next
+    # read. Covers _cmd_move and _cmd_close transitively (both delegate
+    # here). Without this, a `jared move` followed by `jared summary`
+    # within TTL returns the pre-move snapshot. (#52 Phase 1.)
+    board.invalidate_items()
     print(f"OK: set {args.field_name}={args.value} on issue #{args.issue_number}")
     return 0
 
 
 def _cmd_summary(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
-    data = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
-    items: list[dict[str, Any]] = data.get("items", [])
+    if getattr(args, "fresh", False):
+        board.invalidate_items()
+    items: list[dict[str, Any]] = board.board_items()
 
     def by_status(status: str) -> list[dict[str, Any]]:
         return [i for i in items if i.get("status") == status]
@@ -713,26 +722,11 @@ def _now_local_iso() -> str:
 
 
 def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
-    """Mirror of _cmd_summary's item-list call.
+    """Wrapper that delegates to Board.board_items() (Phase 1 of #52).
 
-    Kept inline rather than refactored into Board to keep this phase's
-    diff narrow; if a third caller appears, lift to Board.list_items().
+    Kept as a thin alias so call sites in this file read naturally.
     """
-    data = board.run_gh(
-        [
-            "project",
-            "item-list",
-            str(board.project_number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "500",
-            "--format",
-            "json",
-        ]
-    )
-    items: list[dict[str, Any]] = data.get("items", [])
-    return items
+    return board.board_items()
 
 
 def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
@@ -811,6 +805,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     so changes here are user-visible.
     """
     board = _load_board(args.board)
+    if getattr(args, "fresh", False):
+        board.invalidate_items()
     items = _fetch_board_items(board)
     in_progress = [i for i in items if i.get("status") == "In Progress"]
     up_next = [i for i in items if i.get("status") == "Up Next"][:3]

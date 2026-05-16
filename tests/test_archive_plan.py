@@ -1,8 +1,9 @@
-"""Tests for archive-plan.py — accept MERGED PRs as shipped; surface skip reasons.
+"""Tests for archive-plan.py — accept merged PRs as shipped; surface skip reasons.
 
 Regressions targeted:
-- `gh issue view <N>` returns state=MERGED for PRs. A merged PR is a valid
-  "shipped" signal; it must not look like an open blocker.
+- `gh api repos/<repo>/issues/<N>` (REST, post-#54) returns state="closed"
+  for merged PRs. A closed PR is a valid "shipped" signal; it must not
+  look like an open blocker.
 - The --plan single-file path previously discarded archive_one's return
   value, so a skip (e.g. "not all issues closed") produced exit=0 with
   no output — indistinguishable from success.
@@ -18,6 +19,14 @@ from types import ModuleType
 import pytest
 
 from tests.conftest import patch_gh_by_arg
+
+
+def _merged_pr_json(closed_at: str) -> str:
+    """REST shape (#54): a merged PR is state=closed with pull_request.merged_at set."""
+    return (
+        f'{{"state": "closed", "closed_at": "{closed_at}", '
+        f'"pull_request": {{"merged_at": "{closed_at}"}}}}'
+    )
 
 REPO_ROOT = Path(__file__).parents[1]
 SCRIPT_PATH = REPO_ROOT / "skills" / "jared" / "scripts" / "archive-plan.py"
@@ -185,7 +194,7 @@ def test_archive_one_archives_via_shipped_section_when_pr_merged(
     plan.write_text("# Plan\n\n## Shipped\n\n- PR #415\n\n## Body\n\nDetails.\n")
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 415": '{"state": "MERGED", "closedAt": "2026-05-02T15:30:00Z"}'},
+        {"issues/415": _merged_pr_json("2026-05-02T15:30:00Z")},
     )
 
     result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
@@ -207,7 +216,7 @@ def test_archive_one_skips_shipped_section_with_open_pr(
     plan.write_text("# Plan\n\n## Shipped\n\n- PR #999\n\n## Body\n")
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 999": '{"state": "OPEN", "closedAt": null}'},
+        {"issues/999": '{"state": "open", "closed_at": null}'},
     )
 
     result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
@@ -230,8 +239,8 @@ def test_archive_one_shipped_takes_priority_over_issue_section(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue view 414": '{"state": "OPEN", "closedAt": null}',
-            "issue view 415": '{"state": "MERGED", "closedAt": "2026-05-02T15:30:00Z"}',
+            "issues/414": '{"state": "open", "closed_at": null}',
+            "issues/415": _merged_pr_json("2026-05-02T15:30:00Z"),
         },
     )
 
@@ -253,7 +262,7 @@ def test_archive_one_accepts_merged_pr_as_shipped(
     plan = _write_plan(tmp_path, "2026-04-19-native-deps.md", [98])
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 98": '{"state": "MERGED", "closedAt": "2026-04-20T12:00:00Z"}'},
+        {"issues/98": _merged_pr_json("2026-04-20T12:00:00Z")},
     )
 
     result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
@@ -271,7 +280,7 @@ def test_archive_one_still_skips_open_issue(
     plan = _write_plan(tmp_path, "still-open.md", [10])
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 10": '{"state": "OPEN", "closedAt": null}'},
+        {"issues/10": '{"state": "open", "closed_at": null}'},
     )
 
     result = ap.archive_one(plan, "brockamer/findajob", dry_run=True, yes=True)
@@ -329,7 +338,7 @@ def test_archive_one_warns_to_stderr_when_plan_lacks_required_sections(
     # neither required section is present.
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 42": '{"state": "CLOSED", "closedAt": "2026-05-01T00:00:00Z"}'},
+        {"issues/42": '{"state": "closed", "closed_at": "2026-05-01T00:00:00Z"}'},
     )
 
     result = ap.archive_one(plan, "brockamer/jared", dry_run=True, yes=True)
@@ -358,7 +367,7 @@ def test_archive_one_does_not_warn_when_plan_compliant(
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 42": '{"state": "CLOSED", "closedAt": "2026-05-01T00:00:00Z"}'},
+        {"issues/42": '{"state": "closed", "closed_at": "2026-05-01T00:00:00Z"}'},
     )
 
     result = ap.archive_one(plan, "brockamer/jared", dry_run=True, yes=True)
@@ -377,7 +386,7 @@ def test_main_plan_path_surfaces_skip_reason(
     plan = _write_plan(tmp_path, "plan.md", [11])
     patch_gh_by_arg(
         monkeypatch,
-        {"issue view 11": '{"state": "OPEN", "closedAt": null}'},
+        {"issues/11": '{"state": "open", "closed_at": null}'},
     )
 
     rc = ap.main(["--plan", str(plan), "--repo", "brockamer/findajob", "--dry-run", "--yes"])
