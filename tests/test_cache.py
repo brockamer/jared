@@ -216,6 +216,103 @@ def test_two_subprocess_jared_summary_calls_share_one_gh_item_list(
     )
 
 
+def test_jared_move_nukes_cache_so_next_summary_refetches(tmp_path: Path) -> None:
+    """Cross-process correctness: after a mutating subcommand in one process,
+    another process must NOT serve the stale snapshot. Regression test for
+    the invalidation-discipline gap caught in pre-PR advisor review:
+    `jared move` -> `jared summary` within TTL was returning pre-move data."""
+    fake_gh_dir = tmp_path / "bin"
+    fake_gh_dir.mkdir()
+    log_file = tmp_path / "gh-calls.log"
+    fake_gh = fake_gh_dir / "gh"
+    fake_gh.write_text(
+        dedent(f"""\
+        #!/usr/bin/env python3
+        import sys
+        with open({str(log_file)!r}, "a") as f:
+            f.write(" ".join(sys.argv[1:]) + "\\n")
+        if sys.argv[1:3] == ["project", "item-list"]:
+            print(
+                '{{"items": [{{"id": "PVTI_x", '
+                '"content": {{"number": 1, "title": "x"}}, '
+                '"status": "Backlog", "priority": "Medium"}}]}}'
+            )
+        elif sys.argv[1:4] == ["api", "graphql", "-f"]:
+            # find_item_id uses the scoped projectItems query (fix for #109).
+            print(
+                '{{"data": {{"repository": {{"issue": {{"projectItems": '
+                '{{"nodes": [{{"id": "PVTI_x", "project": {{"number": 7}}, '
+                '"fieldValues": {{"nodes": []}}}}]}}}}}}}}}}'
+            )
+        elif sys.argv[1:3] == ["project", "item-edit"]:
+            print('{{"id": "PVTI_x"}}')
+        elif sys.argv[1:3] == ["issue", "list"]:
+            print("[]")
+        else:
+            pass
+        """)
+    )
+    fake_gh.chmod(0o755)
+
+    project_dir = tmp_path / "project"
+    docs = project_dir / "docs"
+    docs.mkdir(parents=True)
+    (docs / "project-board.md").write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_test
+        - Owner: brockamer
+        - Repo: brockamer/jared
+
+        ### Status
+        - Field ID: PVTSSF_test
+        - Backlog: bk
+        - Up Next: un
+        - In Progress: ip
+        - Blocked: bl
+        - Done: dn
+
+        ### Priority
+        - Field ID: PVTSSF_pri
+        - High: hi
+        - Medium: me
+        - Low: lo
+        """)
+    )
+
+    env = {
+        **os.environ,
+        "PATH": f"{fake_gh_dir}:{os.environ['PATH']}",
+        "JARED_CACHE_DIR": str(tmp_path / "cache"),
+        "JARED_CACHE_TTL_SECONDS": "60",
+    }
+    env.pop("JARED_NO_CACHE", None)
+
+    def run_jared(*argv: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(JARED_CLI), *argv],
+            cwd=project_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    assert run_jared("summary").returncode == 0
+    assert run_jared("move", "1", "In Progress").returncode == 0
+    assert run_jared("summary").returncode == 0
+
+    calls = log_file.read_text().splitlines()
+    item_list_calls = [c for c in calls if c.startswith("project item-list")]
+    # First summary fetches; move nukes the cache; second summary must refetch.
+    # Pre-fix: only one item-list call total (second summary served stale).
+    assert len(item_list_calls) == 2, (
+        f"Mutation must invalidate the on-disk cache so subsequent summaries "
+        f"refetch. Got {len(item_list_calls)} item-list calls; expected 2. "
+        f"All calls: {calls}"
+    )
+
+
 def test_board_items_bypasses_cache_when_no_cache_env_set(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
