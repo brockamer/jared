@@ -10,6 +10,9 @@ survives across sessions, weeks, and shifts in scope.
 > status lives in your head. **Jared makes the board the thing you
 > actually look at.**
 
+**New here?** Skip ahead to [Getting started](#getting-started) for the
+install + first-command walkthrough.
+
 ---
 
 ## What it's for
@@ -81,6 +84,7 @@ The shape Jared enforces makes this work:
 |---|---|---|
 | Once a week (Mon morning) | `/jared-reshape` | Structural review — shape, phasing, milestones, dependencies, long-horizon arc. Catches drift the daily groom can't see. |
 | Every day | `/jared-groom` | Routine sweep — metadata completeness, WIP cap, aging items, pullable check, plan/spec drift, label hygiene. Advisory; you approve each proposed change. |
+| Every day or so | `/jared-stage` | Propose promotions from Backlog → Up Next and revisit anything sitting in Blocked. Advisory; you approve each move before it applies. |
 | Per work session — start | `/jared` then `/jared-start <N>` | `/jared` orients in 2 seconds. `/jared-start` moves the issue to In Progress and loads everything you need to resume. |
 | Per work session — end | `/jared-wrap` | Captures Progress / Decisions / Next action on every touched issue. Files any discovered scope. Proposes plan archivals. |
 | As scope arrives | `/jared-file` | One atomic operation: create issue, add to board, set Priority + Status, verify. No "filed but invisible" state. |
@@ -231,23 +235,110 @@ Archive? [Y/n] y
 
 ---
 
-## Install
+## Getting started
+
+### Prerequisites
+
+- **Claude Code.** Jared's commands are typed into the Claude Code chat,
+  not into your shell.
+  ([Install Claude Code](https://code.claude.com/docs/en/quickstart))
+- **`gh` CLI, authenticated.** Every Jared operation calls GitHub on
+  your behalf. Run `gh auth login` if you haven't; confirm with
+  `gh auth status`.
+- **GitHub token with `project` scope.** The default scopes from
+  `gh auth login` cover `repo` but not `project`. Add it with:
+
+    ```
+    gh auth refresh -s project
+    ```
+
+    Without `project` scope, board mutations fail silently or with
+    confusing 404s.
+- **A GitHub Projects v2 board.** Either an existing one you want to
+  steward, or a fresh empty project at
+  `https://github.com/users/<you>/projects`. Jared works with any
+  board — it introspects the field schema during bootstrap.
+
+### Install jared
+
+In Claude Code:
 
 ```
 /plugin marketplace add brockamer/jared
 /plugin install jared
 ```
 
-In any project with a `docs/project-board.md`, use `/jared` for status or
-the workflow commands above.
+After install, the 8 slash commands (`/jared`, `/jared-file`,
+`/jared-start`, `/jared-stage`, `/jared-groom`, `/jared-reshape`,
+`/jared-wrap`, `/jared-init`) become available.
 
-## Bootstrap on a new project
+### Bootstrap your project
 
-If a project has no `docs/project-board.md` yet, run `/jared-init` to
-pair the repo with an existing (or new) GitHub Projects v2 board. The
-bootstrap introspects the board's field schema and writes a convention
-doc with the project ID, field IDs, and option IDs. The CLI reads that
-file on every invocation — it's the contract between Jared and the board.
+Open a project where you want Jared to steward the board. If it has
+no `docs/project-board.md` yet, run:
+
+```
+/jared-init
+```
+
+The bootstrap asks for your project's URL (for example
+`https://github.com/users/you/projects/4`), introspects the board's
+Status and Priority field schema, and writes the convention doc to
+`docs/project-board.md`. **Commit and push it** — the CLI re-reads it
+on every invocation, so it has to live in the repo.
+
+<details>
+<summary><strong>Excerpt — what <code>/jared-init</code> generates</strong></summary>
+
+```
+# Project Board — How It Works
+
+- Project URL: https://github.com/users/you/projects/4
+- Project number: 4
+- Project ID: PVT_kwHO...
+- Owner: you
+- Repo: you/yourproject
+
+### Status
+- Field ID: PVTSSF_lAHO...
+- Backlog: 4e0a1177
+- Up Next: b44a3a0e
+- In Progress: 47fc9ee4
+- Blocked: 4d8fe8ca
+- Done: 98236657
+
+### Priority
+- Field ID: PVTSSF_lAHO...
+- High: adef53b9
+- Medium: d5a00122
+- Low: 7d424cac
+
+(... narrative conventions follow — human-editable, machine-parsed ...)
+```
+
+Re-run `/jared-init` whenever you rename board fields or add option
+values; the field IDs must stay in sync.
+
+</details>
+
+### First command
+
+```
+/jared
+```
+
+You should see your project URL, the `In Progress` count, and the top
+of Up Next / Blocked. On a fresh board this is mostly empty — that's
+expected. As you file and move issues, the posture fills out (the
+[Excerpt — `/jared` at session start](#a-typical-week) above shows a
+populated example).
+
+> If `/jared` errors with "no docs/project-board.md found," the
+> bootstrap step was skipped or the file lives elsewhere. The CLI
+> autodiscovers across `docs/project-board.md`,
+> `docs/maintainers/project-board.md`, `PROJECT_BOARD.md`, and
+> `.github/project-board.md` — pass `--board <path>` if yours is
+> somewhere else.
 
 ---
 
@@ -256,9 +347,9 @@ file on every invocation — it's the contract between Jared and the board.
 Slash commands sit on top of a unified Python CLI
 (`skills/jared/scripts/jared`) that owns the multi-step operations:
 `file`, `move`, `set`, `close`, `comment`, `blocked-by`, `add-to-board`,
-`get-item`, `summary`, `ties`. Each subcommand is atomic — `file`
-guarantees "issue exists AND on board AND Status set" or fails with a
-non-zero exit.
+`get-item`, `summary`, `ties`, `next-session-prompt`. Each subcommand
+is atomic — `file` guarantees "issue exists AND on board AND Status
+set" or fails with a non-zero exit.
 
 When the GitHub MCP plugin is loaded, the skill prefers its typed tools
 for single-call ops; the CLI handles everything multi-step. Raw `gh` is
@@ -301,7 +392,10 @@ tests target a dedicated `brockamer/jared-testbed` repo.
 
 ## Developing
 
-For active development, install from a local checkout:
+For active development, install from a local checkout. Note: the
+remove step takes the marketplace's `name` from its `marketplace.json`
+(for jared, that's `jared-marketplace`), not the `brockamer/jared`
+repo path you used to add it:
 
 ```
 /plugin marketplace remove jared-marketplace
@@ -314,6 +408,10 @@ cache, then `/reload-plugins` to reload. Claude Code copies plugins into
 `~/.claude/plugins/cache/` at install time — source edits are not picked
 up until you re-sync. (See [plugin-marketplaces docs][pm].)
 
+For the full contributor setup — Python venv with `uv`, `ruff`,
+`mypy`, the dual-import-path gotcha around the `Board` helper, and the
+testbed configuration — see [`CLAUDE.md`](CLAUDE.md).
+
 [pm]: https://code.claude.com/docs/en/plugin-marketplaces.md
 
 ## Testing
@@ -324,7 +422,9 @@ pytest -m integration   # integration tests against brockamer/jared-testbed
                         # (requires tests/testbed.env)
 ```
 
-See `tests/testbed-setup.md` for testbed setup.
+The pytest commands assume the dev venv is active — see
+[`CLAUDE.md`](CLAUDE.md) for `uv venv` setup. Integration tests are
+opt-in; `tests/testbed-setup.md` covers the testbed config.
 
 ## Layout
 
@@ -332,13 +432,16 @@ See `tests/testbed-setup.md` for testbed setup.
 .claude-plugin/
   plugin.json           Plugin metadata
   marketplace.json      Self-hosted marketplace manifest
-commands/               Slash-command stubs (7)
+commands/               Slash-command stubs (8): /jared, /jared-file,
+                        /jared-start, /jared-stage, /jared-groom,
+                        /jared-reshape, /jared-wrap, /jared-init
 skills/jared/
   SKILL.md              Skill contract
   references/           Detail docs loaded on demand
   scripts/
     jared               Unified CLI: file, move, set, close, comment,
-                        blocked-by, add-to-board, get-item, summary, ties
+                        blocked-by, add-to-board, get-item, summary,
+                        ties, next-session-prompt
     lib/board.py        Shared helper: board parsing, gh wrapper,
                         item-id lookup, plan-issue-ref parser
     sweep.py            Routine grooming sweep
@@ -354,8 +457,8 @@ docs/                   Field Notes + Pocket Reference + plugin's own
 
 ## Versioning
 
-Semantic versioning in `.claude-plugin/plugin.json`. Git tag `v<x.y.z>`
-per release. Currently **v0.9.0**.
+Semantic versioning in `.claude-plugin/plugin.json` (the source of
+truth). Git tag `v<x.y.z>` per release.
 
 ## License
 
