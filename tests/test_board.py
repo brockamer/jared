@@ -838,6 +838,134 @@ def test_fetch_blocked_by_edges_passes_cache_flag(monkeypatch: pytest.MonkeyPatc
     assert "--cache" in captured[0] and "60s" in captured[0]
 
 
+def test_fetch_milestone_map_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One paginated GraphQL call → {number: {title, due_on}} with dueOn normalised."""
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": ['
+            '{"number": 10, "milestone": {"title": "Phase 2", "dueOn": "2026-05-31T00:00:00Z"}},'
+            '{"number": 11, "milestone": {"title": "v1.0", "dueOn": "2026-07-01T00:00:00Z"}},'
+            '{"number": 12, "milestone": null}'
+            "]}}}}"
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    milestones = board.fetch_milestone_map("brockamer/jared")
+    # Issues with milestones present, normalised to snake_case due_on
+    assert milestones == {
+        10: {"title": "Phase 2", "due_on": "2026-05-31T00:00:00Z"},
+        11: {"title": "v1.0", "due_on": "2026-07-01T00:00:00Z"},
+    }
+    # Issue #12 (no milestone) is omitted from the result
+    assert 12 not in milestones
+
+
+def test_fetch_milestone_map_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Helper walks pageInfo.hasNextPage; merges all pages into a single map."""
+    from skills.jared.scripts.lib import board
+
+    page_responses = iter(
+        [
+            (
+                '{"data": {"repository": {"issues": {'
+                '"pageInfo": {"hasNextPage": true, "endCursor": "CUR1"},'
+                '"nodes": [{"number": 1, "milestone": '
+                '{"title": "M1", "dueOn": "2026-06-01T00:00:00Z"}}]'
+                "}}}}"
+            ),
+            (
+                '{"data": {"repository": {"issues": {'
+                '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+                '"nodes": [{"number": 2, "milestone": '
+                '{"title": "M2", "dueOn": "2026-07-01T00:00:00Z"}}]'
+                "}}}}"
+            ),
+        ]
+    )
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult(next(page_responses))
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    milestones = board.fetch_milestone_map("brockamer/jared")
+    assert set(milestones) == {1, 2}
+    assert milestones[1]["due_on"] == "2026-06-01T00:00:00Z"
+    assert milestones[2]["title"] == "M2"
+    # Two paginated calls, second one carries the cursor.
+    assert len(captured) == 2
+    assert any("c=CUR1" in arg for arg in captured[1])
+
+
+def test_fetch_milestone_map_passes_cache_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cache='60s' threads through to the underlying gh api invocation."""
+    from skills.jared.scripts.lib import board
+
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": []}}}}'
+        )
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    board.fetch_milestone_map("brockamer/jared", cache="60s")
+    assert "--cache" in captured[0] and "60s" in captured[0]
+
+
+def test_fetch_milestone_map_handles_missing_due_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A milestone with no dueOn yields due_on=None, not omission."""
+    from skills.jared.scripts.lib import board
+
+    class FakeResult:
+        returncode = 0
+        stdout = (
+            '{"data": {"repository": {"issues": {'
+            '"pageInfo": {"hasNextPage": false, "endCursor": null},'
+            '"nodes": ['
+            '{"number": 20, "milestone": {"title": "Unscheduled", "dueOn": null}}'
+            "]}}}}"
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+
+    milestones = board.fetch_milestone_map("brockamer/jared")
+    assert milestones == {20: {"title": "Unscheduled", "due_on": None}}
+
+
 def test_fetch_recent_comments_batch_single_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """One aliased GraphQL call covers many issues; returns {number: [comments]}."""
     from skills.jared.scripts.lib import board
