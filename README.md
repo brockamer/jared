@@ -327,9 +327,11 @@ values; the field IDs must stay in sync.
 /jared
 ```
 
-You should see your project URL, an `In Progress (0)` line, and the top
-of Up Next / Blocked. That's the board posture — the same shape as the
-[`/jared` excerpt above](#a-typical-week).
+You should see your project URL, the `In Progress` count, and the top
+of Up Next / Blocked. On a fresh board this is mostly empty — that's
+expected. As you file and move issues, the posture fills out (the
+[Excerpt — `/jared` at session start](#a-typical-week) above shows a
+populated example).
 
 > If `/jared` errors with "no docs/project-board.md found," the
 > bootstrap step was skipped or the file lives elsewhere. The CLI
