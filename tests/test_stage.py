@@ -85,6 +85,67 @@ class TestIsPullable:
         }
         assert stage.is_pullable(item) is False
 
+    def test_no_summary_details_shape_is_pullable(self) -> None:
+        """`<details>` with no `<summary>` line at all. Real-world shape
+        surfaced by findajob#679 and findajob#680 (2026-05-15) — #134."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary paragraph describing the work.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n\n"
+                "- Real criterion 1\n"
+                "- Real criterion 2\n\n"
+                "</details>"
+            )
+        }
+        assert stage.is_pullable(item) is True
+
+    def test_arbitrary_summary_text_is_pullable(self) -> None:
+        """`<summary>` text other than the canonical `Expand` — e.g.
+        `<summary>Acceptance criteria</summary>`. Real-world shape — #134."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary paragraph describing the work.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Acceptance criteria</summary>\n\n"
+                "- Real criterion 1\n"
+                "- Real criterion 2\n\n"
+                "</details>"
+            )
+        }
+        assert stage.is_pullable(item) is True
+
+    def test_legacy_expand_summary_still_pullable(self) -> None:
+        """Regression: the canonical `<summary>Expand</summary>` shape that
+        `jared file` produces must continue to pass after the regex relaxation
+        for #134."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary paragraph describing the work.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Expand</summary>\n\n"
+                "- Real criterion 1\n\n"
+                "</details>"
+            )
+        }
+        assert stage.is_pullable(item) is True
+
+    def test_unclosed_details_is_not_pullable(self) -> None:
+        """Defensive: the relaxed regex must still require `</details>` to
+        close — otherwise the match could span unrelated content. Locks down
+        AC bullet 5 of #134."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n## Acceptance criteria\n\n<details>\n\n- Real criterion 1\n"
+                # no closing </details>
+            )
+        }
+        assert stage.is_pullable(item) is False
+
 
 class TestNotPullableReason:
     """`not_pullable_reason` should give the operator a self-describing
@@ -129,12 +190,7 @@ class TestNotPullableReason:
         """`## Acceptance` (no `criteria` suffix), no <details> wrapper."""
         stage = import_stage()
         item = {
-            "body": (
-                "Real summary.\n\n"
-                "## Acceptance\n\n"
-                "- Real criterion 1\n"
-                "- Real criterion 2\n"
-            )
+            "body": ("Real summary.\n\n## Acceptance\n\n- Real criterion 1\n- Real criterion 2\n")
         }
         reason = stage.not_pullable_reason(item)
         assert "non-canonical" in reason
