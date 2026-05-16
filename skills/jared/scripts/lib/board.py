@@ -680,6 +680,40 @@ def run_gh(args: list[str], *, cache: str | None = None) -> Any:
         raise GhInvocationError(f"gh returned non-JSON output: {stdout[:200]}") from e
 
 
+def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
+    """Return (state, closed_at) for an issue via the REST API (#54).
+
+    Uses `gh api repos/<repo>/issues/<n>` so the call hits the REST `core`
+    rate-limit bucket (5000/hr) instead of the `graphql` bucket. For batch
+    state checks (archive-plan.py scanning many plans, dependency-graph.py
+    open-state filters), this removes the calls from GraphQL pressure
+    entirely.
+
+    State is mapped to GraphQL's `IssueState`/`PullRequestState` enum so
+    existing consumers continue to work unchanged:
+
+      - "MERGED" when the issue is a PR with a non-null `merged_at`
+        (REST otherwise reports state="closed" for merged PRs, losing
+        the merged-vs-closed-unmerged distinction archive-plan needs).
+      - "CLOSED" / "OPEN" mapped from REST's lowercase `state`.
+      - "UNKNOWN" on any gh failure (missing repo, 404, network).
+    """
+    try:
+        data = run_gh(["api", f"repos/{repo}/issues/{number}"])
+    except GhInvocationError:
+        return "UNKNOWN", None
+    state = data.get("state")
+    if not isinstance(state, str):
+        return "UNKNOWN", None
+    closed_at = data.get("closed_at")
+    if closed_at is not None and not isinstance(closed_at, str):
+        closed_at = None
+    pr = data.get("pull_request")
+    if isinstance(pr, dict) and pr.get("merged_at"):
+        return "MERGED", closed_at
+    return state.upper(), closed_at
+
+
 def _child_env() -> dict[str, str]:
     """Env for `gh` subprocess calls, with GH_TOKEN/GITHUB_TOKEN removed.
 
