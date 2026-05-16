@@ -162,6 +162,22 @@ def deferred_reason(item: dict[str, Any], *, today: date) -> str:
     return "ranked below slot cap"
 
 
+def is_epic(item: dict[str, Any]) -> bool:
+    """True if the item carries the `epic` label.
+
+    Epic-labeled issues are durably parent-shaped — roadmaps, checklists,
+    strategic anchors. They legitimately lack acceptance criteria and exist
+    on Backlog as long-horizon containers, so /jared-stage exempts them from
+    the "Deferred (this pass)" surface (#146). See docs/project-board.md
+    `## Labels` for the convention.
+
+    `labels` arrives from gh project item-list as a plain list of strings
+    (top-level on the raw item; plumbed through fetch_items_for_stage).
+    """
+    labels = item.get("labels") or []
+    return "epic" in labels
+
+
 def is_pullable(item: dict[str, Any]) -> bool:
     """An item is pullable if its body has a real summary + non-placeholder
     acceptance criteria. See spec § "Filter semantics"."""
@@ -327,6 +343,10 @@ def stage_proposals(
     pullable = [i for i in backlog if is_pullable(i)]
     not_pullable = [i for i in backlog if not is_pullable(i)]
     for item in not_pullable:
+        if is_epic(item):
+            # #146: epics are durably parent-shaped and stay in Backlog by
+            # design; surfacing them as "deferred" every pass is noise.
+            continue
         deferred.append(DeferredItem(item, not_pullable_reason(item)))
 
     dep_ready = [i for i in pullable if has_no_open_blockers(i, items)]
@@ -407,6 +427,7 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
                 "milestone": milestone_map.get(number),
                 "createdAt": content.get("createdAt") or content.get("created_at"),
                 "blocked_by_native": blocked_by_native,
+                "labels": raw.get("labels") or [],
             }
         )
     return normalised

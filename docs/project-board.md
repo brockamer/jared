@@ -90,6 +90,7 @@ Suggested defaults (create via `gh label create` as needed):
 | `enhancement` | New capability |
 | `refactor` | Restructuring without behavior change |
 | `documentation` | Docs-only change |
+| `epic` | Durably parent-shaped — roadmap, checklist, strategic anchor. Lacks acceptance criteria by design; stays in Backlog as a long-horizon container. `/jared-stage` exempts these from "Deferred (this pass)" noise. |
 
 **Do not** create a `blocked` label. Blocked is a Status column on this board, not a label — see Status above.
 
