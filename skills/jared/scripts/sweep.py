@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -51,6 +52,7 @@ from typing import Any, cast
 # mypy can't follow the sys.path manipulation; types are still enforced inside lib.board.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from lib import cache as board_cache  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     Board,
     GhInvocationError,
@@ -110,6 +112,18 @@ def find_config() -> Path | None:
 
 
 def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
+    """Fetch project items, consulting the on-disk snapshot cache (#52).
+
+    `JARED_NO_CACHE=1` bypasses the cache; `JARED_CACHE_TTL_SECONDS` overrides
+    the default 60s TTL.
+    """
+    project_number = int(project)
+    no_cache = os.environ.get("JARED_NO_CACHE") == "1"
+    if not no_cache:
+        ttl = int(os.environ.get("JARED_CACHE_TTL_SECONDS", "60"))
+        cached = board_cache.get_item_list(project_number, ttl_seconds=ttl)
+        if cached is not None:
+            return cast(list[dict[str, Any]], cached)
     data = board_run_gh(
         [
             "project",
@@ -123,7 +137,10 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
             "json",
         ]
     )
-    return cast(list[dict[Any, Any]], data.get("items", []))
+    items = cast(list[dict[Any, Any]], data.get("items", []))
+    if not no_cache:
+        board_cache.set_item_list(project_number, items=items)
+    return items
 
 
 def fetch_open_issues_bulk(repo: str) -> list[dict[str, Any]]:

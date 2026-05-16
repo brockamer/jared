@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from . import cache
+
 if TYPE_CHECKING:
     from .ties import OpenIssueForTies
 
@@ -331,38 +333,52 @@ class Board:
         return run_gh_raw(args, cache=cache)
 
     def board_items(self) -> list[dict[str, Any]]:
-        """Cached `gh project item-list` result for this Board instance.
+        """Cached `gh project item-list` result, shared across processes.
 
-        Refreshes on first call; subsequent calls reuse the in-memory copy
-        for the rest of the process. Callers that mutate the board within
-        the same process must call `invalidate_items()` before reading
-        again, or stale entries will leak through.
+        Three layers (#52):
+          1. In-process: `self._items`, lifetime of this Board instance.
+          2. On-disk: JSON at `${JARED_CACHE_DIR:-${TMPDIR}/jared-cache}/<N>.json`,
+             shared across all jared processes within `JARED_CACHE_TTL_SECONDS`.
+          3. Fresh fetch via `gh project item-list` — GraphQL-billed.
 
-        `gh project item-list` is GraphQL-billed, so reusing the snapshot
-        is what saves the points — not just the wall-clock time.
+        Callers that mutate the board within the same process must call
+        `invalidate_items()` before reading again, or stale entries leak.
+        Mutating-CLI subcommands invalidate the disk cache too so other
+        processes refetch on their next read.
+
+        Opt-out: `JARED_NO_CACHE=1` skips both cache layers.
         """
-        if self._items is None:
-            data = self.run_gh(
-                [
-                    "project",
-                    "item-list",
-                    str(self.project_number),
-                    "--owner",
-                    self.owner,
-                    "--limit",
-                    "2000",
-                    "--format",
-                    "json",
-                ]
-            )
-            self._items = data.get("items", [])
-        # Narrow Optional after the populate-if-None branch above.
-        assert self._items is not None
+        if self._items is not None:
+            return self._items
+        no_cache = os.environ.get("JARED_NO_CACHE") == "1"
+        if not no_cache:
+            ttl = int(os.environ.get("JARED_CACHE_TTL_SECONDS", "60"))
+            cached = cache.get_item_list(self.project_number, ttl_seconds=ttl)
+            if cached is not None:
+                self._items = cached
+                return self._items
+        data = self.run_gh(
+            [
+                "project",
+                "item-list",
+                str(self.project_number),
+                "--owner",
+                self.owner,
+                "--limit",
+                "2000",
+                "--format",
+                "json",
+            ]
+        )
+        self._items = data.get("items", [])
+        if not no_cache:
+            cache.set_item_list(self.project_number, items=self._items)
         return self._items
 
     def invalidate_items(self) -> None:
-        """Drop the cached snapshot. Next `board_items()` call re-fetches."""
+        """Drop both in-process and on-disk snapshot caches."""
         self._items = None
+        cache.invalidate_item_list(self.project_number)
 
     _ISSUE_PROJECT_ITEM_QUERY = """
     query($owner: String!, $repo: String!, $number: Int!) {
