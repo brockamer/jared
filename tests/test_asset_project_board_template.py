@@ -33,3 +33,14 @@ def test_asset_template_omits_blocked_label_row() -> None:
 def test_asset_template_has_blocked_label_callout() -> None:
     content = ASSET_PATH.read_text()
     assert "Do not" in content and "`blocked` label" in content
+
+
+def test_asset_template_has_epic_label_row() -> None:
+    content = ASSET_PATH.read_text()
+    assert "| `epic` |" in content
+
+
+def test_asset_template_has_scope_labels_paragraph() -> None:
+    content = ASSET_PATH.read_text()
+    assert "Project-specific scope labels" in content
+    assert "`infra`" in content and "`frontend`" in content and "`customer-facing`" in content
