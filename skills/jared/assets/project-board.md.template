@@ -56,7 +56,8 @@ Defaults:
 | `enhancement` | New capability |
 | `refactor` | Restructuring without behavior change |
 | `documentation` | Docs-only change |
-| `blocked` | Waiting on a dependency (must pair with `## Blocked by` in body) |
+
+**Do not** create a `blocked` label. Blocked is a Status column on this board, not a label — see Status above.
 
 ## Project workflows — recommended settings
 
