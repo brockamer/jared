@@ -264,11 +264,11 @@ See `references/human-readable-board.md` for title/body templates and `assets/is
 
 ## Model & execution guidance — every issue declares its tier mix
 
-Every issue body carries a `## Model & execution guidance` section that names which parts of the work are cheap-tier (USE a Haiku subagent), standard-tier (USE a Sonnet subagent), and smart-tier (USE `advisor()`), plus a short Subagent dispatches subsection and an Execution sketch. The point: when a session pulls the issue, model selection is a property of the issue, not session-floor knowledge that gets re-derived each time.
+Every issue body carries a `## Model & execution guidance` section that classifies parts of the work into tier categories (Cheap / Standard / Smart) and prescribes `advisor()` at named decision points. The point: when a session pulls the issue, **work classification** is a property of the issue, and **decision-point discipline** is reliably prescribed up front. Model and dispatch *choices* belong to the session — work size is unknown at file-time, and operators correctly resize at session-time.
 
-**Framing is imperative, not descriptive.** Tier labels are verb-led directives — `Cheap-tier work (USE a Haiku subagent)`, not `Cheap (Haiku-class)`. The descriptive shape reads as a category and drifts out of context as the session grows; the imperative shape reads as an instruction and holds at dispatch time. Per-line subagent dispatches use the same `USE` framing: `` `feature-dev:code-explorer` — USE to trace how X ships `` rather than `` `feature-dev:code-explorer` to trace how X ships ``.
+**Framing is classification + decision-point prescription, not task-tier dispatch prescription.** The section started life as imperative dispatch directives ("USE a Haiku subagent for X", "USE a Sonnet subagent for Y"; introduced in #126). A 47-audit retrospective (#162) found that task-tier dispatch prescriptions held a **23–43% worked-rate**, while `advisor()` decision-point prescriptions held a **95% worked-rate**. The diagnostic insight: *decision-point prescriptions work because the operator recognizes the decision point regardless of work size; task-tier prescriptions fail because work size is unknown at file-time and the operator correctly resizes at session-time.* The current shape reflects that — tier headers without dispatch directives, `advisor()` retained as the load-bearing prescription, and a leading caveat that names the discipline explicitly.
 
-**File-time composition is the contract.** When you compose the body of a new issue in `/jared-file`, fill in the four subsections from the template. Use the abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure does. Name real Claude Code primitives in the dispatch lines: `Explore` (Haiku-default, read-only search), `general-purpose` (inherits, multi-step), `claude-code-guide` (Haiku-default, Claude Code questions), and `advisor()` for the senior reviewer pass.
+**File-time composition is the contract.** When you compose the body of a new issue in `/jared-file`, fill in the three tier subsections (Cheap / Standard / Smart) + the Execution sketch + the leading caveat. Use the abstract tier labels — model names age faster than the cost structure does. Name real Claude Code primitives only when the dispatch is genuinely load-bearing (e.g., `Explore` for a surface-map task that exceeds the parent session's read budget); mention them inline in the Execution sketch step rather than as a separate Subagent-dispatches block.
 
 **Start-time backstop.** When `/jared-start` pulls an issue whose body has no `## Model & execution guidance` H2, the start flow generates the evaluation on the fly and surfaces it as part of the proposed-plan announce. User confirmation in step 8 implicitly approves the evaluation; on approval, jared posts it as a Session-note-shaped comment on the issue (timestamped `## Session YYYY-MM-DD — Model & execution guidance (start-time backstop)`). The body is not retroactively amended — comments are append-only and durable, body edits are not. See `commands/jared-start.md` for the exact step ordering.
 
@@ -279,29 +279,27 @@ Every issue body carries a `## Model & execution guidance` section that names wh
 ```markdown
 ## Model & execution guidance
 
-**Cheap-tier work (USE a Haiku subagent):**
+*Tiers below classify the work — they do not prescribe dispatch. Use judgment at
+session-time; the wrap audit will ask you to evaluate that judgment honestly.*
+
+**Cheap-tier work:**
 - Reading existing test fixtures and identifying the patch surface in `lib/board.py`.
 - Generating the placeholder docstring for the new public method.
 
-**Standard-tier work (USE a Sonnet subagent):**
+**Standard-tier work:**
 - Implementing `Board.parse_optional_field` and wiring it into `_parse`.
 - Writing the unit test for the three input cases (default, explicit, missing).
 
 **Smart-tier moments (USE `advisor()`):**
 - Final review pass before the PR opens — verifying the field-name choice doesn't collide with existing parsing and that the default-False behavior is right.
 
-**Subagent dispatches (USE these for the noted task):**
-- `Explore` — USE for the initial scan of how other optional fields are parsed in `lib/board.py`.
-- `general-purpose` — USE for the implementation phase if the parent session is on Opus and wants to delegate.
-- `advisor()` — USE once before the final commit for the senior reviewer pass.
-
 **Execution sketch:**
-1. Explore the existing parse pattern for one optional field.
+1. Explore the existing parse pattern for one optional field (use `Explore` if the parent session's read budget can't carry it inline).
 2. Implement + test the new field in one phase.
 3. Advisor review, then commit + PR.
 ```
 
-**This section is informational, not enforced.** Jared doesn't validate that the puller actually used the recommended models — that's session discipline, not board state. Drift is fine; the value is in making the recommendation visible up front and giving the puller a starting point.
+**This section is classification + decision-point prescription, not task-tier dispatch prescription.** Jared doesn't validate that the puller actually used a particular model or dispatched a particular subagent — those are session-time judgment calls. The value is in making the work classification visible up front, and in reliably prescribing `advisor()` at decision points where the prescription is portable across work sizes. The wrap-time `## Guidance audit (#N)` block closes the loop by asking the operator to evaluate their judgment, not their compliance.
 
 ## Bootstrapping a new project
 

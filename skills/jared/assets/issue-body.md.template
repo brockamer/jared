@@ -18,20 +18,20 @@ Not started.
 
 ## Model & execution guidance
 
-**Cheap-tier work (USE a Haiku subagent):**
+*Tiers below classify the work — they do not prescribe dispatch. Use judgment at
+session-time; the wrap audit will ask you to evaluate that judgment honestly.*
+
+**Cheap-tier work:**
 - (parts that are read-only, mechanical, or pattern-matching)
 
-**Standard-tier work (USE a Sonnet subagent):**
+**Standard-tier work:**
 - (parts that are routine implementation, test writing, refactor)
 
 **Smart-tier moments (USE `advisor()`):**
 - (parts that need design judgment, cross-cutting reasoning, or pre-merge review)
 
-**Subagent dispatches (USE these for the noted task):**
-- `agent-name` — USE to <do X>  (real Claude Code agents: `Explore`, `general-purpose`, `claude-code-guide`)
-
 **Execution sketch:**
-1. (first step)
+1. (first step — name a subagent inline if the dispatch is genuinely load-bearing)
 2. (second step)
 3. (commit / PR boundary)
 
