@@ -45,7 +45,7 @@ Flow:
 6. **Model guidance backstop.** Scan the issue body for an `## Model & execution guidance` H2.
 
    - If present: load it as part of context; surface its content in step 8's announce so the user can confirm or amend.
-   - If absent AND the project's `docs/project-board.md` does not have `- model-guidance: disabled` in `## Jared config`: generate a fresh evaluation in the imperative shape — each acceptance criterion (and the issue summary) classified under verb-led headers (**Cheap-tier work (USE a Haiku subagent)**, **Standard-tier work (USE a Sonnet subagent)**, **Smart-tier moments (USE `advisor()`)**), plus per-line `USE`-framed subagent dispatches and an Execution sketch. Use the same shape the file-time section uses — see SKILL.md § "Model & execution guidance" for the rendered example.
+   - If absent AND the project's `docs/project-board.md` does not have `- model-guidance: disabled` in `## Jared config`: generate a fresh evaluation in the standard shape — leading caveat (*"Tiers below classify the work — they do not prescribe dispatch. Use judgment at session-time; the wrap audit will ask you to evaluate that judgment honestly."*), then each acceptance criterion (and the issue summary) classified under tier headers (**Cheap-tier work**, **Standard-tier work**, **Smart-tier moments (USE `advisor()`)**), then an Execution sketch (inline subagent mentions only when the dispatch is genuinely load-bearing). Use the same shape the file-time section uses — see SKILL.md § "Model & execution guidance" for the rendered example.
    - If absent AND the kill switch is set: skip; load no guidance.
 
    When generated at start-time, the guidance is surfaced in step 8 as a labeled block (`Model & execution guidance (generated at start-time)`) so the user can confirm or amend before step 9.
@@ -89,16 +89,17 @@ Flow:
 
    ```
    Model & execution guidance (<from issue body | generated at start-time>):
-     Cheap-tier work (USE a Haiku subagent):
+     *Tiers below classify the work — they do not prescribe dispatch.
+      Use judgment at session-time; the wrap audit will ask you to evaluate
+      that judgment honestly.*
+     Cheap-tier work:
        - <bullet>
-     Standard-tier work (USE a Sonnet subagent):
+     Standard-tier work:
        - <bullet>
      Smart-tier moments (USE `advisor()`):
        - <bullet>
-     Subagent dispatches (USE these for the noted task):
-       - <bullet>
      Execution sketch:
-       1. <step>
+       1. <step — may name a subagent inline if the dispatch is genuinely load-bearing>
    ```
 
    When the kill switch is set, omit the guidance block entirely.

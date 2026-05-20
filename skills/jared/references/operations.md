@@ -109,28 +109,28 @@ gh api graphql --cache 1h -f query='
 
 ## Model & execution guidance — section + kill switch
 
-Every issue body filed through `/jared-file` carries a `## Model & execution guidance` H2 between `## Acceptance criteria` and `## Planning`. Four subsections, all required when the section is present:
+Every issue body filed through `/jared-file` carries a `## Model & execution guidance` H2 between `## Acceptance criteria` and `## Planning`. Three tier subsections + Execution sketch + a leading caveat:
 
 ```markdown
 ## Model & execution guidance
 
-**Cheap-tier work (USE a Haiku subagent):**
+*Tiers below classify the work — they do not prescribe dispatch. Use judgment at
+session-time; the wrap audit will ask you to evaluate that judgment honestly.*
+
+**Cheap-tier work:**
 - <bullet>
 
-**Standard-tier work (USE a Sonnet subagent):**
+**Standard-tier work:**
 - <bullet>
 
 **Smart-tier moments (USE `advisor()`):**
 - <bullet>
 
-**Subagent dispatches (USE these for the noted task):**
-- `agent-name` — USE to <do X>  (real Claude Code agents: Explore, general-purpose, claude-code-guide; `advisor()` for the senior reviewer pass)
-
 **Execution sketch:**
-1. <step>
+1. <step — name a subagent inline if the dispatch is genuinely load-bearing (e.g., `Explore` for a surface-map task that exceeds the parent session's read budget)>
 ```
 
-Headers are imperative (verb-led directives) — `Cheap-tier work (USE a Haiku subagent)`, not `Cheap (Haiku-class)`. The descriptive shape reads as a category and drifts out of context as the session grows; the imperative shape reads as an instruction and holds at dispatch time. Per-line subagent dispatches use the same `USE` framing. Use abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure. Full doctrine and rendered example in SKILL.md § "Model & execution guidance".
+Headers classify work, they do not prescribe dispatch — Cheap/Standard tier headers carry no `USE` directive because work size is unknown at file-time and operators correctly resize at session-time (per #162 audit: task-tier dispatch prescriptions held 23–43% worked-rate). Only the `advisor()` directive in Smart-tier is prescribed, because decision-point prescriptions hold regardless of work size (95% worked-rate). Use abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure. Full doctrine and rendered example in SKILL.md § "Model & execution guidance".
 
 **Two enforcement points:**
 
