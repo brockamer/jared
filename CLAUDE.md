@@ -107,3 +107,5 @@ Use `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared <subcommand>`. **Never har
 ## Versioning
 
 Semantic versioning in `.claude-plugin/plugin.json` and mirrored in `pyproject.toml`. Git tag `v<x.y.z>` per release. `pyproject.toml` configures dev tooling and pins venv deps but isn't published as a package — the version field exists for parity, not distribution. Check `.claude-plugin/plugin.json` for the current version rather than relying on this paragraph (which used to hardcode it).
+
+**Every tag push must be accompanied by a GitHub Release.** Use `gh release create v<x.y.z> --title "v<x.y.z> — <short description>" --notes "<body>"` immediately after `git push origin v<x.y.z>`. The release notes follow the v0.13.0+ format: `## What's changed` with `**Features** / **Bug fixes** / **Refactor** / **Doctrine**` sub-headings, each item ending with `(#<PR>)`; followed by `## Backward compatibility` (if relevant), `## Validation` (if relevant), and `## Upgrading` with the `/plugin update jared` + `/reload-plugins` block. A git tag alone is not enough — the GitHub Release is the public-facing artifact.
