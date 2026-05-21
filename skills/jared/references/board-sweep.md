@@ -171,3 +171,44 @@ Wait for sign-off before bulk changes. The sweep is advisory.
 ## When the sweep finds nothing
 
 Say so. "Swept, all clear" is a valid outcome and the user trusts you more for reporting it honestly than for inventing findings.
+
+## Doc-sync gate
+
+When a project's `docs/project-board.md` defines a `### Current-state
+operator docs` block, the sweep emits an advisory for each closed PR (last
+7 days by default; override with `--doc-sync-days`) that touched the
+configured code surface without also touching any of the listed docs.
+
+Config shape:
+
+````
+### Current-state operator docs
+
+- Docs: CLAUDE.md, docs/PRD.md, docs/architecture.md
+- Code surface: src/**
+````
+
+`Code surface` defaults to `src/**` when `Docs:` is set but `Code surface:`
+is absent. The block can be removed entirely to disable the check.
+
+### Pattern semantics
+
+Patterns are matched via Python's `fnmatch.fnmatchcase` with `**`
+rewritten to `*`. **`fnmatch`'s `*` crosses `/`**, so `*.md` matches
+`README.md`, `docs/PRD.md`, and `docs/architecture/diagrams/x.md` alike
+— you do not need `**/*.md`. To scope narrowly, use specific path
+prefixes:
+
+- `src/**` matches files under `src/` at any depth.
+- `docs/architecture/**` matches files under that directory.
+- `CLAUDE.md` matches only the top-level `CLAUDE.md`.
+
+This is the **opposite** of `pathlib.PurePath.match` semantics, where
+`*` does not cross `/`. If you're used to pathlib globs, double-check
+your patterns aren't accidentally over-matching.
+
+### Output
+
+The advisory line names the PR + closedAt date + the operator-docs list,
+so the operator can decide whether the change actually needs a doc
+update. The gate is soft — never blocks PR creation or merge.
