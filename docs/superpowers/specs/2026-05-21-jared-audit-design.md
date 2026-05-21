@@ -54,6 +54,20 @@ One sentence in the slash-command prompt:
 
 No state machine. Pacing is conversational discipline, not Python.
 
+## Optional advisor pass
+
+Between drafting a batch and showing it to the operator, the conversation MAY invoke `advisor()`. The advisor sees the full transcript (issue bodies, velocity block, drafted verdicts) and pressure-tests:
+
+- **Wrong-reason closes** — verdict doesn't match the issue's actual state.
+- **Missed supersede references** — a verdict closes work that another open issue already absorbs.
+- **Reshape proposals that drop load-bearing nuance** from the body.
+- **Date proposals miscalibrated to reality** — too aggressive *or* too lax against the velocity anchor.
+- **Close-comment drafts** that fail the trigger-condition / supersede / rationale minimum.
+
+The advisor returns either *confirm-and-proceed* or *specific revisions* the conversation makes before the operator ever sees the batch.
+
+**Opt-in.** The slash-command markdown documents when to invoke: recommended for batches containing 2+ closes or any milestone reshape; skippable for pure `leave-alone` + light-reframing batches. The point is to spend operator attention on the genuinely-hard calls, not on refuting model overreaches.
+
 ## Velocity-aware date heuristics
 
 Static `--age-days` thresholds drift wrong on a project that ships fast. "90 days old" feels generous on a project closing 2 items a month, but is ancient on one closing 15 a week. The action calibrates to recent reality:
@@ -110,6 +124,7 @@ Per #169, with these clarifications:
 - Open-dependent check runs before any `close-as-*` verdict (for issues: native blocked-by dependents that are still open). For a milestone `close` verdict, the equivalent check surfaces any open child issues belonging to the milestone.
 - Reshape verdicts produce preview-then-apply mutations the operator can edit or reject.
 - Calibration depth on item 1; batches of 3–5 thereafter.
+- Slash-command doctrine includes an optional `advisor()` pass between batch drafting and operator presentation; the doctrine documents recommended triggers (2+ closes, any milestone reshape).
 - Per-issue atomicity via existing atoms (batch-level atomicity explicitly out of scope).
 - Close comments non-empty by default; PII pre-flight on all drafts.
 - Post-run, the operator can point to a concrete delta (closed / reshaped / untouched).
