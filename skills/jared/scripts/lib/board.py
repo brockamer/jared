@@ -1052,15 +1052,7 @@ def fetch_blocked_by_edges(
         kwargs: dict[str, str] = {"o": owner, "r": name}
         if cursor:
             kwargs["c"] = cursor
-        raw = run_graphql(q, cache=cache, **kwargs)
-        # Guard against empty/malformed responses (transient gh failures, test defaults).
-        data = (
-            raw.get("data", {}).get("repository", {}).get("issues")
-            if isinstance(raw, dict)
-            else None
-        )
-        if data is None:
-            break
+        data = run_graphql(q, cache=cache, **kwargs)["data"]["repository"]["issues"]
         for node in data["nodes"]:
             result[node["number"]] = node["blockedBy"]["nodes"]
         if not data["pageInfo"]["hasNextPage"]:
