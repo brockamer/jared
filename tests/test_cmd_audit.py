@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -83,3 +84,37 @@ def test_compute_velocity_pr_duration(monkeypatch: pytest.MonkeyPatch) -> None:
     velocity = compute_velocity("brockamer/jared")
 
     assert velocity["median_pr_duration_days"] == 2.0
+
+
+def test_fetch_audit_window_count_returns_oldest_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--count N returns the N oldest open issues, oldest first."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+    from tests.conftest import write_minimal_board
+
+    write_minimal_board(tmp_path)
+    issues_payload = json.dumps(
+        [
+            {"number": 50, "title": "old", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
+             "labels": [], "milestone": None},
+            {"number": 51, "title": "older", "body": "...", "createdAt": "2025-12-15T00:00:00Z",
+             "labels": [], "milestone": None},
+            {"number": 52, "title": "newest", "body": "...", "createdAt": "2026-03-01T00:00:00Z",
+             "labels": [], "milestone": None},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue list": issues_payload,
+            "search issues": "[]",
+            "search prs": "[]",
+        },
+    )
+
+    board = Board.from_default(tmp_path)
+    result = fetch_audit_window(board, count=2)
+
+    assert [item["number"] for item in result["items"]] == [51, 50]
+    assert "velocity" in result

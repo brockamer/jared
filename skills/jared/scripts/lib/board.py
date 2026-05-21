@@ -1653,3 +1653,53 @@ def compute_velocity(
         "median_age_at_close": float(median(ages)) if ages else 0.0,
         "median_pr_duration_days": float(median(durations)) if durations else 0.0,
     }
+
+
+def fetch_audit_window(
+    board: Board,
+    *,
+    count: int | None = None,
+    age_days: int | None = None,
+    issues: list[int] | None = None,
+    entity_type: str = "issues",
+    cache: str | None = None,
+) -> dict[str, Any]:
+    """Fetch the audit working set + velocity block.
+
+    Exactly one of {count, age_days, issues} must be set when entity_type
+    includes issues. entity_type is "issues", "milestones", or "both".
+    Items are returned oldest-first. The top-level "velocity" key carries
+    the output of compute_velocity (used by the slash-command doctrine for
+    the date anchor formula and by callers omitting --age-days for the
+    default staleness threshold).
+    """
+    velocity = compute_velocity(board.repo, cache=cache)
+    items: list[dict[str, Any]] = []
+    milestones: list[dict[str, Any]] = []
+
+    if entity_type in ("issues", "both"):
+        raw = run_gh(
+            [
+                "issue", "list",
+                "--repo", board.repo,
+                "--state", "open",
+                "--limit", "500",
+                "--json", "number,title,body,createdAt,labels,milestone",
+            ],
+            cache=cache,
+        ) or []
+        raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
+        if issues is not None:
+            wanted = set(issues)
+            items = [i for i in raw_sorted if i["number"] in wanted]
+        elif count is not None:
+            items = raw_sorted[:count]
+        else:
+            # age_days handled in Task 2.2; for now treat None as count=10
+            items = raw_sorted[:count if count else 10]
+
+    return {
+        "items": items,
+        "milestones": milestones,
+        "velocity": velocity,
+    }
