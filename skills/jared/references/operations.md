@@ -151,6 +151,10 @@ The kill switch is doctrinal: `/jared-file` reads this bullet from `docs/project
 
 **Where the start-time evaluation lands.** Posted as a comment on the issue with header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`, using `jared comment <N> --body-file <path>`. The body is not retroactively amended — comments are append-only and durable, body edits are not. Subject to the standard pre-flight redaction.
 
+### `/jared-audit`
+
+Skeptical per-item accuracy audit. Fetches a working set (oldest-first issues, optionally milestones) with each item's open-dependents and a velocity block (recent closure rate + median age-at-close + median PR duration). The conversation runs a seven-question checklist per item, optionally invokes `advisor()` to pressure-test non-trivial batches before the operator sees them, and applies approved mutations via the existing atoms (`jared close`, `jared comment`, `jared set`) plus `gh api` for body / title / milestone changes. See `commands/jared-audit.md` for the full doctrine. The CLI side is just `jared audit fetch [--count N | --age-days N | --issues N,M,…] [--type issues|milestones|both]` — verdicts and mutation orchestration live in the conversational layer.
+
 ## Operations Jared doesn't wrap today
 
 These remain raw-gh territory; none are used often enough to pull into the CLI.
