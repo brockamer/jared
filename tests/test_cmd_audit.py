@@ -1,6 +1,7 @@
 """Unit tests for /jared-audit — velocity computation + window fetch + CLI."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 from pathlib import Path
 
@@ -118,3 +119,73 @@ def test_fetch_audit_window_count_returns_oldest_first(
 
     assert [item["number"] for item in result["items"]] == [51, 50]
     assert "velocity" in result
+
+
+def test_fetch_audit_window_age_days_filters_by_age(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--age-days N keeps items older than N days from today."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+    from tests.conftest import write_minimal_board
+
+    write_minimal_board(tmp_path)
+    now = dt.datetime.now(dt.UTC)
+    issues_payload = json.dumps(
+        [
+            {"number": 10, "title": "ancient", "body": "...",
+             "createdAt": (now - dt.timedelta(days=120)).isoformat(),
+             "labels": [], "milestone": None},
+            {"number": 11, "title": "stale", "body": "...",
+             "createdAt": (now - dt.timedelta(days=45)).isoformat(),
+             "labels": [], "milestone": None},
+            {"number": 12, "title": "fresh", "body": "...",
+             "createdAt": (now - dt.timedelta(days=5)).isoformat(),
+             "labels": [], "milestone": None},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue list": issues_payload, "search issues": "[]", "search prs": "[]"},
+    )
+
+    board = Board.from_default(tmp_path)
+    result = fetch_audit_window(board, age_days=30)
+
+    assert [item["number"] for item in result["items"]] == [10, 11]
+
+
+def test_fetch_audit_window_default_staleness_uses_velocity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Omitting count + age_days uses 2 * median_age_at_close (floor 14, ceiling 60)."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+    from tests.conftest import write_minimal_board
+
+    write_minimal_board(tmp_path)
+    now = dt.datetime.now(dt.UTC)
+    # Velocity: median age-at-close of 20 → threshold = 2*20 = 40 (within 14..60 band)
+    closed_payload = json.dumps(
+        [
+            {"number": 1, "createdAt": (now - dt.timedelta(days=20)).isoformat(),
+             "closedAt": now.isoformat()},
+        ]
+    )
+    issues_payload = json.dumps(
+        [
+            {"number": 10, "title": "older-than-40", "body": "...",
+             "createdAt": (now - dt.timedelta(days=50)).isoformat(),
+             "labels": [], "milestone": None},
+            {"number": 11, "title": "newer-than-40", "body": "...",
+             "createdAt": (now - dt.timedelta(days=30)).isoformat(),
+             "labels": [], "milestone": None},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue list": issues_payload, "search issues": closed_payload, "search prs": "[]"},
+    )
+
+    board = Board.from_default(tmp_path)
+    result = fetch_audit_window(board)
+
+    assert [item["number"] for item in result["items"]] == [10]
