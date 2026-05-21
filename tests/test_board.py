@@ -1529,6 +1529,17 @@ def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
 
     def fake_run_gh(args: list[str], *, cache: str | None = None) -> object:
         if args[0:2] == ["pr", "list"]:
+            assert "--search" in args, "list call must use --search to window by closedAt"
+            search_idx = args.index("--search")
+            search_value = args[search_idx + 1]
+            assert search_value.startswith("closed:>="), (
+                f"expected closed:>= search filter, got {search_value!r}"
+            )
+            # The date portion after `closed:>=` must be %Y-%m-%d (10 chars: YYYY-MM-DD)
+            date_part = search_value[len("closed:>="):]
+            assert len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-", (
+                f"expected YYYY-MM-DD cutoff, got {date_part!r}"
+            )
             return list_payload
         if args[0:2] == ["pr", "view"]:
             n = int(args[2])
