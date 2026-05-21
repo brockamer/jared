@@ -1239,6 +1239,50 @@ def fetch_recent_comments_batch(
     return result
 
 
+def fetch_recent_closed_prs_with_files(
+    repo: str, days: int = 7, *, cache: str | None = None
+) -> list[dict[str, Any]]:
+    """Return closed PRs from the last `days` days, each with its changed
+    file list. Used by sweep.check_doc_sync_gate (#163).
+
+    Two-stage: `gh pr list` enumerates by closedAt window, then
+    `gh pr view N --json files` per PR. The list endpoint doesn't expose
+    `files` reliably across gh versions; per-PR view is the robust path
+    and matches check_plan_spec_drift's idiom.
+
+    `cache` flows through to run_gh, opting into the on-disk snapshot cache.
+    """
+    cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    list_args = [
+        "pr", "list",
+        "--repo", repo,
+        "--state", "closed",
+        "--search", f"closed:>={cutoff}",
+        "--limit", "100",
+        "--json", "number,closedAt",
+    ]
+    prs = run_gh(list_args, cache=cache)
+    if not isinstance(prs, list):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for pr in prs:
+        number = pr.get("number")
+        closed_at = pr.get("closedAt")
+        if not isinstance(number, int):
+            continue
+        view_args = ["pr", "view", str(number), "--repo", repo, "--json", "files"]
+        try:
+            data = run_gh(view_args, cache=cache)
+        except GhInvocationError:
+            continue
+        files_raw = (data or {}).get("files", []) if isinstance(data, dict) else []
+        files = [f["path"] for f in files_raw if isinstance(f, dict) and "path" in f]
+        result.append({"number": number, "closedAt": closed_at, "files": files})
+
+    return result
+
+
 def graphql_budget() -> tuple[int, int, int]:
     """Return `(remaining, limit, reset_unix)` from `gh api rate_limit`.
 

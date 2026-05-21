@@ -1505,3 +1505,71 @@ def test_board_operator_docs_section_without_docs_bullet_is_disabled(tmp_path: P
     board = Board.from_path(board_md)
     assert board.operator_docs == []
     assert board.code_surface == []
+
+
+def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Helper fetches closed PRs from the last N days via gh and pairs each
+    with its changed-file list. PRs older than N days are excluded.
+
+    The helper is a thin orchestrator: it uses `gh pr list` to enumerate
+    closed PRs and `gh pr view N --json files` per-PR to get changed paths.
+    Tests assert the orchestration, not the gh wire format."""
+    from skills.jared.scripts.lib import board as board_mod
+
+    list_payload = [
+        {"number": 100, "closedAt": "2026-05-20T10:00:00Z"},
+        {"number": 99, "closedAt": "2026-05-18T10:00:00Z"},
+    ]
+    files_by_pr = {
+        100: [{"path": "src/foo.py"}, {"path": "CLAUDE.md"}],
+        99: [{"path": "src/bar.py"}],
+    }
+
+    def fake_run_gh(args: list[str], *, cache: str | None = None) -> object:
+        if args[0:2] == ["pr", "list"]:
+            return list_payload
+        if args[0:2] == ["pr", "view"]:
+            n = int(args[2])
+            return {"files": files_by_pr[n]}
+        raise AssertionError(f"unexpected gh args: {args}")
+
+    monkeypatch.setattr(board_mod, "run_gh", fake_run_gh)
+
+    result = board_mod.fetch_recent_closed_prs_with_files(
+        "brockamer/jared", days=7
+    )
+    assert result == [
+        {"number": 100, "closedAt": "2026-05-20T10:00:00Z", "files": ["src/foo.py", "CLAUDE.md"]},
+        {"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]},
+    ]
+
+
+def test_fetch_recent_closed_prs_swallows_per_pr_view_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If `gh pr view N` fails for one PR, the helper skips that PR and
+    continues with the rest — advisory-tier resilience."""
+    from skills.jared.scripts.lib import board as board_mod
+    from skills.jared.scripts.lib.board import GhInvocationError
+
+    list_payload = [
+        {"number": 100, "closedAt": "2026-05-20T10:00:00Z"},
+        {"number": 99, "closedAt": "2026-05-18T10:00:00Z"},
+    ]
+
+    def fake_run_gh(args: list[str], *, cache: str | None = None) -> object:
+        if args[0:2] == ["pr", "list"]:
+            return list_payload
+        if args[0:2] == ["pr", "view"]:
+            n = int(args[2])
+            if n == 100:
+                raise GhInvocationError("simulated network error")
+            return {"files": [{"path": "src/bar.py"}]}
+        raise AssertionError(f"unexpected gh args: {args}")
+
+    monkeypatch.setattr(board_mod, "run_gh", fake_run_gh)
+
+    result = board_mod.fetch_recent_closed_prs_with_files("brockamer/jared", days=7)
+    assert result == [{"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]}]
