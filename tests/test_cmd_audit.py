@@ -10,6 +10,19 @@ import pytest
 from skills.jared.scripts.lib.board import compute_velocity
 from tests.conftest import patch_gh_by_arg
 
+EMPTY_BLOCKED_BY_PAYLOAD = json.dumps(
+    {
+        "data": {
+            "repository": {
+                "issues": {
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [],
+                }
+            }
+        }
+    }
+)
+
 
 def test_compute_velocity_closure_count(monkeypatch: pytest.MonkeyPatch) -> None:
     """closures_last_14d reflects the count of issues returned by gh search."""
@@ -111,6 +124,7 @@ def test_fetch_audit_window_count_returns_oldest_first(
             "issue list": issues_payload,
             "search issues": "[]",
             "search prs": "[]",
+            "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
         },
     )
 
@@ -145,7 +159,12 @@ def test_fetch_audit_window_age_days_filters_by_age(
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"issue list": issues_payload, "search issues": "[]", "search prs": "[]"},
+        {
+            "issue list": issues_payload,
+            "search issues": "[]",
+            "search prs": "[]",
+            "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
+        },
     )
 
     board = Board.from_default(tmp_path)
@@ -182,7 +201,12 @@ def test_fetch_audit_window_default_staleness_uses_velocity(
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"issue list": issues_payload, "search issues": closed_payload, "search prs": "[]"},
+        {
+            "issue list": issues_payload,
+            "search issues": closed_payload,
+            "search prs": "[]",
+            "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
+        },
     )
 
     board = Board.from_default(tmp_path)
@@ -211,7 +235,12 @@ def test_fetch_audit_window_issues_returns_only_listed(
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"issue list": issues_payload, "search issues": "[]", "search prs": "[]"},
+        {
+            "issue list": issues_payload,
+            "search issues": "[]",
+            "search prs": "[]",
+            "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
+        },
     )
 
     board = Board.from_default(tmp_path)
