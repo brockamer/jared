@@ -1052,7 +1052,15 @@ def fetch_blocked_by_edges(
         kwargs: dict[str, str] = {"o": owner, "r": name}
         if cursor:
             kwargs["c"] = cursor
-        data = run_graphql(q, cache=cache, **kwargs)["data"]["repository"]["issues"]
+        raw = run_graphql(q, cache=cache, **kwargs)
+        # Guard against empty/malformed responses (transient gh failures, test defaults).
+        data = (
+            raw.get("data", {}).get("repository", {}).get("issues")
+            if isinstance(raw, dict)
+            else None
+        )
+        if data is None:
+            break
         for node in data["nodes"]:
             result[node["number"]] = node["blockedBy"]["nodes"]
         if not data["pageInfo"]["hasNextPage"]:
@@ -1709,6 +1717,17 @@ def fetch_audit_window(
                 if age >= threshold:
                     kept.append(i)
             items = kept
+
+    if items:
+        # Invert repo-wide blockedBy edges: who depends on each candidate?
+        edges = fetch_blocked_by_edges(board.repo, cache=cache)
+        dependents: dict[int, list[int]] = {}
+        for dependent_num, blocked_by in edges.items():
+            for blocker in blocked_by:
+                if blocker.get("state") == "OPEN":
+                    dependents.setdefault(blocker["number"], []).append(dependent_num)
+        for item in items:
+            item["open_dependents"] = sorted(dependents.get(item["number"], []))
 
     return {
         "items": items,
