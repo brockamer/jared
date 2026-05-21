@@ -534,3 +534,20 @@ def test_check_doc_sync_gate_honors_glob_patterns() -> None:
     findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
     assert len(findings) == 1
     assert "#104" in findings[0]
+
+
+def test_check_doc_sync_gate_tolerates_missing_files_key() -> None:
+    """A PR dict without a `files` key is silently skipped (defensive against
+    unexpected gh payloads). The check does not raise KeyError."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {"number": 106, "closedAt": "2026-05-20T10:00:00Z"},  # no `files` key
+    ]
+    operator_docs = ["CLAUDE.md"]
+    code_surface = ["src/**"]
+
+    findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
+    assert findings == []
