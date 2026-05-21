@@ -10,8 +10,10 @@ survives across sessions, weeks, and shifts in scope.
 > status lives in your head. **Jared makes the board the thing you
 > actually look at.**
 
-**New here?** Skip ahead to [Getting started](#getting-started) for the
-install + first-command walkthrough.
+**New here?** Skip ahead to [Getting started](#getting-started) for
+install and your first command. Once you're bootstrapped, the
+[first 15 minutes walkthrough](docs/getting-started.md) takes you
+through the full loop — file, start, comment, close, wrap.
 
 ---
 
@@ -339,6 +341,14 @@ populated example).
 > `docs/maintainers/project-board.md`, `PROJECT_BOARD.md`, and
 > `.github/project-board.md` — pass `--board <path>` if yours is
 > somewhere else.
+
+### Next: the loop
+
+The install reference above gets you to a working CLI. The
+[first 15 minutes walkthrough](docs/getting-started.md) takes you the
+rest of the way — file an issue, pull it into In Progress, add a
+Session note, close it, wrap the session. Do it once and the rest of
+the discipline (stage, groom, plans) becomes incremental.
 
 ---
 
