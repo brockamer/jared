@@ -45,6 +45,7 @@ import json
 import os
 import re
 import sys
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, cast
 
@@ -523,8 +524,8 @@ def check_doc_sync_gate(
 ) -> list[str]:
     """Flag closed PRs that touched code surface without touching any operator doc.
 
-    Each PR is a dict of {number, closedAt, files} from
-    fetch_recent_closed_prs_with_files. Glob matching uses fnmatchcase over
+    Each PR is a dict of {number, closedAt, files} matching the shape returned
+    by lib.board.fetch_recent_closed_prs_with_files. Glob matching uses fnmatchcase over
     `**`-expanded patterns: `src/**` matches `src/foo.py` and `src/a/b.py`.
 
     Returns one finding line per flagged PR. Empty operator_docs short-
@@ -557,23 +558,15 @@ def check_doc_sync_gate(
 def _matches_any(path: str, patterns: list[str]) -> bool:
     """fnmatchcase against patterns, with `**` treated as recursive wildcard.
 
-    fnmatch's `*` doesn't cross `/`. We rewrite `**` → `*` and additionally
-    match against the basename-collapsed form to handle `src/**` ⇒ src/x.py
-    AND src/a/b.py uniformly. Cheap and adequate for advisory gating.
+    We rewrite `**` → `*`; `fnmatch`'s `*` crosses `/`, so `src/*` already
+    matches `src/foo.py`, `src/a/b/c.py`, etc. This is the opposite of
+    `pathlib.PurePath.match` semantics — important to remember when reading
+    user-supplied patterns from `docs/project-board.md`.
     """
-    from fnmatch import fnmatchcase
-
     for raw in patterns:
-        # Treat ** as recursive — collapse to a single * for fnmatch.
         pat = raw.replace("**", "*")
         if fnmatchcase(path, pat):
             return True
-        # Also match if the leading directory of the pattern is a prefix of path.
-        # Handles `src/**` matching `src/a/b/c.py` without rewriting to globstar.
-        if "/" in raw:
-            prefix = raw.split("**", 1)[0].rstrip("/")
-            if prefix and (path == prefix or path.startswith(prefix + "/")):
-                return True
     return False
 
 
