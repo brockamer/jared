@@ -1599,3 +1599,58 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
         "    2. OR add the matched phrase to a tracked file if it's intentionally public.",
         file=f,
     )
+
+
+def compute_velocity(
+    repo: str,
+    *,
+    days: int = 14,
+    cache: str | None = None,
+) -> dict[str, Any]:
+    """Recent shipping cadence — count + median age-at-close + median PR duration.
+
+    `days` is the lookback window (default 14). Returns:
+      - closures_last_14d (int): count of issues closed in window
+      - median_age_at_close (float, days): created→closed for those issues
+      - median_pr_duration_days (float): created→merged for PRs in the same
+        window. Proxy for "time to ship" — used as the anchor for proposed
+        milestone due dates in /jared-audit. PR duration is a tighter signal
+        than issue creation→close (which folds in backlog dwell time).
+    """
+    from datetime import UTC, datetime, timedelta
+    from statistics import median
+
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
+    issues_args = [
+        "search", "issues",
+        "--repo", repo,
+        "--state", "closed",
+        "--search", f"closed:>={cutoff}",
+        "--json", "number,createdAt,closedAt",
+        "--limit", "100",
+    ]
+    closed = run_gh(issues_args, cache=cache) or []
+
+    prs_args = [
+        "search", "prs",
+        "--repo", repo,
+        "--state", "merged",
+        "--search", f"merged:>={cutoff}",
+        "--json", "number,createdAt,mergedAt",
+        "--limit", "100",
+    ]
+    merged = run_gh(prs_args, cache=cache) or []
+
+    def _days_between(start: str, end: str) -> float:
+        s = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        return (e - s).total_seconds() / 86400.0
+
+    ages = [_days_between(i["createdAt"], i["closedAt"]) for i in closed]
+    durations = [_days_between(p["createdAt"], p["mergedAt"]) for p in merged]
+
+    return {
+        "closures_last_14d": len(closed),
+        "median_age_at_close": float(median(ages)) if ages else 0.0,
+        "median_pr_duration_days": float(median(durations)) if durations else 0.0,
+    }
