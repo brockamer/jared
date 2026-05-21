@@ -516,6 +516,67 @@ def check_session_note_freshness(
     return findings
 
 
+def check_doc_sync_gate(
+    prs: list[dict[str, Any]],
+    operator_docs: list[str],
+    code_surface: list[str],
+) -> list[str]:
+    """Flag closed PRs that touched code surface without touching any operator doc.
+
+    Each PR is a dict of {number, closedAt, files} from
+    fetch_recent_closed_prs_with_files. Glob matching uses fnmatchcase over
+    `**`-expanded patterns: `src/**` matches `src/foo.py` and `src/a/b.py`.
+
+    Returns one finding line per flagged PR. Empty operator_docs short-
+    circuits — no operator-docs config means the check is disabled.
+    """
+    if not operator_docs:
+        return []
+
+    findings: list[str] = []
+    for pr in prs:
+        files = pr.get("files") or []
+        if not files:
+            continue
+        touched_code = any(_matches_any(f, code_surface) for f in files)
+        if not touched_code:
+            continue
+        touched_doc = any(_matches_any(f, operator_docs) for f in files)
+        if touched_doc:
+            continue
+        number = pr.get("number")
+        closed_at = (pr.get("closedAt") or "").split("T")[0]
+        docs_list = ", ".join(operator_docs)
+        findings.append(
+            f"PR #{number} closed {closed_at} touched code surface without an operator doc — "
+            f"review whether {docs_list} need an update"
+        )
+    return findings
+
+
+def _matches_any(path: str, patterns: list[str]) -> bool:
+    """fnmatchcase against patterns, with `**` treated as recursive wildcard.
+
+    fnmatch's `*` doesn't cross `/`. We rewrite `**` → `*` and additionally
+    match against the basename-collapsed form to handle `src/**` ⇒ src/x.py
+    AND src/a/b.py uniformly. Cheap and adequate for advisory gating.
+    """
+    from fnmatch import fnmatchcase
+
+    for raw in patterns:
+        # Treat ** as recursive — collapse to a single * for fnmatch.
+        pat = raw.replace("**", "*")
+        if fnmatchcase(path, pat):
+            return True
+        # Also match if the leading directory of the pattern is a prefix of path.
+        # Handles `src/**` matching `src/a/b/c.py` without rewriting to globstar.
+        if "/" in raw:
+            prefix = raw.split("**", 1)[0].rstrip("/")
+            if prefix and (path == prefix or path.startswith(prefix + "/")):
+                return True
+    return False
+
+
 # ---------- Main ----------
 
 
