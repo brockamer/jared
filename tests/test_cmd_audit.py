@@ -25,7 +25,7 @@ EMPTY_BLOCKED_BY_PAYLOAD = json.dumps(
 
 
 def test_compute_velocity_closure_count(monkeypatch: pytest.MonkeyPatch) -> None:
-    """closures_last_14d reflects the count of issues returned by gh issue list."""
+    """closures_in_window reflects the count of issues returned by gh issue list."""
     closed_issues = json.dumps(
         [
             {"number": 1, "createdAt": "2026-05-10T00:00:00Z", "closedAt": "2026-05-20T00:00:00Z"},
@@ -40,7 +40,7 @@ def test_compute_velocity_closure_count(monkeypatch: pytest.MonkeyPatch) -> None
 
     velocity = compute_velocity("brockamer/jared")
 
-    assert velocity["closures_last_14d"] == 3
+    assert velocity["closures_in_window"] == 3
 
 
 def test_compute_velocity_median_age_at_close(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,7 +70,8 @@ def test_compute_velocity_empty_windows_return_zero(monkeypatch: pytest.MonkeyPa
     velocity = compute_velocity("brockamer/jared")
 
     assert velocity == {
-        "closures_last_14d": 0,
+        "window_days": 14,
+        "closures_in_window": 0,
         "median_age_at_close": 0.0,
         "median_pr_duration_days": 0.0,
     }
