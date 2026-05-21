@@ -203,9 +203,12 @@ prefixes:
 - `docs/architecture/**` matches files under that directory.
 - `CLAUDE.md` matches only the top-level `CLAUDE.md`.
 
-This is the **opposite** of `pathlib.PurePath.match` semantics, where
-`*` does not cross `/`. If you're used to pathlib globs, double-check
-your patterns aren't accidentally over-matching.
+This differs from `pathlib.PurePath.match` on **prefix** patterns: under
+`fnmatch`, `src/*` matches `src/a/b/c.py`; under `pathlib`, the same
+pattern only matches files directly under `src/` because pathlib treats
+`*` as a single-segment wildcard. If you're used to pathlib globs and
+expect `src/*` to be shallow, write `src/**` (which is the convention
+this project parses) to be explicit.
 
 ### Output
 
