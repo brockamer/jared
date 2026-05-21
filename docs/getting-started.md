@@ -41,16 +41,21 @@ In Claude Code:
 /jared-file
 ```
 
-Jared will ask for a title, then a short body, and confirm the priority.
-Type something real — "fix typo in README" works. The slash command
-gathers the inputs and then calls the underlying CLI; the canonical
-output line is:
+Jared will gather the inputs — either by reading what you already
+described in your message, or by asking one short question at a time
+(title, body, priority). It also runs a duplicate check before filing,
+so if you already opened a similar issue, you'll see that match and be
+asked whether to proceed.
+
+Once it has what it needs, the slash command calls the underlying CLI.
+The output is two lines:
 
 ```
 OK: filed #<N> → Backlog, Priority=Medium
+URL: https://github.com/<you>/<repo>/issues/<N>
 ```
 
-Claude may format that summary a little differently in the chat — the
+Claude may render that summary a little differently in the chat — the
 load-bearing facts are the issue number, the Status column, and the
 Priority. Note the issue number for the next steps — pass it to CLI
 commands as digits only (e.g. `42`, not `#42`; in the shell, `#` starts
@@ -106,14 +111,17 @@ Jared will:
 - Load the latest Session note and any linked plan or spec.
 - Print a session-plan announcement and wait for your confirmation.
 
+The move happens *before* the announcement — by the time you see the
+plan, the board already shows the issue in In Progress. The confirmation
+step is about the work approach, not about the status change.
+
 (`/jared-file` populated the acceptance criteria template when you
 filed the issue, so a fresh-filed issue passes the pullable check on
 the first try. If you ever try to pull an issue with an empty body,
 Jared will pause and suggest reshaping it first — that's the
 discipline. You can fill it in, or tell Jared to proceed anyway.)
 
-Reply `go` (or amend the plan first) and the issue is yours.
-Status = In Progress, and the board reflects the pull.
+Reply `go` (or amend the plan first) and the work begins.
 
 ---
 
@@ -153,16 +161,20 @@ close it; the equivalent direct call is:
 jared close <your-issue-#>
 ```
 
-You'll see:
+You'll see two lines:
 
 ```
+OK: set Status=Done on issue #<N>
 OK: closed #<N>, Status=Done
 ```
 
-`jared close` verifies the board's Status column actually moved to Done.
-If GitHub's auto-move didn't fire for some reason, it sets Status=Done
-explicitly as a fallback. Either way, your issue lands in the Done
-column rather than sitting closed-but-stuck.
+The first line is `jared close`'s defense-in-depth — it *always* writes
+Status=Done explicitly, regardless of whether GitHub's project workflow
+fired the auto-move. (The auto-move has an observed false-positive mode
+where a post-close poll claims Status=Done while the field hasn't
+actually changed; the explicit write is the source of truth.) The
+second line is the final confirmation. Either way, your issue lands in
+the Done column rather than sitting closed-but-stuck.
 
 ---
 
@@ -181,12 +193,10 @@ and proposes plan archivals for anything completed. On the way out it
 regenerates the next-session prompt — the handoff you saw at the top of
 this session.
 
-Wrap is a slash-command-driven flow, so the exact rendering is whatever
-Claude prints back — typically a one-line per touched issue with the
-Session note that was appended, plus any archival proposals it wants you
-to confirm. For a walkthrough session it might say *"appended Session
-2026-05-20 note to #<N> (closed mid-session)"* and ask whether you want
-to file anything new.
+Wrap is a slash-command-driven flow, so the exact rendering varies with
+the session. Expect a short summary per touched issue (what was
+appended), plus any archival proposals Jared wants you to confirm
+before they apply. Read what it shows you and approve or amend.
 
 That's the loop: **file → start → comment → close → wrap.** Everything
 else in Jared — stage, groom, reshape, dependency graphs, bake tests —
