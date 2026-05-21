@@ -189,3 +189,34 @@ def test_fetch_audit_window_default_staleness_uses_velocity(
     result = fetch_audit_window(board)
 
     assert [item["number"] for item in result["items"]] == [10]
+
+
+def test_fetch_audit_window_issues_returns_only_listed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--issues N,M,O returns exactly those issues (oldest-first within the set)."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+    from tests.conftest import write_minimal_board
+
+    write_minimal_board(tmp_path)
+    issues_payload = json.dumps(
+        [
+            {"number": 50, "title": "a", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
+             "labels": [], "milestone": None},
+            {"number": 51, "title": "b", "body": "...", "createdAt": "2025-12-15T00:00:00Z",
+             "labels": [], "milestone": None},
+            {"number": 52, "title": "c", "body": "...", "createdAt": "2026-03-01T00:00:00Z",
+             "labels": [], "milestone": None},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"issue list": issues_payload, "search issues": "[]", "search prs": "[]"},
+    )
+
+    board = Board.from_default(tmp_path)
+    result = fetch_audit_window(board, issues=[52, 51])
+
+    # Oldest-first: 51 (Dec) then 52 (Mar). The explicit list narrows, but order
+    # comes from createdAt.
+    assert [item["number"] for item in result["items"]] == [51, 52]
