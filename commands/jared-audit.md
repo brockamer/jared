@@ -18,7 +18,7 @@ Flow:
 
    Window flags are mutually exclusive. Omit them all and the action selects items older than `2 × velocity.median_age_at_close` (clamped to [14, 60] days) — the default calibrates to recent shipping cadence, not a static threshold. `--type` defaults to `issues`; use `milestones` or `both` to include milestones.
 
-   Output is JSON: `items[]` (oldest-first; each carries `number`, `title`, `body`, `createdAt`, `labels`, `milestone`, `open_dependents`), `milestones[]` (when `--type` includes them: `number`, `title`, `due_on`, `open_issues`, `closed_issues`), and a top-level `velocity` block (`closures_last_14d`, `median_age_at_close`, `median_pr_duration_days`).
+   Output is JSON: `items[]` (oldest-first; each carries `number`, `title`, `body`, `createdAt`, `labels`, `milestone`, `open_dependents`), `milestones[]` (when `--type` includes them: `number`, `title`, `due_on`, `open_issues`, `closed_issues`), and a top-level `velocity` block (`window_days`, `closures_in_window`, `median_age_at_close`, `median_pr_duration_days`).
 
 2. **Run the seven-question skeptical checklist per item.** For each issue (or milestone):
 

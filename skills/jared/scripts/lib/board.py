@@ -1610,7 +1610,8 @@ def compute_velocity(
     """Recent shipping cadence — count + median age-at-close + median PR duration.
 
     `days` is the lookback window (default 14). Returns:
-      - closures_last_14d (int): count of issues closed in window
+      - window_days (int): the lookback window the caller asked for
+      - closures_in_window (int): count of issues closed in window
       - median_age_at_close (float, days): created→closed for those issues
       - median_pr_duration_days (float): created→merged for PRs in the same
         window. Proxy for "time to ship" — used as the anchor for proposed
@@ -1649,7 +1650,8 @@ def compute_velocity(
     durations = [_days_between(p["createdAt"], p["mergedAt"]) for p in merged]
 
     return {
-        "closures_last_14d": len(closed),
+        "window_days": days,
+        "closures_in_window": len(closed),
         "median_age_at_close": float(median(ages)) if ages else 0.0,
         "median_pr_duration_days": float(median(durations)) if durations else 0.0,
     }
