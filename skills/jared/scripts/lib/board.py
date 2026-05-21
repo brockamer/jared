@@ -1621,7 +1621,7 @@ def compute_velocity(
 
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     issues_args = [
-        "search", "issues",
+        "issue", "list",
         "--repo", repo,
         "--state", "closed",
         "--search", f"closed:>={cutoff}",
@@ -1631,7 +1631,7 @@ def compute_velocity(
     closed = run_gh(issues_args, cache=cache) or []
 
     prs_args = [
-        "search", "prs",
+        "pr", "list",
         "--repo", repo,
         "--state", "merged",
         "--search", f"merged:>={cutoff}",
