@@ -62,6 +62,13 @@ class Board:
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
     session_handoff_prompt: str = "ask"
     session_start_checks: list[str] = field(default_factory=list)
+    # Optional "current-state operator docs" config — populated from the
+    # `### Current-state operator docs` block in docs/project-board.md.
+    # Both lists empty = check disabled (no block, or block lacks `Docs:`).
+    # If `Docs:` is present but `Code surface:` is absent, code_surface
+    # defaults to ['src/**']. See sweep.check_doc_sync_gate (#163).
+    operator_docs: list[str] = field(default_factory=list)
+    code_surface: list[str] = field(default_factory=list)
     # Cached `gh project item-list` result, populated on first board_items()
     # call and reused for the lifetime of this instance. None means uncached.
     _items: list[dict[str, Any]] | None = field(default=None, repr=False)
@@ -179,6 +186,7 @@ class Board:
         field_ids, field_options = cls._parse_field_blocks(text)
         session_handoff_prompt = cls._parse_jared_config(text).get("session-handoff-prompt", "ask")
         session_start_checks = cls._parse_session_start_checks(text)
+        operator_docs, code_surface = cls._parse_operator_docs(text)
 
         return cls(
             project_number=project_number_val,
@@ -190,6 +198,8 @@ class Board:
             _field_options=field_options,
             session_handoff_prompt=session_handoff_prompt,
             session_start_checks=session_start_checks,
+            operator_docs=operator_docs,
+            code_surface=code_surface,
             _raw_doc=text,
         )
 
@@ -281,6 +291,50 @@ class Board:
             if body:
                 checks.append(body)
         return checks
+
+    @staticmethod
+    def _parse_operator_docs(text: str) -> tuple[list[str], list[str]]:
+        """Parse the optional `### Current-state operator docs` block.
+
+        Two bullets supported:
+            - Docs: comma-separated list of doc paths/globs
+            - Code surface: comma-separated list of code-path globs
+
+        Returns (operator_docs, code_surface). When the section is absent OR
+        present-but-missing-`Docs:`, both lists are empty (check disabled).
+        When `Docs:` is present and `Code surface:` is absent, code_surface
+        defaults to ['src/**'].
+
+        Section ends at next ### or ## heading or end-of-file — same idiom as
+        the other optional-section parsers.
+        """
+        section_re = re.compile(
+            r"^###\s+Current-state operator docs\s*$(?P<body>.*?)(?=^#{2,3}\s|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = section_re.search(text)
+        if not match:
+            return [], []
+
+        body = match.group("body")
+
+        docs_re = re.compile(r"^\s*-\s*Docs:\s*(?P<list>.+?)\s*$", re.MULTILINE)
+        docs_match = docs_re.search(body)
+        if not docs_match:
+            # Section present but Docs: bullet missing — treat as disabled.
+            return [], []
+        docs = [d.strip() for d in docs_match.group("list").split(",")]
+        docs = [d for d in docs if d]
+
+        surface_re = re.compile(r"^\s*-\s*Code surface:\s*(?P<list>.+?)\s*$", re.MULTILINE)
+        surface_match = surface_re.search(body)
+        if surface_match:
+            surface = [s.strip() for s in surface_match.group("list").split(",")]
+            surface = [s for s in surface if s]
+        else:
+            surface = ["src/**"]
+
+        return docs, surface
 
     def field_id(self, name: str) -> str:
         if name not in self._field_ids:
@@ -1182,6 +1236,51 @@ def fetch_recent_comments_batch(
             continue
         nodes = issue_data.get("comments", {}).get("nodes", []) or []
         result[n] = nodes
+    return result
+
+
+def fetch_recent_closed_prs_with_files(
+    repo: str, days: int = 7
+) -> list[dict[str, Any]]:
+    """Return closed PRs from the last `days` days, each with its changed
+    file list. Used by sweep.check_doc_sync_gate (#163).
+
+    Two-stage: `gh pr list` enumerates by closedAt window, then
+    `gh pr view N --json files` per PR. The list endpoint doesn't expose
+    `files` reliably across gh versions; per-PR view is the robust path
+    and matches check_plan_spec_drift's idiom.
+
+    N+1 in PR count — each PR triggers a per-PR `gh pr view`. Acceptable at
+    typical project weekly cadence; busier projects may want a graphql rewrite.
+    """
+    cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    list_args = [
+        "pr", "list",
+        "--repo", repo,
+        "--state", "closed",
+        "--search", f"closed:>={cutoff}",
+        "--limit", "100",
+        "--json", "number,closedAt",
+    ]
+    prs = run_gh(list_args)
+    if not isinstance(prs, list):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for pr in prs:
+        number = pr.get("number")
+        closed_at = pr.get("closedAt")
+        if not isinstance(number, int):
+            continue
+        view_args = ["pr", "view", str(number), "--repo", repo, "--json", "files"]
+        try:
+            data = run_gh(view_args)
+        except GhInvocationError:
+            continue
+        files_raw = (data or {}).get("files", []) if isinstance(data, dict) else []
+        files = [f["path"] for f in files_raw if isinstance(f, dict) and "path" in f]
+        result.append({"number": number, "closedAt": closed_at, "files": files})
+
     return result
 
 
