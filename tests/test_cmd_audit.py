@@ -336,3 +336,37 @@ def test_fetch_audit_window_milestones_returns_open_milestones(
     assert [m["title"] for m in result["milestones"]] == ["v0.21.0", "v1.0.0"]
     assert result["milestones"][0]["open_issues"] == 5
     assert result["items"] == []
+
+
+def test_cli_audit_fetch_count_emits_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`jared audit fetch --count 1` prints a JSON blob with items + velocity to stdout."""
+    from tests.conftest import import_cli, write_minimal_board
+
+    write_minimal_board(tmp_path)
+    issues_payload = json.dumps(
+        [
+            {"number": 50, "title": "a", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
+             "labels": [], "milestone": None},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue list": issues_payload,
+            "search issues": "[]",
+            "search prs": "[]",
+            "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
+        },
+    )
+
+    monkeypatch.chdir(tmp_path)
+    cli = import_cli()
+    rc = cli.main(["audit", "fetch", "--count", "1"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["items"][0]["number"] == 50
+    assert "velocity" in payload
