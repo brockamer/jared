@@ -1408,3 +1408,179 @@ def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) ->
     # option IDs land in `_field_options`, not the config dict.
     assert board._field_options.get("Status", {}).get("Backlog") == "0369b485"
     assert board._field_options.get("Status", {}).get("Done") == "727e952b"
+
+
+def test_board_parses_operator_docs_section(tmp_path: Path) -> None:
+    """A `### Current-state operator docs` block with both bullets populates
+    `operator_docs` and `code_surface` on the Board dataclass."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Docs: CLAUDE.md, docs/PRD.md, docs/architecture.md
+        - Code surface: src/**, lib/**
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == ["CLAUDE.md", "docs/PRD.md", "docs/architecture.md"]
+    assert board.code_surface == ["src/**", "lib/**"]
+
+
+def test_board_operator_docs_defaults_code_surface_when_bullet_missing(tmp_path: Path) -> None:
+    """`Docs:` bullet present but `Code surface:` bullet absent — default
+    code_surface to ['src/**']. Lets projects opt into the check minimally."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Docs: CLAUDE.md
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == ["CLAUDE.md"]
+    assert board.code_surface == ["src/**"]
+
+
+def test_board_operator_docs_defaults_empty_when_section_absent(tmp_path: Path) -> None:
+    """No `### Current-state operator docs` block at all → both fields empty,
+    which the consumer treats as 'check disabled'."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == []
+    assert board.code_surface == []
+
+
+def test_board_operator_docs_section_without_docs_bullet_is_disabled(tmp_path: Path) -> None:
+    """Section present but `Docs:` bullet absent → both fields empty (check
+    disabled). Robust to partial config — no exception, no surprise default."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Code surface: src/**
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == []
+    assert board.code_surface == []
+
+
+def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Helper fetches closed PRs from the last N days via gh and pairs each
+    with its changed-file list. PRs older than N days are excluded.
+
+    The helper is a thin orchestrator: it uses `gh pr list` to enumerate
+    closed PRs and `gh pr view N --json files` per-PR to get changed paths.
+    Tests assert the orchestration, not the gh wire format."""
+    from skills.jared.scripts.lib import board as board_mod
+
+    list_payload = [
+        {"number": 100, "closedAt": "2026-05-20T10:00:00Z"},
+        {"number": 99, "closedAt": "2026-05-18T10:00:00Z"},
+    ]
+    files_by_pr = {
+        100: [{"path": "src/foo.py"}, {"path": "CLAUDE.md"}],
+        99: [{"path": "src/bar.py"}],
+    }
+
+    def fake_run_gh(args: list[str], *, cache: str | None = None) -> object:
+        if args[0:2] == ["pr", "list"]:
+            assert "--search" in args, "list call must use --search to window by closedAt"
+            search_idx = args.index("--search")
+            search_value = args[search_idx + 1]
+            assert search_value.startswith("closed:>="), (
+                f"expected closed:>= search filter, got {search_value!r}"
+            )
+            # The date portion after `closed:>=` must be %Y-%m-%d (10 chars: YYYY-MM-DD)
+            date_part = search_value[len("closed:>="):]
+            assert len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-", (
+                f"expected YYYY-MM-DD cutoff, got {date_part!r}"
+            )
+            return list_payload
+        if args[0:2] == ["pr", "view"]:
+            n = int(args[2])
+            return {"files": files_by_pr[n]}
+        raise AssertionError(f"unexpected gh args: {args}")
+
+    monkeypatch.setattr(board_mod, "run_gh", fake_run_gh)
+
+    result = board_mod.fetch_recent_closed_prs_with_files(
+        "brockamer/jared", days=7
+    )
+    assert result == [
+        {"number": 100, "closedAt": "2026-05-20T10:00:00Z", "files": ["src/foo.py", "CLAUDE.md"]},
+        {"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]},
+    ]
+
+
+def test_fetch_recent_closed_prs_swallows_per_pr_view_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If `gh pr view N` fails for one PR, the helper skips that PR and
+    continues with the rest — advisory-tier resilience."""
+    from skills.jared.scripts.lib import board as board_mod
+    from skills.jared.scripts.lib.board import GhInvocationError
+
+    list_payload = [
+        {"number": 100, "closedAt": "2026-05-20T10:00:00Z"},
+        {"number": 99, "closedAt": "2026-05-18T10:00:00Z"},
+    ]
+
+    def fake_run_gh(args: list[str], *, cache: str | None = None) -> object:
+        if args[0:2] == ["pr", "list"]:
+            return list_payload
+        if args[0:2] == ["pr", "view"]:
+            n = int(args[2])
+            if n == 100:
+                raise GhInvocationError("simulated network error")
+            return {"files": [{"path": "src/bar.py"}]}
+        raise AssertionError(f"unexpected gh args: {args}")
+
+    monkeypatch.setattr(board_mod, "run_gh", fake_run_gh)
+
+    result = board_mod.fetch_recent_closed_prs_with_files("brockamer/jared", days=7)
+    assert result == [{"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]}]

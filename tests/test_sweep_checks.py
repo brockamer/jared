@@ -427,3 +427,127 @@ def test_format_closed_not_done_line_includes_propose_command() -> None:
     assert "jared set 92 Status Done" in line
     assert "[Backlog]" in line
     assert "Stuck" in line
+
+
+def test_check_doc_sync_gate_flags_code_only_pr() -> None:
+    """A closed PR that touched the project's code surface (src/**) without
+    touching any operator doc emits an advisory line naming the PR + the
+    untouched doc list."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 100,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "files": ["src/foo.py", "tests/test_foo.py"],
+        },
+    ]
+    operator_docs = ["CLAUDE.md", "docs/PRD.md"]
+    code_surface = ["src/**"]
+
+    findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
+    assert len(findings) == 1
+    assert "#100" in findings[0]
+    assert "CLAUDE.md" in findings[0] or "docs/PRD.md" in findings[0]
+
+
+def test_check_doc_sync_gate_no_finding_when_both_touched() -> None:
+    """A closed PR that touched both code surface and an operator doc is
+    correctly synced — no advisory."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 101,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "files": ["src/foo.py", "CLAUDE.md"],
+        },
+    ]
+    operator_docs = ["CLAUDE.md", "docs/PRD.md"]
+    code_surface = ["src/**"]
+
+    findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
+    assert findings == []
+
+
+def test_check_doc_sync_gate_no_finding_when_only_doc_touched() -> None:
+    """A docs-only PR (no code-surface paths) is not flagged. The gate fires
+    only when code was touched without a corresponding doc update."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 102,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "files": ["docs/PRD.md", "README.md"],
+        },
+    ]
+    operator_docs = ["CLAUDE.md", "docs/PRD.md"]
+    code_surface = ["src/**"]
+
+    findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
+    assert findings == []
+
+
+def test_check_doc_sync_gate_skips_when_operator_docs_empty() -> None:
+    """Empty operator_docs (block absent on this project's convention doc)
+    short-circuits the check — never iterates PRs."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {"number": 103, "closedAt": "2026-05-20T10:00:00Z", "files": ["src/foo.py"]},
+    ]
+    findings = sweep.check_doc_sync_gate(prs, operator_docs=[], code_surface=[])
+    assert findings == []
+
+
+def test_check_doc_sync_gate_honors_glob_patterns() -> None:
+    """Globs in both lists are matched via fnmatch. `lib/**` matches `lib/foo.py`
+    and `lib/sub/bar.py`; `docs/architecture/**` matches files under that dir."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 104,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "files": ["lib/sub/bar.py"],
+        },
+        {
+            "number": 105,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "files": ["lib/sub/baz.py", "docs/architecture/diagrams/x.md"],
+        },
+    ]
+    operator_docs = ["docs/architecture/**", "CLAUDE.md"]
+    code_surface = ["lib/**"]
+
+    findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
+    assert len(findings) == 1
+    assert "#104" in findings[0]
+
+
+def test_check_doc_sync_gate_tolerates_missing_files_key() -> None:
+    """A PR dict without a `files` key is silently skipped (defensive against
+    unexpected gh payloads). The check does not raise KeyError."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {"number": 106, "closedAt": "2026-05-20T10:00:00Z"},  # no `files` key
+    ]
+    operator_docs = ["CLAUDE.md"]
+    code_surface = ["src/**"]
+
+    findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
+    assert findings == []
