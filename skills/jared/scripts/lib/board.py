@@ -1617,10 +1617,9 @@ def compute_velocity(
         milestone due dates in /jared-audit. PR duration is a tighter signal
         than issue creation→close (which folds in backlog dwell time).
     """
-    from datetime import UTC, datetime, timedelta
     from statistics import median
 
-    cutoff = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     issues_args = [
         "search", "issues",
         "--repo", repo,
@@ -1642,8 +1641,8 @@ def compute_velocity(
     merged = run_gh(prs_args, cache=cache) or []
 
     def _days_between(start: str, end: str) -> float:
-        s = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        s = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+        e = dt.datetime.fromisoformat(end.replace("Z", "+00:00"))
         return (e - s).total_seconds() / 86400.0
 
     ages = [_days_between(i["createdAt"], i["closedAt"]) for i in closed]
