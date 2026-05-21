@@ -26,3 +26,60 @@ def test_compute_velocity_closure_count(monkeypatch: pytest.MonkeyPatch) -> None
     velocity = compute_velocity("brockamer/jared")
 
     assert velocity["closures_last_14d"] == 3
+
+
+def test_compute_velocity_median_age_at_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """median_age_at_close = median of (closedAt - createdAt) across closed issues."""
+    closed_issues = json.dumps(
+        [
+            # 10 days, 4 days, 17 days → median 10
+            {"number": 1, "createdAt": "2026-05-10T00:00:00Z", "closedAt": "2026-05-20T00:00:00Z"},
+            {"number": 2, "createdAt": "2026-05-15T00:00:00Z", "closedAt": "2026-05-19T00:00:00Z"},
+            {"number": 3, "createdAt": "2026-05-01T00:00:00Z", "closedAt": "2026-05-18T00:00:00Z"},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"search issues": closed_issues, "search prs": "[]"},
+    )
+
+    velocity = compute_velocity("brockamer/jared")
+
+    assert velocity["median_age_at_close"] == 10.0
+
+
+def test_compute_velocity_empty_windows_return_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty closure / merge windows produce zeros, not crashes."""
+    patch_gh_by_arg(monkeypatch, {"search issues": "[]", "search prs": "[]"})
+
+    velocity = compute_velocity("brockamer/jared")
+
+    assert velocity == {
+        "closures_last_14d": 0,
+        "median_age_at_close": 0.0,
+        "median_pr_duration_days": 0.0,
+    }
+
+
+def test_compute_velocity_pr_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """median_pr_duration_days = median of (mergedAt - createdAt) across PRs."""
+    closed_issues = "[]"
+    merged_prs = json.dumps(
+        [
+            # 2 days, 1 day, 4 days → median 2
+            {"number": 100, "createdAt": "2026-05-18T00:00:00Z",
+             "mergedAt": "2026-05-20T00:00:00Z"},
+            {"number": 101, "createdAt": "2026-05-19T00:00:00Z",
+             "mergedAt": "2026-05-20T00:00:00Z"},
+            {"number": 102, "createdAt": "2026-05-15T00:00:00Z",
+             "mergedAt": "2026-05-19T00:00:00Z"},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"search issues": closed_issues, "search prs": merged_prs},
+    )
+
+    velocity = compute_velocity("brockamer/jared")
+
+    assert velocity["median_pr_duration_days"] == 2.0
