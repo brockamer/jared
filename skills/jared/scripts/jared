@@ -246,6 +246,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ties_p.set_defaults(func=_cmd_ties)
 
+    audit_p = sub.add_parser(
+        "audit",
+        help="Subcommands for /jared-audit (fetch the audit working set).",
+    )
+    audit_sub = audit_p.add_subparsers(dest="audit_command", required=True)
+    audit_fetch = audit_sub.add_parser(
+        "fetch",
+        help="Emit the audit working set (issues + milestones + velocity) as JSON.",
+    )
+    group = audit_fetch.add_mutually_exclusive_group()
+    group.add_argument("--count", type=int, help="Take the oldest N items.")
+    group.add_argument("--age-days", type=int, help="Items older than N days.")
+    group.add_argument(
+        "--issues",
+        type=lambda s: [int(n.strip()) for n in s.split(",")],
+        help="Comma-separated explicit issue numbers.",
+    )
+    audit_fetch.add_argument(
+        "--type",
+        choices=["issues", "milestones", "both"],
+        default="issues",
+        dest="entity_type",
+    )
+    audit_fetch.add_argument("--cache", help="gh cache duration, e.g. '60s'.")
+    audit_fetch.set_defaults(func=_cmd_audit_fetch)
+
     return parser
 
 
@@ -962,6 +988,22 @@ def _cmd_ties(args: argparse.Namespace) -> int:
 
     if output:
         print(output)
+    return 0
+
+
+def _cmd_audit_fetch(args: argparse.Namespace) -> int:
+    from lib.board import fetch_audit_window  # type: ignore[import-not-found]
+
+    board = _load_board(args.board)
+    result = fetch_audit_window(
+        board,
+        count=args.count,
+        age_days=args.age_days,
+        issues=args.issues,
+        entity_type=args.entity_type,
+        cache=args.cache,
+    )
+    print(json.dumps(result, indent=2, default=str))
     return 0
 
 

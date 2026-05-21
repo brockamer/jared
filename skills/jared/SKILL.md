@@ -195,6 +195,9 @@ Run the sweep (`scripts/sweep.py` for the mechanical pass, `references/board-swe
 - A week has passed since the last sweep
 - You spot drift
 - After a major close (e.g., milestone shipped)
+- Backlog has aged (oldest items 60+ days untouched) → trigger `/jared-audit`
+- About to pull from a Backlog item that hasn't been touched in weeks → trigger `/jared-audit --issues <N>` for a single-item accuracy check
+- Reviewing a milestone before its due date → trigger `/jared-audit --type milestones`
 
 **Doc-sync gate.** If a project's `docs/project-board.md` includes a
 `### Current-state operator docs` block, `jared groom` / `sweep.py` will
@@ -342,6 +345,7 @@ Triggers handle most invocations. Slash commands exist for explicit, guaranteed 
 - **`/jared-file`** — guided issue filing. Delegates to `jared file` (Tier 2) which creates the issue, adds it to the board, sets Priority + Status + any extra single-select fields, and verifies — killing the two-step footgun.
 - **`/jared-start <issue-ref>`** — begin work: move to In Progress, load context, announce the session plan.
 - **`/jared-wrap`** — end session: Session notes, drift reconciliation, discovered-scope filing, plan archival proposals.
+- **`/jared-audit`** — Skeptical kanban-manager audit. Walks the backlog oldest-first, runs a seven-question per-item checklist (necessity, scope realism, YAGNI, antipattern, framing accuracy, dependency edges, calibration), produces operator-approved close / reshape / leave-alone verdicts. Velocity-aware date heuristics so proposed milestone dates calibrate to recent shipping cadence. Use when the backlog has aged, when reviewing a body of work before a milestone close, or when the operator wants confidence before pulling from old items.
 - **`/jared-groom`** — routine sweep: metadata, WIP, aging, blocked, pullable check, plan/spec drift, label hygiene. Proposes, you approve.
 - **`/jared-reshape`** — structural review: shape, phasing, milestones, dependency graph, long-horizon arc. Replaces the kickoff-prompt pattern.
 - **`/jared-init`** — bootstrap: introspect a project's fields, write `docs/project-board.md`, optionally create missing fields.
