@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from . import cache
 
@@ -1599,3 +1599,147 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
         "    2. OR add the matched phrase to a tracked file if it's intentionally public.",
         file=f,
     )
+
+
+def compute_velocity(
+    repo: str,
+    *,
+    days: int = 14,
+    cache: str | None = None,
+) -> dict[str, Any]:
+    """Recent shipping cadence — count + median age-at-close + median PR duration.
+
+    `days` is the lookback window (default 14). Returns:
+      - window_days (int): the lookback window the caller asked for
+      - closures_in_window (int): count of issues closed in window
+      - median_age_at_close (float, days): created→closed for those issues
+      - median_pr_duration_days (float): created→merged for PRs in the same
+        window. Proxy for "time to ship" — used as the anchor for proposed
+        milestone due dates in /jared-audit. PR duration is a tighter signal
+        than issue creation→close (which folds in backlog dwell time).
+    """
+    from statistics import median
+
+    cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    issues_args = [
+        "issue", "list",
+        "--repo", repo,
+        "--state", "closed",
+        "--search", f"closed:>={cutoff}",
+        "--json", "number,createdAt,closedAt",
+        "--limit", "100",
+    ]
+    closed = run_gh(issues_args, cache=cache) or []
+
+    prs_args = [
+        "pr", "list",
+        "--repo", repo,
+        "--state", "merged",
+        "--search", f"merged:>={cutoff}",
+        "--json", "number,createdAt,mergedAt",
+        "--limit", "100",
+    ]
+    merged = run_gh(prs_args, cache=cache) or []
+
+    def _days_between(start: str, end: str) -> float:
+        s = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+        e = dt.datetime.fromisoformat(end.replace("Z", "+00:00"))
+        return (e - s).total_seconds() / 86400.0
+
+    ages = [_days_between(i["createdAt"], i["closedAt"]) for i in closed]
+    durations = [_days_between(p["createdAt"], p["mergedAt"]) for p in merged]
+
+    return {
+        "window_days": days,
+        "closures_in_window": len(closed),
+        "median_age_at_close": float(median(ages)) if ages else 0.0,
+        "median_pr_duration_days": float(median(durations)) if durations else 0.0,
+    }
+
+
+def fetch_audit_window(
+    board: Board,
+    *,
+    count: int | None = None,
+    age_days: int | None = None,
+    issues: list[int] | None = None,
+    entity_type: Literal["issues", "milestones", "both"] = "issues",
+    cache: str | None = None,
+) -> dict[str, Any]:
+    """Fetch the audit working set + velocity block.
+
+    Exactly one of {count, age_days, issues} must be set when entity_type
+    includes issues. entity_type is "issues", "milestones", or "both".
+    Items are returned oldest-first. The top-level "velocity" key carries
+    the output of compute_velocity (used by the slash-command doctrine for
+    the date anchor formula and by callers omitting --age-days for the
+    default staleness threshold).
+    """
+    velocity = compute_velocity(board.repo, cache=cache)
+    items: list[dict[str, Any]] = []
+    milestones: list[dict[str, Any]] = []
+
+    if entity_type in ("issues", "both"):
+        raw = run_gh(
+            [
+                "issue", "list",
+                "--repo", board.repo,
+                "--state", "open",
+                "--limit", "500",
+                "--json", "number,title,body,createdAt,labels,milestone",
+            ],
+            cache=cache,
+        ) or []
+        raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
+        if issues is not None:
+            wanted = set(issues)
+            items = [i for i in raw_sorted if i["number"] in wanted]
+        elif count is not None:
+            items = raw_sorted[:count]
+        else:
+            # age_days mode (explicit) OR default-staleness mode (omitted).
+            if age_days is None:
+                # Default: 2 * median_age_at_close, clamped to [14, 60].
+                threshold = max(14.0, min(60.0, 2.0 * velocity["median_age_at_close"]))
+            else:
+                threshold = float(age_days)
+            now = dt.datetime.now(dt.UTC)
+            kept = []
+            for i in raw_sorted:
+                created = dt.datetime.fromisoformat(i["createdAt"].replace("Z", "+00:00"))
+                age = (now - created).total_seconds() / 86400.0
+                if age >= threshold:
+                    kept.append(i)
+            items = kept
+
+    if entity_type in ("milestones", "both"):
+        owner, name = board.repo.split("/", 1)
+        milestones = run_gh(
+            [
+                "api",
+                f"/repos/{owner}/{name}/milestones",
+                "--paginate",
+                "-X", "GET",
+                "-f", "state=open",
+                "-f", "sort=due_on",
+                "-f", "direction=asc",
+            ],
+            cache=cache,
+        ) or []
+
+    if items:
+        # Invert repo-wide blockedBy edges: who depends on each candidate?
+        edges = fetch_blocked_by_edges(board.repo, cache=cache)
+        dependents: dict[int, list[int]] = {}
+        for dependent_num, blocked_by in edges.items():
+            for blocker in blocked_by:
+                if blocker.get("state") == "OPEN":
+                    dependents.setdefault(blocker["number"], []).append(dependent_num)
+        for item in items:
+            item["open_dependents"] = sorted(dependents.get(item["number"], []))
+
+    return {
+        "items": items,
+        "milestones": milestones,
+        "velocity": velocity,
+    }
