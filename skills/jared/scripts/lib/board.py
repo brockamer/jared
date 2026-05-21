@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from . import cache
 
@@ -1661,7 +1661,7 @@ def fetch_audit_window(
     count: int | None = None,
     age_days: int | None = None,
     issues: list[int] | None = None,
-    entity_type: str = "issues",
+    entity_type: Literal["issues", "milestones", "both"] = "issues",
     cache: str | None = None,
 ) -> dict[str, Any]:
     """Fetch the audit working set + velocity block.
@@ -1695,8 +1695,20 @@ def fetch_audit_window(
         elif count is not None:
             items = raw_sorted[:count]
         else:
-            # age_days handled in Task 2.2; for now treat None as count=10
-            items = raw_sorted[:count if count else 10]
+            # age_days mode (explicit) OR default-staleness mode (omitted).
+            if age_days is None:
+                # Default: 2 * median_age_at_close, clamped to [14, 60].
+                threshold = max(14.0, min(60.0, 2.0 * velocity["median_age_at_close"]))
+            else:
+                threshold = float(age_days)
+            now = dt.datetime.now(dt.UTC)
+            kept = []
+            for i in raw_sorted:
+                created = dt.datetime.fromisoformat(i["createdAt"].replace("Z", "+00:00"))
+                age = (now - created).total_seconds() / 86400.0
+                if age >= threshold:
+                    kept.append(i)
+            items = kept
 
     return {
         "items": items,
