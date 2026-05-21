@@ -220,3 +220,57 @@ def test_fetch_audit_window_issues_returns_only_listed(
     # Oldest-first: 51 (Dec) then 52 (Mar). The explicit list narrows, but order
     # comes from createdAt.
     assert [item["number"] for item in result["items"]] == [51, 52]
+
+
+def test_fetch_audit_window_enriches_open_dependents(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each item gets an open_dependents list (issues that depend on it, still open)."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+    from tests.conftest import write_minimal_board
+
+    write_minimal_board(tmp_path)
+    issues_payload = json.dumps(
+        [
+            {"number": 50, "title": "leaf", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
+             "labels": [], "milestone": None},
+            {"number": 51, "title": "blocks-leaf", "body": "...",
+             "createdAt": "2026-01-02T00:00:00Z", "labels": [], "milestone": None},
+        ]
+    )
+    # GraphQL repo-wide blockedBy edges: #51 is blocked by #50, both open
+    blocked_by_payload = json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "issues": {
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        "nodes": [
+                            {"number": 50, "blockedBy": {"nodes": []}},
+                            {
+                                "number": 51,
+                                "blockedBy": {"nodes": [{"number": 50, "state": "OPEN"}]},
+                            },
+                        ],
+                    }
+                }
+            }
+        }
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue list": issues_payload,
+            "search issues": "[]",
+            "search prs": "[]",
+            "blockedBy": blocked_by_payload,
+        },
+    )
+
+    board = Board.from_default(tmp_path)
+    result = fetch_audit_window(board, count=2)
+
+    # #50 has #51 as an open dependent; #51 has none.
+    by_num = {i["number"]: i for i in result["items"]}
+    assert by_num[50]["open_dependents"] == [51]
+    assert by_num[51]["open_dependents"] == []
