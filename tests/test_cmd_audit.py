@@ -25,7 +25,7 @@ EMPTY_BLOCKED_BY_PAYLOAD = json.dumps(
 
 
 def test_compute_velocity_closure_count(monkeypatch: pytest.MonkeyPatch) -> None:
-    """closures_last_14d reflects the count of issues returned by gh search."""
+    """closures_last_14d reflects the count of issues returned by gh issue list."""
     closed_issues = json.dumps(
         [
             {"number": 1, "createdAt": "2026-05-10T00:00:00Z", "closedAt": "2026-05-20T00:00:00Z"},
@@ -35,7 +35,7 @@ def test_compute_velocity_closure_count(monkeypatch: pytest.MonkeyPatch) -> None
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"search issues": closed_issues, "search prs": "[]"},
+        {"--state closed": closed_issues, "pr list": "[]"},
     )
 
     velocity = compute_velocity("brockamer/jared")
@@ -55,7 +55,7 @@ def test_compute_velocity_median_age_at_close(monkeypatch: pytest.MonkeyPatch) -
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"search issues": closed_issues, "search prs": "[]"},
+        {"--state closed": closed_issues, "pr list": "[]"},
     )
 
     velocity = compute_velocity("brockamer/jared")
@@ -65,7 +65,7 @@ def test_compute_velocity_median_age_at_close(monkeypatch: pytest.MonkeyPatch) -
 
 def test_compute_velocity_empty_windows_return_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty closure / merge windows produce zeros, not crashes."""
-    patch_gh_by_arg(monkeypatch, {"search issues": "[]", "search prs": "[]"})
+    patch_gh_by_arg(monkeypatch, {"--state closed": "[]", "pr list": "[]"})
 
     velocity = compute_velocity("brockamer/jared")
 
@@ -92,7 +92,7 @@ def test_compute_velocity_pr_duration(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     patch_gh_by_arg(
         monkeypatch,
-        {"search issues": closed_issues, "search prs": merged_prs},
+        {"--state closed": closed_issues, "pr list": merged_prs},
     )
 
     velocity = compute_velocity("brockamer/jared")
@@ -121,9 +121,9 @@ def test_fetch_audit_window_count_returns_oldest_first(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue list": issues_payload,
-            "search issues": "[]",
-            "search prs": "[]",
+            "--state open": issues_payload,
+            "--state closed": "[]",
+            "pr list": "[]",
             "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
         },
     )
@@ -160,9 +160,9 @@ def test_fetch_audit_window_age_days_filters_by_age(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue list": issues_payload,
-            "search issues": "[]",
-            "search prs": "[]",
+            "--state open": issues_payload,
+            "--state closed": "[]",
+            "pr list": "[]",
             "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
         },
     )
@@ -202,9 +202,9 @@ def test_fetch_audit_window_default_staleness_uses_velocity(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue list": issues_payload,
-            "search issues": closed_payload,
-            "search prs": "[]",
+            "--state open": issues_payload,
+            "--state closed": closed_payload,
+            "pr list": "[]",
             "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
         },
     )
@@ -236,9 +236,9 @@ def test_fetch_audit_window_issues_returns_only_listed(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue list": issues_payload,
-            "search issues": "[]",
-            "search prs": "[]",
+            "--state open": issues_payload,
+            "--state closed": "[]",
+            "pr list": "[]",
             "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
         },
     )
@@ -289,9 +289,9 @@ def test_fetch_audit_window_enriches_open_dependents(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue list": issues_payload,
-            "search issues": "[]",
-            "search prs": "[]",
+            "--state open": issues_payload,
+            "--state closed": "[]",
+            "pr list": "[]",
             "blockedBy": blocked_by_payload,
         },
     )
@@ -325,8 +325,8 @@ def test_fetch_audit_window_milestones_returns_open_milestones(
         monkeypatch,
         {
             "/milestones": milestones_payload,
-            "search issues": "[]",
-            "search prs": "[]",
+            "--state closed": "[]",
+            "pr list": "[]",
         },
     )
 
@@ -354,9 +354,9 @@ def test_cli_audit_fetch_count_emits_json(
     patch_gh_by_arg(
         monkeypatch,
         {
-            "issue list": issues_payload,
-            "search issues": "[]",
-            "search prs": "[]",
+            "--state open": issues_payload,
+            "--state closed": "[]",
+            "pr list": "[]",
             "blockedBy": EMPTY_BLOCKED_BY_PAYLOAD,
         },
     )
