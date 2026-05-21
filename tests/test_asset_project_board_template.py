@@ -49,11 +49,7 @@ def test_asset_template_has_scope_labels_paragraph() -> None:
 def test_template_documents_operator_docs_section() -> None:
     """The project-board template ships the optional `### Current-state
     operator docs` block as a documented opt-in (covers AC for #163)."""
-    template_path = (
-        Path(__file__).resolve().parent.parent
-        / "skills/jared/assets/project-board.md.template"
-    )
-    text = template_path.read_text()
+    text = ASSET_PATH.read_text()
     assert "### Current-state operator docs" in text
     assert "- Docs:" in text
     assert "- Code surface:" in text
