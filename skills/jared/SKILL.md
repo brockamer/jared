@@ -196,6 +196,14 @@ Run the sweep (`scripts/sweep.py` for the mechanical pass, `references/board-swe
 - You spot drift
 - After a major close (e.g., milestone shipped)
 
+**Doc-sync gate.** If a project's `docs/project-board.md` includes a
+`### Current-state operator docs` block, `jared groom` / `sweep.py` will
+emit an advisory when recent closed PRs touched the configured code
+surface (default `src/**`) without touching any listed doc. Opt-in per
+project; never blocks. See
+[references/board-sweep.md](references/board-sweep.md) for the full
+contract.
+
 For a structural review — shape of the board, phasing, milestone hygiene, long-horizon arc — see `references/structural-review.md`. Trigger this when the project has shifted enough that the board may not reflect the new direction (big pivot, major release cut, new strategic horizon opens up).
 
 ### Periodically — stage (forward-looking complement to groom)
