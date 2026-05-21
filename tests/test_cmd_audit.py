@@ -303,3 +303,36 @@ def test_fetch_audit_window_enriches_open_dependents(
     by_num = {i["number"]: i for i in result["items"]}
     assert by_num[50]["open_dependents"] == [51]
     assert by_num[51]["open_dependents"] == []
+
+
+def test_fetch_audit_window_milestones_returns_open_milestones(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """entity_type='milestones' returns open milestones with REST field shape."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+    from tests.conftest import write_minimal_board
+
+    write_minimal_board(tmp_path)
+    milestones_payload = json.dumps(
+        [
+            {"number": 1, "title": "v0.21.0", "due_on": "2026-06-01T00:00:00Z",
+             "open_issues": 5, "closed_issues": 2, "state": "open"},
+            {"number": 2, "title": "v1.0.0", "due_on": None,
+             "open_issues": 12, "closed_issues": 0, "state": "open"},
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "/milestones": milestones_payload,
+            "search issues": "[]",
+            "search prs": "[]",
+        },
+    )
+
+    board = Board.from_default(tmp_path)
+    result = fetch_audit_window(board, entity_type="milestones")
+
+    assert [m["title"] for m in result["milestones"]] == ["v0.21.0", "v1.0.0"]
+    assert result["milestones"][0]["open_issues"] == 5
+    assert result["items"] == []

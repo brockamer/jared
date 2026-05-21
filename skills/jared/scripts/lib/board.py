@@ -1710,6 +1710,21 @@ def fetch_audit_window(
                     kept.append(i)
             items = kept
 
+    if entity_type in ("milestones", "both"):
+        owner, name = board.repo.split("/", 1)
+        milestones = run_gh(
+            [
+                "api",
+                f"/repos/{owner}/{name}/milestones",
+                "--paginate",
+                "-X", "GET",
+                "-f", "state=open",
+                "-f", "sort=due_on",
+                "-f", "direction=asc",
+            ],
+            cache=cache,
+        ) or []
+
     if items:
         # Invert repo-wide blockedBy edges: who depends on each candidate?
         edges = fetch_blocked_by_edges(board.repo, cache=cache)
