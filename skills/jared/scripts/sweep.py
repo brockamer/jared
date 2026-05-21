@@ -66,6 +66,9 @@ from lib.board import (
     fetch_blocked_by_edges as board_fetch_blocked_by_edges,
 )
 from lib.board import (
+    fetch_recent_closed_prs_with_files as board_fetch_recent_closed_prs_with_files,
+)
+from lib.board import (
     fetch_recent_comments_batch as board_fetch_recent_comments_batch,
 )
 from lib.board import (
@@ -593,6 +596,13 @@ def main() -> int:
         help="Flag Blocked-status items with no activity beyond this (default: 7)",
     )
     parser.add_argument(
+        "--doc-sync-days",
+        type=int,
+        default=7,
+        help="Window (in days) of closed PRs to scan for operator-doc sync (default: 7). "
+        "Matches the next-session-prompt 'recently closed' window.",
+    )
+    parser.add_argument(
         "--min-budget",
         type=int,
         default=200,
@@ -746,6 +756,34 @@ def main() -> int:
         findings = check_plan_spec_drift(existing_plan_dirs, repo)
         for f in findings or ["  None"]:
             print(f if f.startswith(" ") else f"  {f}")
+    print()
+
+    print("== Doc-sync gate (operator docs not updated alongside code) ==")
+    if not repo:
+        print("  (skipped — repo not determined)")
+    else:
+        # The doc-sync config lives on the Board dataclass. find_config()
+        # already located the convention doc above; load Board lazily here
+        # so older boards without the section parse fine (they yield
+        # operator_docs=[], which short-circuits the check).
+        try:
+            board = Board.from_default()
+            operator_docs = board.operator_docs
+            code_surface = board.code_surface
+        except Exception as e:  # noqa: BLE001 — advisory path, never fail the sweep
+            print(f"  (skipped — board load failed: {e})")
+            operator_docs = []
+            code_surface = []
+        if not operator_docs:
+            print("  (skipped — no ### Current-state operator docs block on this board)")
+        else:
+            try:
+                prs = board_fetch_recent_closed_prs_with_files(repo, days=args.doc_sync_days)
+                findings = check_doc_sync_gate(prs, operator_docs, code_surface)
+                for line in findings or ["None"]:
+                    print(f"  {line}")
+            except (RuntimeError, GhInvocationError) as e:
+                print(f"  (skipped — {e})")
     print()
 
     print("== Closed items not on Done ==")
