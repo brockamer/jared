@@ -1240,7 +1240,7 @@ def fetch_recent_comments_batch(
 
 
 def fetch_recent_closed_prs_with_files(
-    repo: str, days: int = 7, *, cache: str | None = None
+    repo: str, days: int = 7
 ) -> list[dict[str, Any]]:
     """Return closed PRs from the last `days` days, each with its changed
     file list. Used by sweep.check_doc_sync_gate (#163).
@@ -1250,7 +1250,8 @@ def fetch_recent_closed_prs_with_files(
     `files` reliably across gh versions; per-PR view is the robust path
     and matches check_plan_spec_drift's idiom.
 
-    `cache` flows through to run_gh, opting into the on-disk snapshot cache.
+    N+1 in PR count — each PR triggers a per-PR `gh pr view`. Acceptable at
+    typical project weekly cadence; busier projects may want a graphql rewrite.
     """
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     list_args = [
@@ -1261,7 +1262,7 @@ def fetch_recent_closed_prs_with_files(
         "--limit", "100",
         "--json", "number,closedAt",
     ]
-    prs = run_gh(list_args, cache=cache)
+    prs = run_gh(list_args)
     if not isinstance(prs, list):
         return []
 
@@ -1273,7 +1274,7 @@ def fetch_recent_closed_prs_with_files(
             continue
         view_args = ["pr", "view", str(number), "--repo", repo, "--json", "files"]
         try:
-            data = run_gh(view_args, cache=cache)
+            data = run_gh(view_args)
         except GhInvocationError:
             continue
         files_raw = (data or {}).get("files", []) if isinstance(data, dict) else []
