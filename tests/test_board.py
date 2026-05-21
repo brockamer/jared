@@ -1408,3 +1408,100 @@ def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) ->
     # option IDs land in `_field_options`, not the config dict.
     assert board._field_options.get("Status", {}).get("Backlog") == "0369b485"
     assert board._field_options.get("Status", {}).get("Done") == "727e952b"
+
+
+def test_board_parses_operator_docs_section(tmp_path: Path) -> None:
+    """A `### Current-state operator docs` block with both bullets populates
+    `operator_docs` and `code_surface` on the Board dataclass."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Docs: CLAUDE.md, docs/PRD.md, docs/architecture.md
+        - Code surface: src/**, lib/**
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == ["CLAUDE.md", "docs/PRD.md", "docs/architecture.md"]
+    assert board.code_surface == ["src/**", "lib/**"]
+
+
+def test_board_operator_docs_defaults_code_surface_when_bullet_missing(tmp_path: Path) -> None:
+    """`Docs:` bullet present but `Code surface:` bullet absent — default
+    code_surface to ['src/**']. Lets projects opt into the check minimally."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Docs: CLAUDE.md
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == ["CLAUDE.md"]
+    assert board.code_surface == ["src/**"]
+
+
+def test_board_operator_docs_defaults_empty_when_section_absent(tmp_path: Path) -> None:
+    """No `### Current-state operator docs` block at all → both fields empty,
+    which the consumer treats as 'check disabled'."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == []
+    assert board.code_surface == []
+
+
+def test_board_operator_docs_section_without_docs_bullet_is_disabled(tmp_path: Path) -> None:
+    """Section present but `Docs:` bullet absent → both fields empty (check
+    disabled). Robust to partial config — no exception, no surprise default."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Code surface: src/**
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == []
+    assert board.code_surface == []
