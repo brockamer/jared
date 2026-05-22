@@ -198,13 +198,20 @@ def test_board_invalidate_items_also_nukes_disk_cache(
     assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is None
 
 
-def test_two_subprocess_jared_summary_calls_share_one_gh_item_list(
+def test_subprocess_jared_summary_does_not_call_project_item_list(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Acceptance criterion for #52: two `jared summary` invocations within
-    TTL in different processes must produce exactly one `gh project item-list`
-    call. Counted via a fake `gh` on PATH that appends a marker to a log."""
-    # Fake gh: log each call, return a minimal item-list for the item-list verb.
+    """Post-#185 regression guard: `jared summary` must not route through
+    `gh project item-list`, whose cost scales with total board size on
+    mature boards. The hot path now uses `gh issue list --state open` +
+    per-issue projectItems GraphQL.
+
+    Replaces the older "two summary calls share one item-list" assertion
+    (#52 era) — that contract is obsolete because summary no longer pulls
+    items from the project at all. Same fake-gh-on-PATH structure used to
+    catch a future regression that re-introduces board_items() into the
+    summary path.
+    """
     fake_gh_dir = tmp_path / "bin"
     fake_gh_dir.mkdir()
     log_file = tmp_path / "gh-calls.log"
@@ -215,14 +222,104 @@ def test_two_subprocess_jared_summary_calls_share_one_gh_item_list(
         import sys
         with open({str(log_file)!r}, "a") as f:
             f.write(" ".join(sys.argv[1:]) + "\\n")
-        if sys.argv[1:3] == ["project", "item-list"]:
-            print(
-                '{{"items": [{{"id": "PVTI_x", '
-                '"content": {{"number": 1, "title": "x"}}, '
-                '"status": "In Progress", "priority": "Medium"}}]}}'
-            )
-        elif sys.argv[1:3] == ["issue", "list"]:
+        if sys.argv[1:3] == ["issue", "list"]:
             print("[]")
+        elif sys.argv[1:3] == ["api", "graphql"]:
+            print('{{"data": {{"repository": {{"issue": null}}}}}}')
+        else:
+            pass
+        """)
+    )
+    fake_gh.chmod(0o755)
+
+    project_dir = tmp_path / "project"
+    docs = project_dir / "docs"
+    docs.mkdir(parents=True)
+    (docs / "project-board.md").write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_test
+        - Owner: brockamer
+        - Repo: brockamer/jared
+
+        ### Status
+        - Field ID: PVTSSF_test
+        - Backlog: bk
+        - Up Next: un
+        - In Progress: ip
+        - Blocked: bl
+        - Done: dn
+
+        ### Priority
+        - Field ID: PVTSSF_pri
+        - High: hi
+        - Medium: me
+        - Low: lo
+        """)
+    )
+
+    env = {
+        **os.environ,
+        "PATH": f"{fake_gh_dir}:{os.environ['PATH']}",
+        "JARED_CACHE_DIR": str(tmp_path / "cache"),
+        "JARED_CACHE_TTL_SECONDS": "60",
+    }
+    env.pop("JARED_NO_CACHE", None)
+
+    result = subprocess.run(
+        [sys.executable, str(JARED_CLI), "summary"],
+        cwd=project_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"jared summary failed: {result.stderr}"
+
+    calls = log_file.read_text().splitlines() if log_file.exists() else []
+    item_list_calls = [c for c in calls if c.startswith("project item-list")]
+    assert item_list_calls == [], (
+        f"jared summary must NOT call `gh project item-list` (#185); "
+        f"saw: {item_list_calls!r}. All calls: {calls}"
+    )
+    # And it must have called the new fast path at least once.
+    open_list_calls = [c for c in calls if "issue list" in c and "--state open" in c]
+    assert len(open_list_calls) >= 1, (
+        f"jared summary must route via `gh issue list --state open`; "
+        f"saw 0 such calls. All calls: {calls}"
+    )
+
+
+def test_subprocess_jared_move_invalidates_disk_cache(tmp_path: Path) -> None:
+    """Cross-process invalidation discipline: a mutating subcommand in one
+    process must remove the on-disk `board_items()` snapshot so any other
+    process reading the cache afterward refetches.
+
+    `stage.py` (run from cron / `/jared-stage`) is the active reader of
+    `board_items()` post-#185 — summary moved to the open-only path that
+    doesn't use this cache at all. The discipline still matters: any
+    `jared` CLI mutation should leave stage's next run with a fresh view.
+
+    Seeds the disk cache, runs `jared move`, asserts the cache file is
+    gone. Doesn't assert anything about summary's gh-call count (summary
+    no longer touches this cache).
+    """
+    fake_gh_dir = tmp_path / "bin"
+    fake_gh_dir.mkdir()
+    fake_gh = fake_gh_dir / "gh"
+    fake_gh.write_text(
+        dedent("""\
+        #!/usr/bin/env python3
+        import sys
+        if sys.argv[1:4] == ["api", "graphql", "-f"]:
+            # find_item_id uses the scoped projectItems query (fix for #109).
+            print(
+                '{"data": {"repository": {"issue": {"projectItems": '
+                '{"nodes": [{"id": "PVTI_x", "project": {"number": 7}, '
+                '"fieldValues": {"nodes": []}}]}}}}}'
+            )
+        elif sys.argv[1:3] == ["project", "item-edit"]:
+            print('{"id": "PVTI_x"}')
         else:
             pass
         """)
@@ -265,118 +362,27 @@ def test_two_subprocess_jared_summary_calls_share_one_gh_item_list(
     }
     env.pop("JARED_NO_CACHE", None)
 
-    for _ in range(2):
-        result = subprocess.run(
-            [sys.executable, str(JARED_CLI), "summary"],
-            cwd=project_dir,
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, f"jared summary failed: {result.stderr}"
-
-    calls = log_file.read_text().splitlines() if log_file.exists() else []
-    item_list_calls = [c for c in calls if c.startswith("project item-list")]
-    assert len(item_list_calls) == 1, (
-        f"Expected exactly 1 `gh project item-list` call across two `jared summary` "
-        f"subprocesses; got {len(item_list_calls)}. All calls: {calls}"
+    # Pre-seed the disk cache so we can assert it gets nuked.
+    cache.set_item_list(
+        project_number=7,
+        items=[{"id": "STALE_BEFORE_MOVE"}],
+        cache_dir=cache_dir,
     )
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is not None
 
-
-def test_jared_move_nukes_cache_so_next_summary_refetches(tmp_path: Path) -> None:
-    """Cross-process correctness: after a mutating subcommand in one process,
-    another process must NOT serve the stale snapshot. Regression test for
-    the invalidation-discipline gap caught in pre-PR advisor review:
-    `jared move` -> `jared summary` within TTL was returning pre-move data."""
-    fake_gh_dir = tmp_path / "bin"
-    fake_gh_dir.mkdir()
-    log_file = tmp_path / "gh-calls.log"
-    fake_gh = fake_gh_dir / "gh"
-    fake_gh.write_text(
-        dedent(f"""\
-        #!/usr/bin/env python3
-        import sys
-        with open({str(log_file)!r}, "a") as f:
-            f.write(" ".join(sys.argv[1:]) + "\\n")
-        if sys.argv[1:3] == ["project", "item-list"]:
-            print(
-                '{{"items": [{{"id": "PVTI_x", '
-                '"content": {{"number": 1, "title": "x"}}, '
-                '"status": "Backlog", "priority": "Medium"}}]}}'
-            )
-        elif sys.argv[1:4] == ["api", "graphql", "-f"]:
-            # find_item_id uses the scoped projectItems query (fix for #109).
-            print(
-                '{{"data": {{"repository": {{"issue": {{"projectItems": '
-                '{{"nodes": [{{"id": "PVTI_x", "project": {{"number": 7}}, '
-                '"fieldValues": {{"nodes": []}}}}]}}}}}}}}}}'
-            )
-        elif sys.argv[1:3] == ["project", "item-edit"]:
-            print('{{"id": "PVTI_x"}}')
-        elif sys.argv[1:3] == ["issue", "list"]:
-            print("[]")
-        else:
-            pass
-        """)
+    result = subprocess.run(
+        [sys.executable, str(JARED_CLI), "move", "1", "In Progress"],
+        cwd=project_dir,
+        env=env,
+        capture_output=True,
+        text=True,
     )
-    fake_gh.chmod(0o755)
+    assert result.returncode == 0, f"jared move failed: {result.stderr}"
 
-    project_dir = tmp_path / "project"
-    docs = project_dir / "docs"
-    docs.mkdir(parents=True)
-    (docs / "project-board.md").write_text(
-        dedent("""\
-        - Project URL: https://github.com/users/brockamer/projects/7
-        - Project number: 7
-        - Project ID: PVT_test
-        - Owner: brockamer
-        - Repo: brockamer/jared
-
-        ### Status
-        - Field ID: PVTSSF_test
-        - Backlog: bk
-        - Up Next: un
-        - In Progress: ip
-        - Blocked: bl
-        - Done: dn
-
-        ### Priority
-        - Field ID: PVTSSF_pri
-        - High: hi
-        - Medium: me
-        - Low: lo
-        """)
-    )
-
-    env = {
-        **os.environ,
-        "PATH": f"{fake_gh_dir}:{os.environ['PATH']}",
-        "JARED_CACHE_DIR": str(tmp_path / "cache"),
-        "JARED_CACHE_TTL_SECONDS": "60",
-    }
-    env.pop("JARED_NO_CACHE", None)
-
-    def run_jared(*argv: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, str(JARED_CLI), *argv],
-            cwd=project_dir,
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-    assert run_jared("summary").returncode == 0
-    assert run_jared("move", "1", "In Progress").returncode == 0
-    assert run_jared("summary").returncode == 0
-
-    calls = log_file.read_text().splitlines()
-    item_list_calls = [c for c in calls if c.startswith("project item-list")]
-    # First summary fetches; move nukes the cache; second summary must refetch.
-    # Pre-fix: only one item-list call total (second summary served stale).
-    assert len(item_list_calls) == 2, (
-        f"Mutation must invalidate the on-disk cache so subsequent summaries "
-        f"refetch. Got {len(item_list_calls)} item-list calls; expected 2. "
-        f"All calls: {calls}"
+    # After mutation, the cache must be gone — stage's next read refetches.
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is None, (
+        "jared move must invalidate the cross-process board_items() cache; "
+        "stage.py's next run would otherwise see the pre-mutation snapshot."
     )
 
 
