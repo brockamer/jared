@@ -118,9 +118,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     close_p = sub.add_parser(
         "close",
-        help="Close issue + verify/force auto-move to Done.",
+        help=(
+            "Close issue + verify/force auto-move to Done. "
+            "Optionally post a comment first via --body / --body-file."
+        ),
+        allow_abbrev=False,
     )
     close_p.add_argument("issue_number", type=int)
+    close_body = close_p.add_mutually_exclusive_group()
+    close_body.add_argument(
+        "--body",
+        help="Inline comment body to post on the issue before closing.",
+    )
+    close_body.add_argument(
+        "--body-file",
+        help='Path to markdown comment body, or "-" for stdin. Posted before close.',
+    )
     close_p.set_defaults(func=_cmd_close)
 
     comment = sub.add_parser(
@@ -306,6 +319,37 @@ def _cmd_move(args: argparse.Namespace) -> int:
 
 def _cmd_close(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
+
+    # Optional comment-before-close (#184). Post the Session note first so a
+    # close failure leaves a recoverable state (open issue + stray comment,
+    # user re-runs `jared close <N>` without --body). The opposite order would
+    # close the issue and then fail to post the note — a discipline violation
+    # since the audit/wrap doctrine treats close-with-comment as one atom.
+    has_comment = args.body is not None or args.body_file is not None
+    if has_comment:
+        body = resolve_body(args.body, args.body_file)
+        report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
+        if not report.clean:
+            print_redaction_diff(report, file=sys.stderr)
+            return 2
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
+            tf.write(body)
+            tmp_path = tf.name
+        try:
+            comment_url = board.run_gh_raw(
+                [
+                    "issue",
+                    "comment",
+                    str(args.issue_number),
+                    "--repo",
+                    board.repo,
+                    "--body-file",
+                    tmp_path,
+                ]
+            )
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+        print(f"OK: commented on #{args.issue_number} ({comment_url})")
 
     board.run_gh(
         [

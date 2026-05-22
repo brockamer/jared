@@ -60,8 +60,12 @@ Flow:
 7. **Mutations — date proposals are aggressive.** When proposing a new milestone due date during reshape, anchor to:
 
    ```
-   default_due_date = today + (velocity.median_pr_duration_days × remaining_open_children)
+   raw_days     = velocity.median_pr_duration_days × remaining_open_children
+   anchor_days  = max(7, raw_days)
+   default_due_date = today + anchor_days
    ```
+
+   The **7-day floor** exists because `median_pr_duration_days` is a tight proxy for "CI duration" on projects that gate merges on green CI, not for "feature-completion duration." On CI-fast-merge cadences (PRs auto-merging within minutes of green) the raw formula collapses to "today + epsilon" — i.e., "tomorrow" — for every reshape, regardless of remaining work. That's not what anchoring to recent shipping cadence is meant to do. The floor keeps proposals aggressive but realistic (#183).
 
    Bias toward the near term. Default cadence is weeks, not quarters. If the proposed date pushes past this anchor, include a one-line written rationale (e.g., "external dependency lands week of X") in the operator approval prompt — parking a milestone 3–6 months out without an explicit reason is a smell.
 
@@ -76,10 +80,12 @@ Flow:
 9. **Apply approved mutations** using existing atoms:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> --comment-file <path>
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> --body-file <path>
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file <path>
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <field> <value>
    ```
+
+   `jared close --body-file` posts the comment before closing, so a close failure leaves the issue open with a stray comment (recoverable by re-running `jared close <N>` without `--body-file`). Closing first then failing to comment would leave a closed issue without a Session note — the discipline this atom exists to enforce.
 
    For body/title edits: `gh api -X PATCH /repos/{owner}/{repo}/issues/{N} -f title=… -f body=…`
    For milestone mutations: `gh api -X PATCH /repos/{owner}/{repo}/milestones/{N} …` (or `DELETE` for `dissolve`).

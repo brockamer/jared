@@ -109,7 +109,7 @@ conventional columns are Backlog / Up Next / In Progress / Blocked / Done.
 
 ---
 
-## `jared close <issue_number>`
+## `jared close <issue_number> [--body TEXT | --body-file PATH]`
 
 **Purpose.** Close an issue and verify the board auto-moves it to Done.
 GitHub's project-v2 auto-move is eventually consistent; this subcommand
@@ -117,8 +117,19 @@ polls for up to ~3 attempts, and if the auto-move hasn't fired, forces
 `Status=Done` explicitly. Either way you get a definitive Done state
 before the command returns.
 
+Optionally post a Session note in the same atom — `--body` / `--body-file`
+mirror `jared comment` and `jared file`. When supplied, the comment is
+posted *before* the close, so a close failure leaves the issue open with
+a stray comment (recoverable: re-run `jared close <N>` without `--body*`).
+Closing first then failing to comment would leave a closed issue without
+a Session note — the discipline this flag exists to enforce against the
+audit/wrap doctrine that treats close-with-comment as one atom.
+
 ```
 jared close <issue_number>
+jared close <issue_number> --body "Done — shipped in v0.21."
+jared close <issue_number> --body-file close-note.md
+cat close-note.md | jared close <issue_number> --body-file -
 ```
 
 **Example.**
@@ -126,7 +137,15 @@ jared close <issue_number>
 ```
 $ jared close 12
 OK: closed #12, board auto-moved to Done
+
+$ jared close 12 --body-file close-note.md
+OK: commented on #12 (https://github.com/owner/repo/issues/12#issuecomment-…)
+OK: closed #12, Status=Done
 ```
+
+PII pre-flight (#102) runs on the comment body, same as `jared comment`
+and `jared file`. A redaction-dirty body short-circuits before any gh call —
+neither the comment nor the close runs.
 
 ---
 
