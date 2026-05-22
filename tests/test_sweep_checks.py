@@ -5,13 +5,14 @@ separate from the full sweep flow (which shells out to gh and reads live
 board state) — these only exercise the pure list-processing logic.
 """
 
+import json
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
 
 import pytest
 
-from tests.conftest import import_sweep
+from tests.conftest import import_sweep, patch_gh
 
 
 def _item(number: int, state: str, status: str, title: str = "") -> dict[str, Any]:
@@ -551,3 +552,25 @@ def test_check_doc_sync_gate_tolerates_missing_files_key() -> None:
 
     findings = sweep.check_doc_sync_gate(prs, operator_docs, code_surface)
     assert findings == []
+
+
+def test_sweep_fetch_items_raises_when_limit_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sweep.py's parallel `gh project item-list` pull has the same silent
+    truncation cliff as Board.board_items() (#185 AC #2). sweep is the more
+    dangerous site because it's what genuinely scales with total board
+    size — `check_off_board_issues` needs the full snapshot. Add the same
+    `len == limit` guard, raising GhInvocationError loudly rather than
+    producing a wrong off-board-ghost report from a truncated snapshot.
+    """
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
+    sweep = import_sweep()
+
+    items_payload = [
+        {"id": f"item{i}", "content": {"number": i, "title": f"T{i}"}} for i in range(2000)
+    ]
+    patch_gh(monkeypatch, stdout=json.dumps({"items": items_payload}))
+
+    with pytest.raises(sweep.GhInvocationError, match="truncat"):
+        sweep.fetch_items("brockamer", "7")

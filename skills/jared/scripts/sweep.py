@@ -128,6 +128,7 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
         cached = board_cache.get_item_list(project_number, ttl_seconds=ttl)
         if cached is not None:
             return cast(list[dict[str, Any]], cached)
+    limit = 2000
     data = board_run_gh(
         [
             "project",
@@ -136,12 +137,19 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
             "--owner",
             owner,
             "--limit",
-            "2000",
+            str(limit),
             "--format",
             "json",
         ]
     )
     items = cast(list[dict[Any, Any]], data.get("items", []))
+    if len(items) == limit:
+        raise GhInvocationError(
+            f"gh project item-list returned exactly {limit} items — "
+            f"likely truncated. sweep flows (off-board ghost detection, "
+            f"stuck-closed) depend on a complete snapshot; do not trust "
+            f"this one. Raise the --limit or paginate."
+        )
     if not no_cache:
         board_cache.set_item_list(project_number, items=items)
     return items
