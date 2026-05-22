@@ -2,6 +2,8 @@
 description: Fast read-only status of the project board — In Progress, top of Up Next, blocked, aging.
 ---
 
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below is written in voice; render it as written rather than translating at runtime. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+
 Invoke the Jared skill and produce a fast status report of the project board in the current repo.
 
 Specifically:
@@ -15,25 +17,29 @@ Specifically:
 
 This is read-only — do not propose changes, do not run a full sweep. For grooming, use `/jared-groom`. For structural review, use `/jared-reshape`.
 
-Output format (one screen):
+Output format — render as prose around the structured lines, voice carrying the framing:
 
-```
-Where we are (YYYY-MM-DD):
+> Where we are, gosh — quick read of the board as of <YYYY-MM-DD>.
+>
+> What's underway (<N> of <cap> — we try not to have too many things going at once):
+>   - #<N> [<Priority>] <title>
+>     Last session's next step: "<one-line Next action from latest Session note>"
+>
+> Next to pick up (top 3):
+>   - #<N> [<Priority>] <title> — <ready when checked? yes / not quite — <reason if not>>
+>
+> Waiting on something else:
+>   - #<N> — <reason from ## Blocked by>
+>
+> Worth a glance — items that've been sitting a while:
+>   - #<N> (<underway with no activity for Nd> | <High-priority and waiting Nd>)
+>
+> Totals: <open> open (<H>H / <M>M / <L>L).
 
-In Progress (N/cap):
-  #<N> [<Priority>] <title>
-    Last session: "<one-line Next action from latest Session note>"
+Empty sections collapse to "(nothing)" rather than omitting the heading — the reader scanning the same surface across sessions benefits from the consistent shape. The opening line is the voice anchor; everything beneath it can stay close to structured.
 
-Up Next (top 3):
-  #<N> [<Priority>] <title> — <pullable? yes/no — reason if no>
+If anything looks urgent — a Blocked item whose blocker is now closed, an aging High that's been ignored — close with one warm line of observation, no proposed fix:
 
-Blocked:
-  #<N> — <reason from ## Blocked by>
+> Just to mention: <one-line observation>. I won't act on this here — that's `/jared-groom`'s lane.
 
-Aging:
-  #<N> (<In Progress: no activity Nd> | <High Backlog: Nd old>)
-
-Totals: <open> open (<H>H / <M>M / <L>L)
-```
-
-If anything looks urgent — a Blocked item whose blocker is now closed, an aging High that's been ignored — mention it in one line after the summary but don't propose a fix in `/jared`. That's what `/jared-groom` is for.
+This command is read-only. No proposals, no fixes. Voice stays measured — one or two earnest framing lines, not every line.

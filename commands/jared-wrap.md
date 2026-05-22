@@ -2,6 +2,8 @@
 description: End of session — append Session notes to touched issues, reconcile drift, propose plan archivals, file discovered scope.
 ---
 
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 4) is written in voice; render it as written rather than translating at runtime. **Important boundary:** Session-note bodies themselves are voice-OFF (per the lane rule — board writes are plain technical prose). The voice is in the *dialogue around* the drafts ("Here's what I'd like to write to each of these — please tell me what to change"), not in the drafts. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the wrap dialogue in plain technical prose — keep the structural content, strip the Jared-isms.
+
 Invoke the Jared skill to wrap the current session. The session record lives on the touched issues as Session-note comments — no `tmp/` file is written, and no handoff prompt is synthesized. The next session uses `/jared-start`, which assembles the posture on-demand from current board state.
 
 Flow:
@@ -53,26 +55,33 @@ Flow:
    - Plans/specs whose issues just closed → propose archival via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
    - **Doc-sync flag (advisory).** For each touched issue, scan its merged PRs (or unpushed commits) — if code changed but no `.md` outside `docs/sessions/` was touched, surface: *"#N's PR touched code but no doc surface — was a doc update relevant?"* Flag, do not enforce. Most well-maintained projects pair code with doc updates by convention; the flag prompts the human to confirm rather than gates the wrap on it.
 
-4. **Present all drafts consolidated** for user review:
+4. **Present all drafts consolidated** for user review. Wrap the structural review in voice — the *drafts* are plain technical prose (board writes, voice-OFF), but the dialogue presenting them is in voice:
 
-   ```
-   /jared-wrap — session end, <date>
-
-   Touched issues: #<list>
-
-   Draft Session note for #14:
-     [renders the full draft]
-
-   Draft Session note for #23:
-     [...]
-
-   Drift to reconcile:
-     - #27 was In Progress but the commits show it's done — propose closing
-     - Discovered scope (not yet filed): "logger should retry on 429" — propose filing as new issue
-     - Plan docs/superpowers/plans/2026-04-14-xyz.md references only closed issues — propose archiving
-
-   Approve? (y / edit #<N> / skip #<N> / no-drift / no-archive)
-   ```
+   > Wrapping up, <date>. <One-line warm framing of the session — what we accomplished, what shape it leaves us in. Restraint: this is the moment when a brief autobiographical aside lands well if the session had a meaningful arc; skip the aside entirely if the wrap is routine.>
+   >
+   > Touched issues: #<list>
+   >
+   > Here's what I'd like to write to each of them — please tell me what to change:
+   >
+   > **Draft Session note for #14** *(this and the others below are written voice-OFF — board surfaces stay plain technical prose, per the lane rule)*
+   >
+   > ```
+   > [renders the full draft — voice OFF, plain technical prose]
+   > ```
+   >
+   > **Draft Session note for #23**
+   >
+   > ```
+   > [...]
+   > ```
+   >
+   > Now, a few things to reconcile before we close out — I'd appreciate your call on each:
+   >
+   > - #27 was In Progress, but the commits suggest it actually shipped — shall I close it?
+   > - We discovered scope along the way that hasn't been filed: "logger should retry on 429." May I file it?
+   > - The plan at `docs/superpowers/plans/2026-04-14-xyz.md` only references closed issues now — propose archiving via `archive-plan.py`?
+   >
+   > Approve? (y / edit #<N> / skip #<N> / no-drift / no-archive)
 
 5. **On approval, apply in order:**
    - For issues being **closed as part of this wrap**, post the Session note and close in one atom — pipe the note to
@@ -84,6 +93,10 @@ Flow:
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
 
-6. **Confirm and close out.** Print a one-line summary: *"Wrapped N issues, filed N new, archived N plans, reconciled N drift items. Next session: `/jared-start` to pull, or `/jared-stage` to see staging proposals."*
+6. **Confirm and close out.** Render the closing line in voice:
+
+   > Wrapped <N> issues, filed <N> new, archived <N> plans, reconciled <N> drift items. Lovely work today — I'd be delighted to pick this back up whenever you are. Next session: `/jared-start` to pull, or `/jared-stage` to see staging proposals.
+
+   If the numbers are all zero (a no-op wrap — nothing touched, nothing reconciled), say so plainly: *"Quiet wrap — nothing to write, no drift to reconcile. Until next time."*
 
 The next session's `/jared-start` invokes `jared next-session-prompt` to assemble the posture from current board state — In Progress with each issue's most recent Session-note one-liner, top of Up Next, recently closed. Because the assembly is on-demand, the recommendation cannot go stale and no `tmp/` artifact accumulates.
