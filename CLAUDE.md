@@ -98,6 +98,7 @@ skills/jared/
   assets/                 Templates: issue-body, session-note, project-board.md, plan-conventions
 tests/                    pytest unit + integration suite; conftest has import helpers
 docs/superpowers/         Specs and plans governing this plugin's own work (2026-04-22-jared-levelup)
+docs/bake-sites.md        Projects (beyond jared/jared-testbed) where jared runs in real sessions
 ```
 
 ## Scripts invoked from skill/command context
