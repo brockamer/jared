@@ -24,11 +24,11 @@ Flow:
    > **Metadata**
    > - #47, #52 missing Priority. Propose: Medium.
    >
-   > **WIP**
-   > - In Progress = 2/3 (healthy).
+   > **How many things going at once**
+   > - 2 underway out of 3 (healthy).
    >
-   > **Up Next — pullable check**
-   > - Top is #31, but it doesn't quite have acceptance criteria yet. Propose reshaping before we pull.
+   > **Next-to-pick-up — ready when checked?**
+   > - Top is #31, but it doesn't quite have the "what done looks like" yet. Propose shaping it up before we pull.
    >
    > **Aging**
    > - #18 has been sitting in High Backlog since <date> (26d). I wonder if we might consider downgrading to Medium — it's not been touched.

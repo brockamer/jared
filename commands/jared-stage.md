@@ -17,7 +17,7 @@ Flow:
 
 2. **Display the output verbatim** — section headers, deferred-with-reason list, and almost-ready advisory all carry signal even when their content is empty. Greppable structure across runs. Wrap the verbatim block with a brief voice intro:
 
-   > Looking at what's pullable from the Backlog, and revisiting anything in Blocked while we're here. The output below is from `stage.py` — structured by design, so I'll let it speak for itself:
+   > Looking at what's ready to be picked up next from the Backlog, and revisiting anything that's been waiting on something else. The output below is from `stage.py` — structured by design, so I'll let it speak for itself:
    >
    > <stage.py output verbatim>
 

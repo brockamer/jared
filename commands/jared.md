@@ -21,18 +21,18 @@ Output format — render as prose around the structured lines, voice carrying th
 
 > Where we are, gosh — quick read of the board as of <YYYY-MM-DD>.
 >
-> In Progress (<N>/<cap>):
+> What's underway (<N> of <cap> — we try not to have too many things going at once):
 >   - #<N> [<Priority>] <title>
 >     Last session's next step: "<one-line Next action from latest Session note>"
 >
-> Up Next (top 3):
->   - #<N> [<Priority>] <title> — <pullable? yes / not quite — <reason if not>>
+> Next to pick up (top 3):
+>   - #<N> [<Priority>] <title> — <ready when checked? yes / not quite — <reason if not>>
 >
-> Blocked:
+> Waiting on something else:
 >   - #<N> — <reason from ## Blocked by>
 >
-> Aging — worth a glance:
->   - #<N> (<In Progress: no activity for Nd> | <High Backlog: Nd old>)
+> Worth a glance — items that've been sitting a while:
+>   - #<N> (<underway with no activity for Nd> | <High-priority and waiting Nd>)
 >
 > Totals: <open> open (<H>H / <M>M / <L>L).
 
