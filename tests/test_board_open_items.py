@@ -25,39 +25,56 @@ from tests.conftest import patch_gh, patch_gh_by_arg, write_minimal_board
 def test_open_items_returns_empty_list_when_no_open_issues(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Smallest happy path: no open issues → empty list, no extra GraphQL."""
+    """Smallest happy path: no open issues → empty list."""
     from skills.jared.scripts.lib.board import Board
 
     board_md = write_minimal_board(tmp_path)
     board = Board.from_path(board_md)
 
-    patch_gh(monkeypatch, stdout="[]")
+    patch_gh(
+        monkeypatch,
+        stdout=json.dumps(
+            {"data": {"repository": {"issues": {"pageInfo": {"hasNextPage": False}, "nodes": []}}}}
+        ),
+    )
 
     assert board.open_items() == []
 
 
-def test_open_items_calls_gh_issue_list_state_open_not_project_item_list(
+def test_open_items_does_not_call_project_item_list(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The whole point of open_items() (#185): the hot path must not pay
-    the cost of pulling Done items via `gh project item-list`.
-
-    Pins the routing: at least one `gh issue list --state open` call;
-    zero `gh project item-list` calls.
+    """The whole point of open_items() (#185): never route through
+    `gh project item-list`, whose cost scales with total board size on
+    mature boards. Implementation detail (one batched GraphQL query)
+    can change; the regression target is "no item-list."
     """
     from skills.jared.scripts.lib.board import Board
 
     board_md = write_minimal_board(tmp_path)
     board = Board.from_path(board_md)
 
-    calls = patch_gh_by_arg(monkeypatch, responses={"issue list": "[]"})
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "api graphql": json.dumps(
+                {
+                    "data": {
+                        "repository": {
+                            "issues": {
+                                "pageInfo": {"hasNextPage": False},
+                                "nodes": [],
+                            }
+                        }
+                    }
+                }
+            ),
+        },
+    )
 
     board.open_items()
 
     joined_calls = [" ".join(argv) for argv in calls]
-    assert any("issue list" in c and "--state open" in c for c in joined_calls), (
-        f"open_items() must call `gh issue list --state open`; saw {joined_calls!r}"
-    )
     assert not any("project item-list" in c for c in joined_calls), (
         f"open_items() must NOT call `gh project item-list`; saw {joined_calls!r}"
     )
@@ -71,20 +88,51 @@ def test_open_items_single_issue_shape_matches_board_items(
     `{"content": {"number", "title", "state"}, "status", "priority"}`.
     """
     from skills.jared.scripts.lib.board import Board
-    from tests.conftest import graphql_item_response
 
     board_md = write_minimal_board(tmp_path)
     board = Board.from_path(board_md)
 
-    patch_gh_by_arg(
-        monkeypatch,
-        responses={
-            "issue list": json.dumps([{"number": 42, "title": "Thing to do", "state": "OPEN"}]),
-            "api graphql": graphql_item_response(
-                project_number=7, status="Up Next", priority="Medium"
-            ),
-        },
+    # The batched `repository.issues(states: OPEN)` query — one open issue
+    # with one project item attached.
+    batched_response = json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "issues": {
+                        "pageInfo": {"hasNextPage": False},
+                        "nodes": [
+                            {
+                                "number": 42,
+                                "title": "Thing to do",
+                                "state": "OPEN",
+                                "projectItems": {
+                                    "nodes": [
+                                        {
+                                            "id": "PVTI_aaa",
+                                            "project": {"number": 7},
+                                            "fieldValues": {
+                                                "nodes": [
+                                                    {
+                                                        "name": "Up Next",
+                                                        "field": {"name": "Status"},
+                                                    },
+                                                    {
+                                                        "name": "Medium",
+                                                        "field": {"name": "Priority"},
+                                                    },
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                    }
+                }
+            }
+        }
     )
+    patch_gh(monkeypatch, stdout=batched_response)
 
     result = board.open_items()
 
@@ -102,34 +150,67 @@ def test_open_items_excludes_issues_not_on_project_board(
 ) -> None:
     """An open repo issue that was never added to the project (off-board
     ghost — distinct drift surfaced by sweep's check_off_board_issues)
-    has no project item; it must not appear in open_items() output.
+    has no projectItems node for this project; it must not appear in
+    open_items() output.
     """
     from skills.jared.scripts.lib.board import Board
 
     board_md = write_minimal_board(tmp_path)
     board = Board.from_path(board_md)
 
-    # fetch_item_for_issue returns None when the issue has no projectItems
-    # node matching this project (see graphql_item_response with no fields,
-    # or an empty nodes list — emulate the empty-nodes case).
-    empty_project_items = json.dumps(
+    batched_response = json.dumps(
         {
             "data": {
                 "repository": {
-                    "issue": {"projectItems": {"nodes": []}},
+                    "issues": {
+                        "pageInfo": {"hasNextPage": False},
+                        "nodes": [
+                            {
+                                "number": 99,
+                                "title": "Ghost issue",
+                                "state": "OPEN",
+                                "projectItems": {"nodes": []},
+                            }
+                        ],
+                    }
                 }
             }
         }
     )
-    patch_gh_by_arg(
-        monkeypatch,
-        responses={
-            "issue list": json.dumps([{"number": 99, "title": "Ghost issue", "state": "OPEN"}]),
-            "api graphql": empty_project_items,
-        },
-    )
+    patch_gh(monkeypatch, stdout=batched_response)
 
     assert board.open_items() == []
+
+
+def test_open_items_raises_when_pagination_required(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Silent-pagination guard mirrors the truncation discipline on
+    `board_items()`: hasNextPage=true means >100 open issues, and
+    pagination isn't implemented. Raise loudly so the caller knows the
+    snapshot is incomplete.
+    """
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+
+    board_md = write_minimal_board(tmp_path)
+    board = Board.from_path(board_md)
+
+    batched_response = json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "issues": {
+                        "pageInfo": {"hasNextPage": True},
+                        "nodes": [],
+                    }
+                }
+            }
+        }
+    )
+    patch_gh(monkeypatch, stdout=batched_response)
+
+    with pytest.raises(GhInvocationError, match="hasNextPage"):
+        board.open_items()
 
 
 def test_board_items_raises_when_limit_reached(
@@ -175,3 +256,60 @@ def test_board_items_does_not_raise_when_below_limit(
 
     result = board.board_items()
     assert len(result) == 50
+
+
+def test_fetch_recently_closed_raises_when_limit_reached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CLI's _fetch_recently_closed hits `gh issue list --state closed --limit 200`.
+    Same silent-truncation hazard as `board_items()`: hitting the cap
+    means "more items might have been dropped" — and summary's
+    stuck-closed detector silently degrades if items past the cap exist.
+    """
+    from tests.conftest import import_cli
+
+    cli = import_cli()
+    # The dual-import-path gotcha (CLAUDE.md): the CLI raises lib.board's
+    # GhInvocationError, not skills.jared.scripts.lib.board's. Grab the
+    # right class off the loaded CLI module via the Board import.
+    cli_gh_invocation_error = cli.GhInvocationError
+
+    board_md = write_minimal_board(tmp_path)
+    board = cli.Board.from_path(board_md)
+    payload = [
+        {"number": i, "title": f"closed-{i}", "closedAt": f"2026-05-{(i % 28) + 1:02d}T10:00:00Z"}
+        for i in range(200)
+    ]
+    patch_gh(monkeypatch, stdout=json.dumps(payload))
+
+    with pytest.raises(cli_gh_invocation_error, match="truncat"):
+        cli._fetch_recently_closed(board, days=14)
+
+
+def test_summary_degrades_gracefully_on_recently_closed_truncation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """If `_fetch_recently_closed` truncates on an exceptionally busy board
+    (>200 closures in 14d), `_detect_stuck_closed_recent` must swallow
+    the error and let summary render the rest. The operator sees a
+    stderr notice, not a stack trace.
+    """
+    from tests.conftest import import_cli
+
+    cli = import_cli()
+    cli_gh_invocation_error = cli.GhInvocationError
+
+    board_md = write_minimal_board(tmp_path)
+    board = cli.Board.from_path(board_md)
+
+    def explode(*_args: object, **_kw: object) -> object:
+        raise cli_gh_invocation_error("simulated truncation at limit=200")
+
+    monkeypatch.setattr(cli, "_fetch_recently_closed", explode)
+
+    result = cli._detect_stuck_closed_recent(board, days=14)
+    captured = capsys.readouterr()
+
+    assert result == []
+    assert "stuck-closed detection skipped" in captured.err
+    assert "jared sweep" in captured.err

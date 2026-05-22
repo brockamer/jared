@@ -165,18 +165,21 @@ def test_summary_routes_through_open_items_not_full_project_pull(
 ) -> None:
     """`jared summary` is a hot path that on mature boards used to bill
     GraphQL proportional to total board size via `gh project item-list`
-    (#185). After migration, it must route via `gh issue list --state open`
-    + per-issue projectItems, NOT the Done-inclusive item-list pull.
+    (#185). After migration, it must not pull items via item-list.
 
-    Pins the routing so a regression that re-introduces `board_items()`
-    in the summary path is caught.
+    Implementation detail (one batched GraphQL via `repository.issues`)
+    can change without breaking this test; the regression target is the
+    no-item-list contract.
     """
     board_md = write_minimal_board(tmp_path)
 
+    empty_issues_response = (
+        '{"data": {"repository": {"issues": {"pageInfo": {"hasNextPage": false}, "nodes": []}}}}'
+    )
     calls = patch_gh_by_arg(
         monkeypatch,
         responses={
-            "--state open": "[]",  # empty open list
+            "api graphql": empty_issues_response,
             "--state closed": "[]",  # empty recently-closed list (no stuck-closed lookup needed)
         },
     )
@@ -186,9 +189,6 @@ def test_summary_routes_through_open_items_not_full_project_pull(
     assert rc == 0
 
     joined = [" ".join(argv) for argv in calls]
-    assert any("issue list" in c and "--state open" in c for c in joined), (
-        f"summary must call `gh issue list --state open`; saw {joined!r}"
-    )
     assert not any("project item-list" in c for c in joined), (
         f"summary must NOT call `gh project item-list`; saw {joined!r}"
     )
