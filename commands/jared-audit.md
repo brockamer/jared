@@ -76,10 +76,12 @@ Flow:
 9. **Apply approved mutations** using existing atoms:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> --comment-file <path>
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> --body-file <path>
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file <path>
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <field> <value>
    ```
+
+   `jared close --body-file` posts the comment before closing, so a close failure leaves the issue open with a stray comment (recoverable by re-running `jared close <N>` without `--body-file`). Closing first then failing to comment would leave a closed issue without a Session note — the discipline this atom exists to enforce.
 
    For body/title edits: `gh api -X PATCH /repos/{owner}/{repo}/issues/{N} -f title=… -f body=…`
    For milestone mutations: `gh api -X PATCH /repos/{owner}/{repo}/milestones/{N} …` (or `DELETE` for `dissolve`).
