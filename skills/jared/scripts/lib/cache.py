@@ -86,6 +86,77 @@ def get_item_list(
     return items
 
 
+# ---------- Closed-items cache (#186) ----------
+#
+# Separate file namespace (`<project>-closed.json`) so the open-items snapshot
+# and the closed-items snapshot can be invalidated independently. The closed
+# set is mostly monotone — what changes is each record's Status field (Done ↔
+# stuck), which the invalidation hook in `_cmd_set` catches for first-party
+# mutations. External mutations (raw `gh`, UI, PR-merge auto-close) accept
+# staleness within TTL by design; see references/operations.md.
+#
+# 24h TTL by default — chosen so a daily cron-driven sweep gets at most one
+# cache miss per day on a quiet board, and an interactive operator running
+# `jared sweep` repeatedly in one session doesn't re-pay the full closed pull.
+
+
+_CLOSED_DEFAULT_TTL_SECONDS = 24 * 60 * 60
+
+
+def _closed_cache_path(project_number: int, cache_dir: Path | None) -> Path:
+    base = cache_dir if cache_dir is not None else _default_cache_dir()
+    return base / f"{project_number}-closed.json"
+
+
+def set_closed_items(
+    project_number: int,
+    *,
+    items: list[dict[str, Any]],
+    cache_dir: Path | None = None,
+) -> None:
+    """Atomically write the closed-items snapshot for this project."""
+    path = _closed_cache_path(project_number, cache_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"fetched_at": time.time(), "items": items}
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload))
+    os.replace(tmp, path)
+
+
+def invalidate_closed_items(
+    project_number: int,
+    *,
+    cache_dir: Path | None = None,
+) -> None:
+    """Remove the closed-items cache file. No-op if absent."""
+    path = _closed_cache_path(project_number, cache_dir)
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
+def get_closed_items(
+    project_number: int,
+    *,
+    ttl_seconds: int = _CLOSED_DEFAULT_TTL_SECONDS,
+    cache_dir: Path | None = None,
+) -> list[dict[str, Any]] | None:
+    """Return cached closed-items if the file exists and is within TTL, else None."""
+    path = _closed_cache_path(project_number, cache_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    fetched_at = payload.get("fetched_at")
+    items = payload.get("items")
+    if not isinstance(fetched_at, (int, float)) or not isinstance(items, list):
+        return None
+    if time.time() - fetched_at > ttl_seconds:
+        return None
+    return items
+
+
 def _etag_cache_path(
     repo: str,
     number: int,
