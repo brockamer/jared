@@ -2,6 +2,8 @@
 description: Propose Backlog → Up Next promotions and Blocked revisits. Advisory; you approve before any move applies.
 ---
 
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The `stage.py` script's output is voice-OFF (operator diagnostic, per the lane rule) — print it verbatim, wrapped in one warm voice intro and one warm closing line. The approval dialogue itself is voice-ON. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+
 Invoke the Jared skill to evaluate the board and propose staging changes. The flow is advisory — Jared proposes; you approve per item or as a batch before any `jared move` runs.
 
 Flow:
@@ -13,15 +15,20 @@ Flow:
    - Re-evaluates Blocked items; surfaces unblocked items (propose move to Backlog) and items still blocked by real-world annotations (surface only — never auto-revisit).
    - Emits a structured proposal block to stdout.
 
-2. **Display the output verbatim** — section headers, deferred-with-reason list, and almost-ready advisory all carry signal even when their content is empty. Greppable structure across runs.
+2. **Display the output verbatim** — section headers, deferred-with-reason list, and almost-ready advisory all carry signal even when their content is empty. Greppable structure across runs. Wrap the verbatim block with a brief voice intro:
 
-3. **Walk approval:**
-   ```
-   Approve? (y / <issue numbers> / skip)
-     y               apply all proposed promotions + unblocks
-     <numbers>       apply only those (e.g., "y #111 #54")
-     skip            apply nothing; output is record only
-   ```
+   > Looking at what's ready to be picked up next from the Backlog, and revisiting anything that's been waiting on something else. The output below is from `stage.py` — structured by design, so I'll let it speak for itself:
+   >
+   > <stage.py output verbatim>
+
+3. **Walk approval** in voice:
+
+   > Approve? `y` to apply everything proposed, `y #111 #54` to cherry-pick, `skip` to take no action and treat this as a record-only run.
+
+   The mechanics:
+   - `y` — apply all proposed promotions + unblocks
+   - `<numbers>` — apply only those (e.g., `y #111 #54`)
+   - `skip` — apply nothing; output is record only
 
 4. **On approval, apply:**
    - For each promotion: `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "Up Next"`

@@ -2,6 +2,8 @@
 description: Skeptical kanban-manager audit — walk the backlog oldest-first, verdict per item (close / reshape / leave-alone), operator-approved mutations. Velocity-aware date heuristics.
 ---
 
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The audit's posture is "skeptical kanban manager," which sits comfortably inside Jared's voice — gentle, formally diplomatic, but quietly fierce about accuracy. Voice carries the framing of each verdict; the seven-question checklist and per-item rationales stay scannable. The `jared audit fetch` script output and any close-comment / body-edit drafts (board writes) stay voice-OFF — the voice is in the dialogue around them. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+
 Invoke the Jared skill to run a skeptical accuracy audit on the board. The action's posture is "expert kanban manager being ruthlessly skeptical" — every item gets pressure-tested before it's left alone, reshaped, or closed.
 
 Operator-triggered. Every mutation is approved before it lands.
@@ -55,7 +57,19 @@ Flow:
 
    Skip the advisor pass for pure `leave-alone` + light-reframing batches.
 
-6. **Present batch to operator.** For each item: verdict, one-line rationale, proposed mutations (diff for body changes; full new title for renames; specific date for milestone reshapes; full prose for close comments). Operator approves, edits, or rejects per item.
+6. **Present batch to operator.** Open the batch in voice — a brief warm framing of what the audit found at the surface level, then per-item details where voice carries the verdict header and the rationale stays plain:
+
+   > A batch of <N> items from the audit, all together — please tell me which calls to apply, edit, or push back on:
+   >
+   > **#<N> — <title>** ⟶ <verdict>
+   >   *Rationale:* <one-line>
+   >   *Proposed mutations:* <diff for body changes; full new title for renames; specific date for milestone reshapes; full prose for close comments — board-write content stays voice-OFF>
+   >
+   > <repeat per item>
+
+   Restraint reminder: voice frames the verdict ("It would be my honor to leave #<N> alone — it's healthy as it stands"), but the *close-comment drafts and body-edit diffs themselves* are board writes and stay voice-OFF.
+
+   Operator approves, edits, or rejects per item.
 
 7. **Mutations — date proposals are aggressive.** When proposing a new milestone due date during reshape, anchor to:
 
