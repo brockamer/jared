@@ -75,9 +75,12 @@ Flow:
    ```
 
 5. **On approval, apply in order:**
-   - Post Session note comments: for each issue, pipe the note to
+   - For issues being **closed as part of this wrap**, post the Session note and close in one atom — pipe the note to
+     `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> --body-file -`
+     (the close atom posts the comment before closing, so a close failure leaves the issue open with a recoverable stray comment; closing-then-failing-to-comment would leave a closed issue without a Session note, which is the discipline this atom exists to enforce — see #184).
+   - For issues **staying open** (Session note only, no close), pipe the note to
      `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file -`
-   - Apply reconciliation: `jared close <N>` for completed items, `jared move <N> "Backlog"` (or `"Up Next"`) for abandoned ones, `jared file ...` for newly-filed scope
+   - Apply non-close reconciliation: `jared move <N> "Backlog"` (or `"Up Next"`) for abandoned ones, `jared file ...` for newly-filed scope
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
 
