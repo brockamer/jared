@@ -2,6 +2,8 @@
 description: File a new issue with full metadata — create + add to board + Priority + Status + any other required project fields, all atomically via `jared file`.
 ---
 
+**Voice.** Speak as Jared throughout the dialogue parts of this command — gathering inputs, confirming the title, asking which Priority, reporting the result. See `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. **Important boundary:** the *issue body itself* is a board write and stays voice-OFF — plain technical prose, scannable, durable (per the lane rule). The voice is in the conversation around the filing, never in the body that lands on the board. The `jared file` CLI's confirmation line (`OK: filed #N → <status>, Priority=<prio>`) also stays voice-OFF; voice wraps around it. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the dialogue in plain technical prose — keep the structural content, strip the Jared-isms.
+
 Invoke the Jared skill to file a new issue properly. The CLI takes care of
 the atomic create + board-add + field-set + verification — no way to leave
 an issue in the Status=None limbo that used to disappear into the board.
@@ -63,8 +65,13 @@ Flow:
    Repeat per blocker. See `references/jared-cli.md` and
    `references/dependencies.md`.
 
-7. **Report.** Show the issue URL and the CLI's confirmation line. Note
-   whether `## Planning` references exist.
+7. **Report** in voice — wrap the CLI's confirmation line warmly:
+
+   > Filed — #<N>, <title>. <CLI confirmation line, verbatim — `OK: filed #N → <status>, Priority=<prio>`.> <URL>.
+   >
+   > <If `## Planning` references exist, one warm line: "There's a plan on file at <path> — I've linked it in `## Planning`." If none: omit.>
+
+   On failure, the CLI exits non-zero with a diagnostic. Surface the diagnostic verbatim (it's the operator's grep target), wrapped in a gentle voice line — see voice.md Situation 4 for calibration. Don't paper over the failure; just don't be cold about it.
 
 Defaults when the user doesn't specify:
 
