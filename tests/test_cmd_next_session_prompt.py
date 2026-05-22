@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import import_cli, patch_gh_by_arg, write_minimal_board
+from tests.conftest import import_cli, patch_gh_by_arg, patch_gh_multi, write_minimal_board
 
 
 def test_next_session_prompt_renders_basic_sections(
@@ -20,17 +20,6 @@ def test_next_session_prompt_renders_basic_sections(
 ) -> None:
     board_md = write_minimal_board(tmp_path)
 
-    # gh project item-list returns one In Progress, two Up Next, one closed
-    item_list = (
-        '{"items": ['
-        '{"id": "a", "content": {"number": 65, "title": "Buried-gems UI"}, '
-        '"status": "In Progress", "priority": "High"},'
-        '{"id": "b", "content": {"number": 273, "title": "Filter facets"}, '
-        '"status": "Up Next", "priority": "High"},'
-        '{"id": "c", "content": {"number": 274, "title": "Indeed diagnostic"}, '
-        '"status": "Up Next", "priority": "Medium"}'
-        "]}"
-    )
     # gh api graphql aliased batch returns comments for every in-flight number
     issue_comments = (
         '{"data": {"repository": {"i65": {"comments": {"nodes": ['
@@ -40,16 +29,23 @@ def test_next_session_prompt_renders_basic_sections(
         '"}'
         "]}}}}}"
     )
-    # gh issue list for recently closed (state=closed, closed within 7d)
-    closed_list = '[{"number": 251, "title": "v0.4 release", "closedAt": "2026-04-23T15:00:00Z"}]'
 
-    patch_gh_by_arg(
+    patch_gh_multi(
         monkeypatch,
-        responses={
-            "item-list": item_list,
-            "graphql": issue_comments,
-            "issue list": closed_list,
+        open_issues=[
+            {"number": 65, "title": "Buried-gems UI", "state": "OPEN"},
+            {"number": 273, "title": "Filter facets", "state": "OPEN"},
+            {"number": 274, "title": "Indeed diagnostic", "state": "OPEN"},
+        ],
+        statuses={
+            65: ("In Progress", "High"),
+            273: ("Up Next", "High"),
+            274: ("Up Next", "Medium"),
         },
+        closed_issues=[
+            {"number": 251, "title": "v0.4 release", "closedAt": "2026-04-23T15:00:00Z"}
+        ],
+        comments_batch_json=issue_comments,
     )
 
     mod = import_cli()
@@ -132,20 +128,11 @@ def test_in_progress_without_session_notes_skips_one_liner(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     board_md = write_minimal_board(tmp_path)
-    item_list = (
-        '{"items": ['
-        '{"id": "a", "content": {"number": 7, "title": "Cold issue"}, '
-        '"status": "In Progress", "priority": "Medium"}'
-        "]}"
-    )
-    # No comments at all — graphql returns an empty nodes list under the alias
-    patch_gh_by_arg(
+    patch_gh_multi(
         monkeypatch,
-        responses={
-            "item-list": item_list,
-            "graphql": '{"data": {"repository": {"i7": {"comments": {"nodes": []}}}}}',
-            "issue list": "[]",
-        },
+        open_issues=[{"number": 7, "title": "Cold issue", "state": "OPEN"}],
+        statuses={7: ("In Progress", "Medium")},
+        comments_batch_json='{"data": {"repository": {"i7": {"comments": {"nodes": []}}}}}',
     )
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "next-session-prompt"])
@@ -163,12 +150,6 @@ def test_session_note_without_next_action_field_skips_one_liner(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     board_md = write_minimal_board(tmp_path)
-    item_list = (
-        '{"items": ['
-        '{"id": "a", "content": {"number": 9, "title": "Half-noted issue"}, '
-        '"status": "In Progress", "priority": "Medium"}'
-        "]}"
-    )
     # Comment matches Session prefix but lacks **Next action:**
     issue_comments = (
         '{"data": {"repository": {"i9": {"comments": {"nodes": [{'
@@ -176,13 +157,11 @@ def test_session_note_without_next_action_field_skips_one_liner(
         '"body": "## Session 2026-04-24\\n\\n**Progress:** stuff happened.\\n"'
         "}]}}}}}"
     )
-    patch_gh_by_arg(
+    patch_gh_multi(
         monkeypatch,
-        responses={
-            "item-list": item_list,
-            "graphql": issue_comments,
-            "issue list": "[]",
-        },
+        open_issues=[{"number": 9, "title": "Half-noted issue", "state": "OPEN"}],
+        statuses={9: ("In Progress", "Medium")},
+        comments_batch_json=issue_comments,
     )
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "next-session-prompt"])

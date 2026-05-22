@@ -25,7 +25,6 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     ItemNotFound,
     OptionNotFound,
     _find_project_root,
-    check_closed_not_done,
     fetch_recent_comments_batch,
     pre_flight_check,
     print_redaction_diff,
@@ -653,7 +652,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     if getattr(args, "fresh", False):
         board.invalidate_items()
-    items: list[dict[str, Any]] = board.board_items()
+    items: list[dict[str, Any]] = board.open_items()
 
     def by_status(status: str) -> list[dict[str, Any]]:
         return [i for i in items if i.get("status") == status]
@@ -669,18 +668,12 @@ def _cmd_summary(args: argparse.Namespace) -> int:
 
     # Stuck-closed items: closed issues whose Status never auto-moved to
     # Done (typical drift path: PR-merge auto-close on a project where
-    # the built-in "Item closed → Done" workflow is off). They look like
-    # In Progress to a naive `status == "In Progress"` filter and would
-    # silently inflate the WIP count that /jared-start uses to enforce
-    # the cap. Detect them here, list separately, and exclude from the
-    # In Progress total. Detector lives in lib.board so sweep and summary
-    # share one source of truth.
-    stuck_closed = check_closed_not_done(items)
-    stuck_numbers = {entry["number"] for entry in stuck_closed}
-    in_progress_raw = by_status("In Progress")
-    in_progress = [
-        i for i in in_progress_raw if (i.get("content") or {}).get("number") not in stuck_numbers
-    ]
+    # the built-in "Item closed → Done" workflow is off). open_items()
+    # excludes closed items entirely (#185), so the detector pivots to a
+    # 14-day recently-closed lookback + per-issue Status probe. Older
+    # drift still gets flagged by sweep, which has the full board.
+    stuck_closed = _detect_stuck_closed_recent(board, days=14)
+    in_progress = by_status("In Progress")
     up_next_all = by_status("Up Next")
     up_next = up_next_all[:3]
     blocked = by_status("Blocked")
@@ -748,11 +741,56 @@ def _now_local_iso() -> str:
 
 
 def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
-    """Wrapper that delegates to Board.board_items() (Phase 1 of #52).
+    """Wrapper that delegates to Board.open_items().
 
-    Kept as a thin alias so call sites in this file read naturally.
+    next-session-prompt only filters by status In Progress / Up Next, so
+    the open-only path is what it actually wants. Done-inclusive
+    `board_items()` would just bloat GraphQL cost on mature boards (#185).
+    Closed items in the handoff come from `_fetch_recently_closed`, which
+    runs separately.
     """
-    return board.board_items()
+    return board.open_items()
+
+
+def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, Any]]:
+    """Stuck-closed drift detection for the open-only summary path (#185).
+
+    `check_closed_not_done` (lib.board) needs CLOSED items already in the
+    snapshot; that worked when summary pulled the full Done-inclusive
+    `board_items()`. The new `open_items()` path skips closed items, so
+    detection pivots to: list issues closed in the last `days`, probe
+    each one's project Status, flag anything that isn't on Done.
+
+    Bounded lookback keeps cost proportional to recent-closure volume
+    (typically 5-20 per active board) rather than total Done count.
+    Drift older than the window is sweep's job — sweep still pulls the
+    full board and runs `check_closed_not_done` against it.
+
+    Returns the same `[{"number", "title", "current_status"}]` shape
+    `check_closed_not_done` returns, so the renderer is unchanged.
+    """
+    closed = _fetch_recently_closed(board, days=days)
+    stuck: list[dict[str, Any]] = []
+    for entry in closed:
+        number = entry.get("number")
+        if not isinstance(number, int):
+            continue
+        item = board.fetch_item_for_issue(number)
+        if item is None:
+            # Closed issue that was never on the project board — not
+            # this detector's drift (off-board ghosts are sweep's check).
+            continue
+        status = item.get("status") or ""
+        if status == "Done":
+            continue
+        stuck.append(
+            {
+                "number": number,
+                "title": (entry.get("title") or "")[:60],
+                "current_status": status or "no Status",
+            }
+        )
+    return stuck
 
 
 def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:

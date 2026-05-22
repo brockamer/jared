@@ -24,6 +24,7 @@ Board class (e.g., a classmethod), patch it on both module objects
 from __future__ import annotations
 
 import importlib.util
+import json as _json
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -195,6 +196,89 @@ def patch_gh(
     monkeypatch.setattr(
         "skills.jared.scripts.lib.board.subprocess.run",
         lambda *a, **kw: fake,
+    )
+
+
+def patch_gh_multi(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    open_issues: list[dict[str, object]] | None = None,
+    statuses: dict[int, tuple[str, str]] | None = None,
+    closed_issues: list[dict[str, object]] | None = None,
+    closed_statuses: dict[int, tuple[str, str]] | None = None,
+    comments_batch_json: str | None = None,
+) -> None:
+    """Patch the multi-gh-call shape produced by the open-only fetch path (#185).
+
+    Routes by argv shape:
+    - `gh issue list --state open --json ...` → top-level JSON list from `open_issues`
+    - `gh issue list --state closed --search ...` → top-level JSON list from `closed_issues`
+    - `gh api graphql` with `projectItems(first: 10)` in the query → per-issue
+      projectItems response built from `statuses` / `closed_statuses` (keyed
+      by the `-F number=N` arg). Issues not in either map come back as a
+      no-project-items node list (off-board ghost shape).
+    - `gh api graphql` with `comments(last:` in the query → `comments_batch_json`,
+      or an empty-comments shape if not provided.
+
+    Most tests only need `open_issues` + `statuses`. Stuck-closed tests
+    additionally provide `closed_issues` + `closed_statuses`. The handoff
+    test needs the comments batch too.
+    """
+    open_list_json = _json.dumps(open_issues or [])
+    closed_list_json = _json.dumps(closed_issues or [])
+    merged_statuses = {**(statuses or {}), **(closed_statuses or {})}
+    empty_comments_json = '{"data": {"repository": {}}}'
+
+    def fake_run(args: list[str], **_: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue list" in joined and "--state open" in joined:
+            return FakeGhResult(stdout=open_list_json)
+        if "issue list" in joined and "--state closed" in joined:
+            return FakeGhResult(stdout=closed_list_json)
+        if "api graphql" in joined:
+            query_arg = next(
+                (
+                    args[i + 1]
+                    for i, tok in enumerate(args)
+                    if tok == "-f" and i + 1 < len(args) and args[i + 1].startswith("query=")
+                ),
+                "",
+            )
+            if "projectItems(first: 10)" in query_arg:
+                number = next(
+                    (
+                        int(args[j + 1].split("=", 1)[1])
+                        for j, tok in enumerate(args)
+                        if tok == "-F" and j + 1 < len(args) and args[j + 1].startswith("number=")
+                    ),
+                    None,
+                )
+                if number is not None and number in merged_statuses:
+                    status, priority = merged_statuses[number]
+                    return FakeGhResult(
+                        stdout=graphql_item_response(
+                            project_number=7, status=status, priority=priority
+                        )
+                    )
+                # No project item — off-board ghost shape.
+                return FakeGhResult(
+                    stdout=_json.dumps(
+                        {
+                            "data": {
+                                "repository": {
+                                    "issue": {"projectItems": {"nodes": []}},
+                                }
+                            }
+                        }
+                    )
+                )
+            if "comments(last:" in query_arg:
+                return FakeGhResult(stdout=comments_batch_json or empty_comments_json)
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        fake_run,
     )
 
 
