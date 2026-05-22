@@ -412,6 +412,7 @@ class Board:
             if cached is not None:
                 self._items = cached
                 return self._items
+        limit = 2000
         data = self.run_gh(
             [
                 "project",
@@ -420,12 +421,18 @@ class Board:
                 "--owner",
                 self.owner,
                 "--limit",
-                "2000",
+                str(limit),
                 "--format",
                 "json",
             ]
         )
         self._items = data.get("items", [])
+        if len(self._items) == limit:
+            raise GhInvocationError(
+                f"gh project item-list returned exactly {limit} items — "
+                f"likely truncated. Raise the --limit or paginate; do not "
+                f"trust this snapshot."
+            )
         if not no_cache:
             cache.set_item_list(self.project_number, items=self._items)
         return self._items
@@ -434,6 +441,88 @@ class Board:
         """Drop both in-process and on-disk snapshot caches."""
         self._items = None
         cache.invalidate_item_list(self.project_number)
+
+    _OPEN_ITEMS_QUERY = """
+    query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+          pageInfo { hasNextPage }
+          nodes {
+            number
+            title
+            state
+            projectItems(first: 10) {
+              nodes {
+                id
+                project { number }
+                fieldValues(first: 20) {
+                  nodes {
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      name
+                      field { ... on ProjectV2SingleSelectField { name } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    def open_items(self) -> list[dict[str, Any]]:
+        """Fetch open issues + their project field values in one GraphQL call.
+
+        Hot-path callers (summary, next-session-prompt) only need open items;
+        `board_items()` pulls Done too, so its cost scales with total board
+        size on mature boards (#185). The single `repository.issues(states:
+        OPEN)` query returns every open issue with its projectItems node
+        embedded, so cost scales with open-issue count regardless of how
+        much Done has accumulated.
+
+        Returns dicts shaped like `board_items()` entries for open items:
+        `{"content": {"number", "title", "state"}, "status", "priority"}`.
+        Open issues not on the project board are excluded.
+
+        Raises GhInvocationError if there are >100 open issues — pagination
+        is not implemented and a silent truncation would mis-report status.
+        """
+        owner, repo_name = self.repo.split("/", 1)
+        data = self.run_graphql(
+            self._OPEN_ITEMS_QUERY,
+            owner=owner,
+            repo=repo_name,
+        )
+        issues_node = (data.get("data") or {}).get("repository", {}).get("issues") or {}
+        if (issues_node.get("pageInfo") or {}).get("hasNextPage"):
+            raise GhInvocationError(
+                "open_items() query returned hasNextPage=true; >100 open issues "
+                "on this repo. Pagination not implemented — bump the first: cap "
+                "or add cursor-based pagination."
+            )
+        items: list[dict[str, Any]] = []
+        for issue in issues_node.get("nodes", []) or []:
+            if not isinstance(issue, dict):
+                continue
+            number = issue.get("number")
+            if not isinstance(number, int):
+                continue
+            flat = _flatten_project_item_for_project(issue.get("projectItems"), self.project_number)
+            if flat is None:
+                continue
+            items.append(
+                {
+                    "content": {
+                        "number": number,
+                        "title": issue.get("title", ""),
+                        "state": issue.get("state", "OPEN"),
+                    },
+                    "status": flat.get("status"),
+                    "priority": flat.get("priority"),
+                }
+            )
+        return items
 
     _ISSUE_PROJECT_ITEM_QUERY = """
     query($owner: String!, $repo: String!, $number: Int!) {
@@ -465,6 +554,9 @@ class Board:
         Returns a dict with at least 'id' plus any single-select fields
         lowercased (e.g. 'status', 'priority'), or None if the issue is
         not on this board. Fix for #109.
+
+        For batched lookups across many issues, prefer the module-level
+        `fetch_project_items_batch` (one gh call instead of N).
         """
         owner, repo_name = self.repo.split("/", 1)
         data = self.run_graphql(
@@ -474,16 +566,7 @@ class Board:
             number=issue_number,
         )
         issue = (data.get("data") or {}).get("repository", {}).get("issue") or {}
-        for node in (issue.get("projectItems") or {}).get("nodes", []):
-            if (node.get("project") or {}).get("number") != self.project_number:
-                continue
-            flat: dict[str, Any] = {"id": node.get("id")}
-            for fv in (node.get("fieldValues") or {}).get("nodes", []):
-                field_name = (fv.get("field") or {}).get("name")
-                if field_name:
-                    flat[field_name.lower()] = fv.get("name")
-            return flat
-        return None
+        return _flatten_project_item_for_project(issue.get("projectItems"), self.project_number)
 
     def find_item_id(self, issue_number: int) -> str:
         """Look up the ProjectV2Item id for a given issue number on this board.
@@ -1196,6 +1279,84 @@ def check_closed_not_done(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return stuck
 
 
+def _flatten_project_item_for_project(
+    project_items_node: Any, project_number: int
+) -> dict[str, Any] | None:
+    """Pick the projectItems entry matching `project_number` and flatten it.
+
+    GraphQL's projectItems edge returns a list of items (one per project
+    the issue belongs to). Callers want a single flat dict for THIS
+    project: `{"id": ..., "status": ..., "priority": ..., ...}` with
+    single-select field names lowercased.
+
+    Returns None when the issue has no item on this project (off-board
+    ghost; see `fetch_item_for_issue`'s contract for the upstream usage).
+    Module-level so `Board.fetch_item_for_issue`, `Board.open_items`,
+    and `fetch_project_items_batch` share one flattener.
+    """
+    if not isinstance(project_items_node, dict):
+        return None
+    for node in project_items_node.get("nodes", []) or []:
+        if not isinstance(node, dict):
+            continue
+        if (node.get("project") or {}).get("number") != project_number:
+            continue
+        flat: dict[str, Any] = {"id": node.get("id")}
+        for fv in (node.get("fieldValues") or {}).get("nodes", []) or []:
+            field_name = (fv.get("field") or {}).get("name")
+            if field_name:
+                flat[field_name.lower()] = fv.get("name")
+        return flat
+    return None
+
+
+def fetch_project_items_batch(
+    repo: str,
+    issue_numbers: list[int],
+    *,
+    project_number: int,
+    cache: str | None = None,
+) -> dict[int, dict[str, Any] | None]:
+    """One aliased GraphQL call → `{issue_number: flat_project_item or None}`.
+
+    Replaces the N+1 in callers that need projectItems for many issues
+    (e.g., `_detect_stuck_closed_recent` post-#185): per-issue
+    `fetch_item_for_issue` calls each pay gh-cli startup overhead, which
+    dominates wall-clock on mature boards. One aliased query keeps it a
+    single round trip — same idiom as `fetch_recent_comments_batch`.
+
+    Each value is the flat `{"id", "status", "priority", ...}` shape
+    `fetch_item_for_issue` returns, or None for issues not on the named
+    project (off-board ghost). Empty input → empty dict, no gh call.
+    """
+    if not issue_numbers:
+        return {}
+    owner, name = repo.split("/", 1)
+    aliases = "\n".join(
+        f"  i{n}: issue(number: {n}) {{ projectItems(first: 10) {{ "
+        f"nodes {{ id project {{ number }} fieldValues(first: 20) {{ "
+        f"nodes {{ ... on ProjectV2ItemFieldSingleSelectValue {{ "
+        f"name field {{ ... on ProjectV2SingleSelectField {{ name }} }} "
+        f"}} }} }} }} }} }}"
+        for n in issue_numbers
+    )
+    query = (
+        f"query($o:String!,$r:String!) {{\n  repository(owner:$o, name:$r) {{\n{aliases}\n  }}\n}}"
+    )
+    data = run_graphql(query, cache=cache, o=owner, r=name)
+    repo_data = (data.get("data") or {}).get("repository") or {}
+    result: dict[int, dict[str, Any] | None] = {}
+    for n in issue_numbers:
+        issue_data = repo_data.get(f"i{n}")
+        if not isinstance(issue_data, dict):
+            result[n] = None
+            continue
+        result[n] = _flatten_project_item_for_project(
+            issue_data.get("projectItems"), project_number
+        )
+    return result
+
+
 def fetch_recent_comments_batch(
     repo: str,
     issue_numbers: list[int],
@@ -1239,9 +1400,7 @@ def fetch_recent_comments_batch(
     return result
 
 
-def fetch_recent_closed_prs_with_files(
-    repo: str, days: int = 7
-) -> list[dict[str, Any]]:
+def fetch_recent_closed_prs_with_files(repo: str, days: int = 7) -> list[dict[str, Any]]:
     """Return closed PRs from the last `days` days, each with its changed
     file list. Used by sweep.check_doc_sync_gate (#163).
 
@@ -1255,12 +1414,18 @@ def fetch_recent_closed_prs_with_files(
     """
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     list_args = [
-        "pr", "list",
-        "--repo", repo,
-        "--state", "closed",
-        "--search", f"closed:>={cutoff}",
-        "--limit", "100",
-        "--json", "number,closedAt",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "closed",
+        "--search",
+        f"closed:>={cutoff}",
+        "--limit",
+        "100",
+        "--json",
+        "number,closedAt",
     ]
     prs = run_gh(list_args)
     if not isinstance(prs, list):
@@ -1622,22 +1787,34 @@ def compute_velocity(
 
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     issues_args = [
-        "issue", "list",
-        "--repo", repo,
-        "--state", "closed",
-        "--search", f"closed:>={cutoff}",
-        "--json", "number,createdAt,closedAt",
-        "--limit", "100",
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "closed",
+        "--search",
+        f"closed:>={cutoff}",
+        "--json",
+        "number,createdAt,closedAt",
+        "--limit",
+        "100",
     ]
     closed = run_gh(issues_args, cache=cache) or []
 
     prs_args = [
-        "pr", "list",
-        "--repo", repo,
-        "--state", "merged",
-        "--search", f"merged:>={cutoff}",
-        "--json", "number,createdAt,mergedAt",
-        "--limit", "100",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "merged",
+        "--search",
+        f"merged:>={cutoff}",
+        "--json",
+        "number,createdAt,mergedAt",
+        "--limit",
+        "100",
     ]
     merged = run_gh(prs_args, cache=cache) or []
 
@@ -1680,16 +1857,24 @@ def fetch_audit_window(
     milestones: list[dict[str, Any]] = []
 
     if entity_type in ("issues", "both"):
-        raw = run_gh(
-            [
-                "issue", "list",
-                "--repo", board.repo,
-                "--state", "open",
-                "--limit", "500",
-                "--json", "number,title,body,createdAt,labels,milestone",
-            ],
-            cache=cache,
-        ) or []
+        raw = (
+            run_gh(
+                [
+                    "issue",
+                    "list",
+                    "--repo",
+                    board.repo,
+                    "--state",
+                    "open",
+                    "--limit",
+                    "500",
+                    "--json",
+                    "number,title,body,createdAt,labels,milestone",
+                ],
+                cache=cache,
+            )
+            or []
+        )
         raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
         if issues is not None:
             wanted = set(issues)
@@ -1714,18 +1899,25 @@ def fetch_audit_window(
 
     if entity_type in ("milestones", "both"):
         owner, name = board.repo.split("/", 1)
-        milestones = run_gh(
-            [
-                "api",
-                f"/repos/{owner}/{name}/milestones",
-                "--paginate",
-                "-X", "GET",
-                "-f", "state=open",
-                "-f", "sort=due_on",
-                "-f", "direction=asc",
-            ],
-            cache=cache,
-        ) or []
+        milestones = (
+            run_gh(
+                [
+                    "api",
+                    f"/repos/{owner}/{name}/milestones",
+                    "--paginate",
+                    "-X",
+                    "GET",
+                    "-f",
+                    "state=open",
+                    "-f",
+                    "sort=due_on",
+                    "-f",
+                    "direction=asc",
+                ],
+                cache=cache,
+            )
+            or []
+        )
 
     if items:
         # Invert repo-wide blockedBy edges: who depends on each candidate?
