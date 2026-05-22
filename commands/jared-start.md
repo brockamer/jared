@@ -129,7 +129,7 @@ Flow:
    >
    > <Plan/spec on file: <path> — <one-line summary>. Omit the line entirely if none, or note plainly: "No separate plan — the issue body carries the spec.">
    >
-   > Acceptance criteria — the boxes we'll need to tick to ship:
+   > What we need to be true to call this done:
    >   - <criterion 1>
    >   - <criterion 2>
    >
