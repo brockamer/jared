@@ -442,6 +442,17 @@ class Board:
         self._items = None
         cache.invalidate_item_list(self.project_number)
 
+    def invalidate_closed_items(self) -> None:
+        """Drop the on-disk closed-items snapshot (#186).
+
+        Called from `_cmd_set` when field_name=='Status' — Status mutations
+        are the only first-party path that can move an item into or out of
+        the closed set, so the invalidation is gated on field, not on every
+        mutation. Non-Status writes (Priority, Work Stream) leave the cache
+        intact to avoid a wasted full-board refetch on next sweep.
+        """
+        cache.invalidate_closed_items(self.project_number)
+
     _OPEN_ITEMS_QUERY = """
     query($owner: String!, $repo: String!) {
       repository(owner: $owner, name: $repo) {
