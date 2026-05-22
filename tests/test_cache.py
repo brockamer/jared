@@ -203,8 +203,8 @@ def test_subprocess_jared_summary_does_not_call_project_item_list(
 ) -> None:
     """Post-#185 regression guard: `jared summary` must not route through
     `gh project item-list`, whose cost scales with total board size on
-    mature boards. The hot path now uses `gh issue list --state open` +
-    per-issue projectItems GraphQL.
+    mature boards. The hot path now uses a single batched GraphQL query
+    via `repository.issues(states: OPEN)`.
 
     Replaces the older "two summary calls share one item-list" assertion
     (#52 era) — that contract is obsolete because summary no longer pulls
@@ -225,7 +225,9 @@ def test_subprocess_jared_summary_does_not_call_project_item_list(
         if sys.argv[1:3] == ["issue", "list"]:
             print("[]")
         elif sys.argv[1:3] == ["api", "graphql"]:
-            print('{{"data": {{"repository": {{"issue": null}}}}}}')
+            # batched open-items query returns empty pageInfo + nodes
+            print('{{"data": {{"repository": {{"issues": '
+                  '{{"pageInfo": {{"hasNextPage": false}}, "nodes": []}}}}}}}}')
         else:
             pass
         """)
@@ -281,12 +283,6 @@ def test_subprocess_jared_summary_does_not_call_project_item_list(
     assert item_list_calls == [], (
         f"jared summary must NOT call `gh project item-list` (#185); "
         f"saw: {item_list_calls!r}. All calls: {calls}"
-    )
-    # And it must have called the new fast path at least once.
-    open_list_calls = [c for c in calls if "issue list" in c and "--state open" in c]
-    assert len(open_list_calls) >= 1, (
-        f"jared summary must route via `gh issue list --state open`; "
-        f"saw 0 such calls. All calls: {calls}"
     )
 
 

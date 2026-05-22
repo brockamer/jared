@@ -25,6 +25,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     ItemNotFound,
     OptionNotFound,
     _find_project_root,
+    fetch_project_items_batch,
     fetch_recent_comments_batch,
     pre_flight_check,
     print_redaction_diff,
@@ -768,14 +769,38 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
 
     Returns the same `[{"number", "title", "current_status"}]` shape
     `check_closed_not_done` returns, so the renderer is unchanged.
+
+    On `GhInvocationError` from the underlying `_fetch_recently_closed`
+    (recent-closure count exceeds the cap on an exceptionally busy board),
+    swallow the error, print a one-line stderr notice, and return [].
+    `jared summary` should keep working — sweep has the full picture and
+    catches the older drift anyway.
     """
-    closed = _fetch_recently_closed(board, days=days)
+    try:
+        closed = _fetch_recently_closed(board, days=days)
+    except GhInvocationError as e:
+        print(
+            f"jared: stuck-closed detection skipped — {e}. Run `jared sweep` for the full check.",
+            file=sys.stderr,
+        )
+        return []
+    numbers = [entry["number"] for entry in closed if isinstance(entry.get("number"), int)]
+    if not numbers:
+        return []
+    titles = {
+        entry["number"]: entry.get("title") or ""
+        for entry in closed
+        if isinstance(entry.get("number"), int)
+    }
+    # One aliased GraphQL call covers every recently-closed issue's
+    # projectItems lookup, instead of N per-issue calls — the wall-clock
+    # bottleneck on mature boards (gh-cli startup overhead dominates).
+    items_by_number = fetch_project_items_batch(
+        board.repo, numbers, project_number=board.project_number
+    )
     stuck: list[dict[str, Any]] = []
-    for entry in closed:
-        number = entry.get("number")
-        if not isinstance(number, int):
-            continue
-        item = board.fetch_item_for_issue(number)
+    for number in numbers:
+        item = items_by_number.get(number)
         if item is None:
             # Closed issue that was never on the project board — not
             # this detector's drift (off-board ghosts are sweep's check).
@@ -786,7 +811,7 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
         stuck.append(
             {
                 "number": number,
-                "title": (entry.get("title") or "")[:60],
+                "title": titles.get(number, "")[:60],
                 "current_status": status or "no Status",
             }
         )
@@ -798,8 +823,20 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
 
     Returns a list of {"number", "title", "closedAt"} dicts, sorted by
     closedAt desc (newest first). Empty list if none.
+
+    Raises GhInvocationError on silent-truncation at the --limit cap —
+    same discipline as `Board.board_items()` and `sweep.fetch_items`.
+    Both summary's stuck-closed detector and next-session-prompt's
+    Recently-closed section produce silently-wrong output if items
+    past the cap are dropped.
+
+    Limit set to 200 (was 50): active boards in heavy-shipping mode
+    can close >50 items in 7-14d. Caller-side fallback in
+    `_detect_stuck_closed_recent` catches the truncation error and
+    keeps `jared summary` rendering even when the cap is hit.
     """
     cutoff = _date_n_days_ago(days)
+    limit = 200
     data = board.run_gh(
         [
             "issue",
@@ -811,7 +848,7 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
             "--search",
             f"closed:>={cutoff}",
             "--limit",
-            "50",
+            str(limit),
             "--json",
             "number,title,closedAt",
         ]
@@ -819,6 +856,12 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
     # gh returns a top-level list, not an object — run_gh hands back whatever
     # JSON it parsed. Accept both shapes defensively.
     items = data if isinstance(data, list) else data.get("issues", [])
+    if len(items) == limit:
+        raise GhInvocationError(
+            f"gh issue list --state closed returned exactly {limit} items "
+            f"in the last {days}d — likely truncated. Narrow the lookback "
+            f"window or paginate; do not trust this snapshot."
+        )
     items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
     return items
 
