@@ -412,6 +412,7 @@ class Board:
             if cached is not None:
                 self._items = cached
                 return self._items
+        limit = 2000
         data = self.run_gh(
             [
                 "project",
@@ -420,12 +421,18 @@ class Board:
                 "--owner",
                 self.owner,
                 "--limit",
-                "2000",
+                str(limit),
                 "--format",
                 "json",
             ]
         )
         self._items = data.get("items", [])
+        if len(self._items) == limit:
+            raise GhInvocationError(
+                f"gh project item-list returned exactly {limit} items — "
+                f"likely truncated. Raise the --limit or paginate; do not "
+                f"trust this snapshot."
+            )
         if not no_cache:
             cache.set_item_list(self.project_number, items=self._items)
         return self._items
@@ -434,6 +441,57 @@ class Board:
         """Drop both in-process and on-disk snapshot caches."""
         self._items = None
         cache.invalidate_item_list(self.project_number)
+
+    def open_items(self) -> list[dict[str, Any]]:
+        """Fetch open issues with project field values, in `board_items()` shape.
+
+        Hot-path callers (summary, next-session-prompt) only need open items;
+        `board_items()` pulls Done too and so bills GraphQL proportional to
+        total board size on mature boards (#185). This routes through
+        `gh issue list --state open` (REST, no GraphQL budget) + per-issue
+        `fetch_item_for_issue` (~1-3 GraphQL points each) so cost scales with
+        open count, not board age.
+
+        Returns dicts shaped like `board_items()` entries for open items:
+        `{"content": {"number", "title", "state"}, "status", "priority"}`.
+        Open issues not on the project board are excluded.
+        """
+        issues = self.run_gh(
+            [
+                "issue",
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "open",
+                "--limit",
+                "500",
+                "--json",
+                "number,title,state",
+            ]
+        )
+        if not issues:
+            return []
+        items: list[dict[str, Any]] = []
+        for issue in issues:
+            number = issue.get("number")
+            if not isinstance(number, int):
+                continue
+            project_item = self.fetch_item_for_issue(number)
+            if project_item is None:
+                continue
+            items.append(
+                {
+                    "content": {
+                        "number": number,
+                        "title": issue.get("title", ""),
+                        "state": issue.get("state", "OPEN"),
+                    },
+                    "status": project_item.get("status"),
+                    "priority": project_item.get("priority"),
+                }
+            )
+        return items
 
     _ISSUE_PROJECT_ITEM_QUERY = """
     query($owner: String!, $repo: String!, $number: Int!) {
@@ -1239,9 +1297,7 @@ def fetch_recent_comments_batch(
     return result
 
 
-def fetch_recent_closed_prs_with_files(
-    repo: str, days: int = 7
-) -> list[dict[str, Any]]:
+def fetch_recent_closed_prs_with_files(repo: str, days: int = 7) -> list[dict[str, Any]]:
     """Return closed PRs from the last `days` days, each with its changed
     file list. Used by sweep.check_doc_sync_gate (#163).
 
@@ -1255,12 +1311,18 @@ def fetch_recent_closed_prs_with_files(
     """
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     list_args = [
-        "pr", "list",
-        "--repo", repo,
-        "--state", "closed",
-        "--search", f"closed:>={cutoff}",
-        "--limit", "100",
-        "--json", "number,closedAt",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "closed",
+        "--search",
+        f"closed:>={cutoff}",
+        "--limit",
+        "100",
+        "--json",
+        "number,closedAt",
     ]
     prs = run_gh(list_args)
     if not isinstance(prs, list):
@@ -1622,22 +1684,34 @@ def compute_velocity(
 
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     issues_args = [
-        "issue", "list",
-        "--repo", repo,
-        "--state", "closed",
-        "--search", f"closed:>={cutoff}",
-        "--json", "number,createdAt,closedAt",
-        "--limit", "100",
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "closed",
+        "--search",
+        f"closed:>={cutoff}",
+        "--json",
+        "number,createdAt,closedAt",
+        "--limit",
+        "100",
     ]
     closed = run_gh(issues_args, cache=cache) or []
 
     prs_args = [
-        "pr", "list",
-        "--repo", repo,
-        "--state", "merged",
-        "--search", f"merged:>={cutoff}",
-        "--json", "number,createdAt,mergedAt",
-        "--limit", "100",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "merged",
+        "--search",
+        f"merged:>={cutoff}",
+        "--json",
+        "number,createdAt,mergedAt",
+        "--limit",
+        "100",
     ]
     merged = run_gh(prs_args, cache=cache) or []
 
@@ -1680,16 +1754,24 @@ def fetch_audit_window(
     milestones: list[dict[str, Any]] = []
 
     if entity_type in ("issues", "both"):
-        raw = run_gh(
-            [
-                "issue", "list",
-                "--repo", board.repo,
-                "--state", "open",
-                "--limit", "500",
-                "--json", "number,title,body,createdAt,labels,milestone",
-            ],
-            cache=cache,
-        ) or []
+        raw = (
+            run_gh(
+                [
+                    "issue",
+                    "list",
+                    "--repo",
+                    board.repo,
+                    "--state",
+                    "open",
+                    "--limit",
+                    "500",
+                    "--json",
+                    "number,title,body,createdAt,labels,milestone",
+                ],
+                cache=cache,
+            )
+            or []
+        )
         raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
         if issues is not None:
             wanted = set(issues)
@@ -1714,18 +1796,25 @@ def fetch_audit_window(
 
     if entity_type in ("milestones", "both"):
         owner, name = board.repo.split("/", 1)
-        milestones = run_gh(
-            [
-                "api",
-                f"/repos/{owner}/{name}/milestones",
-                "--paginate",
-                "-X", "GET",
-                "-f", "state=open",
-                "-f", "sort=due_on",
-                "-f", "direction=asc",
-            ],
-            cache=cache,
-        ) or []
+        milestones = (
+            run_gh(
+                [
+                    "api",
+                    f"/repos/{owner}/{name}/milestones",
+                    "--paginate",
+                    "-X",
+                    "GET",
+                    "-f",
+                    "state=open",
+                    "-f",
+                    "sort=due_on",
+                    "-f",
+                    "direction=asc",
+                ],
+                cache=cache,
+            )
+            or []
+        )
 
     if items:
         # Invert repo-wide blockedBy edges: who depends on each candidate?
