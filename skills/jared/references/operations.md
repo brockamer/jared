@@ -50,6 +50,21 @@ keep conversational sessions inside that budget:
 
 The escape-hatch examples below are written with these rules applied.
 
+### Closed-items cache (sweep optimization, #186)
+
+`sweep.py` runs `check_off_board_issues` and `check_closed_not_done`, both of which need closed items in the snapshot — `check_closed_not_done` specifically needs closed-with-Status-not-Done items, so a pure Done-only cache would make them invisible.
+
+To avoid re-pulling the full mature-board history every sweep cycle, sweep maintains a persistent **closed-items cache** at `${JARED_CACHE_DIR}/<project>-closed.json` (24-hour default TTL). On warm-cache reads, sweep pulls open items via `Board.open_items()` (cost scales with open count, not total board size) and merges with the cached closed items. Dedup rule: open-items pull wins on number collision (handles external reopen).
+
+**Invalidation surface.** First-party `jared set <N> Status <value>` invalidates the cache — that catches `jared close` (which delegates to `jared set ... Status Done`), `jared move <N> Done`, and any direct `jared set` of the Status field. Non-Status writes (Priority, Work Stream) leave the cache intact to avoid forcing a needless full-board refetch.
+
+**External-mutation staleness window.** Mutations that bypass the `jared` CLI do **not** invalidate the cache: raw `gh issue close`, raw `gh project item-edit`, the GitHub UI, and the built-in "Item closed → Done" project workflow on PR-merge auto-close. Sweep reports based on the closed-cache may be stale by up to the TTL (24h default). Acceptable trade-off — the alternative is paying full-board GraphQL cost every sweep cycle. Escape valves:
+
+- `JARED_NO_CACHE=1` bypasses every cache layer for one invocation.
+- `jared` mutation paths invalidate; if you've just done a UI close and want sweep to see it, run `jared set <N> Status Done` (no-op if already Done; still invalidates).
+
+The 60s `--cache` discipline above is unaffected: it governs `gh` HTTP-response caching, which is keyed by request shape; the 24h closed-cache governs Jared's own on-disk snapshot.
+
 ## Raw `gh` fallback — the minimum escape-hatch set
 
 ### Inspect the board

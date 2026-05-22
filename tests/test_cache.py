@@ -57,6 +57,85 @@ def test_different_projects_use_separate_cache_files(tmp_path: Path) -> None:
     assert cache.get_item_list(project_number=5, cache_dir=tmp_path) == [{"b": 2}]
 
 
+# ---------- Closed-items cache (#186) ----------
+#
+# Sweep needs Done + stuck-closed items in the snapshot to run
+# `check_off_board_issues` (state-agnostic intersection) and
+# `check_closed_not_done` (closed AND status != Done). A pure Done-only cache
+# makes stuck items invisible, so this cache holds ALL closed items with their
+# current Status field. Long TTL because the closed-item *set* is mostly
+# monotone; first-party Status mutations invalidate to catch the mutable cases
+# (close-into-Done, reopen, manual Status reset).
+
+
+def test_get_closed_items_returns_none_when_no_cache_file(tmp_path: Path) -> None:
+    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path)
+    assert result is None
+
+
+def test_set_then_get_closed_items_round_trips(tmp_path: Path) -> None:
+    items = [
+        {"content": {"number": 52, "state": "CLOSED"}, "status": "Done"},
+        {"content": {"number": 53, "state": "CLOSED"}, "status": "In Progress"},
+    ]
+    cache.set_closed_items(project_number=4, items=items, cache_dir=tmp_path)
+    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path)
+    assert result == items
+
+
+def test_get_closed_items_returns_none_when_past_ttl(tmp_path: Path) -> None:
+    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
+    result = cache.get_closed_items(project_number=4, ttl_seconds=0, cache_dir=tmp_path)
+    assert result is None
+
+
+def test_get_closed_items_default_ttl_is_24h(tmp_path: Path) -> None:
+    """Long TTL: closed-item set is mostly monotone, so the default is generous.
+
+    The open-items cache uses a 60s TTL because open Status changes constantly;
+    closed-items see far fewer mutations and the staleness window for an
+    external mutation is bounded by this value.
+    """
+    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
+    # Default ttl_seconds parameter — 24h = 86400s. If a closed item was cached
+    # 60s ago, the default-TTL read must succeed.
+    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path)
+    assert result == [{"a": 1}]
+
+
+def test_invalidate_closed_items_removes_cache_file(tmp_path: Path) -> None:
+    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
+    cache.invalidate_closed_items(project_number=4, cache_dir=tmp_path)
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) is None
+
+
+def test_invalidate_closed_items_is_noop_when_file_absent(tmp_path: Path) -> None:
+    cache.invalidate_closed_items(project_number=4, cache_dir=tmp_path)
+
+
+def test_get_closed_items_returns_none_on_corrupted_json(tmp_path: Path) -> None:
+    path = tmp_path / "4-closed.json"
+    path.write_text("{not json")
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) is None
+
+
+def test_closed_items_cache_separate_from_open_items_cache(tmp_path: Path) -> None:
+    """The two caches must live in distinct files so neither invalidates the other."""
+    cache.set_item_list(project_number=4, items=[{"open": True}], cache_dir=tmp_path)
+    cache.set_closed_items(project_number=4, items=[{"closed": True}], cache_dir=tmp_path)
+    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path)
+    # Closed-items cache must survive open-items invalidation.
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) == [{"closed": True}]
+    assert cache.get_item_list(project_number=4, cache_dir=tmp_path) is None
+
+
+def test_closed_items_different_projects_use_separate_files(tmp_path: Path) -> None:
+    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
+    cache.set_closed_items(project_number=5, items=[{"b": 2}], cache_dir=tmp_path)
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) == [{"a": 1}]
+    assert cache.get_closed_items(project_number=5, cache_dir=tmp_path) == [{"b": 2}]
+
+
 def test_issue_etag_set_then_get_round_trips(tmp_path: Path) -> None:
     cache.set_issue_etag(
         "brockamer/jared",
