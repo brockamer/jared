@@ -24,6 +24,7 @@ Board class (e.g., a classmethod), patch it on both module objects
 from __future__ import annotations
 
 import importlib.util
+import json as _json
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -195,6 +196,128 @@ def patch_gh(
     monkeypatch.setattr(
         "skills.jared.scripts.lib.board.subprocess.run",
         lambda *a, **kw: fake,
+    )
+
+
+def _projectitems_node(status: str | None, priority: str | None) -> dict[str, object]:
+    """Build a projectItems.nodes entry for project number 7 with the given fields."""
+    field_nodes: list[dict[str, object]] = []
+    if status is not None:
+        field_nodes.append({"name": status, "field": {"name": "Status"}})
+    if priority is not None:
+        field_nodes.append({"name": priority, "field": {"name": "Priority"}})
+    return {
+        "id": "PVTI_aaa",
+        "project": {"number": 7},
+        "fieldValues": {"nodes": field_nodes},
+    }
+
+
+def patch_gh_multi(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    open_issues: list[dict[str, object]] | None = None,
+    statuses: dict[int, tuple[str, str]] | None = None,
+    closed_issues: list[dict[str, object]] | None = None,
+    closed_statuses: dict[int, tuple[str, str]] | None = None,
+    comments_batch_json: str | None = None,
+) -> None:
+    """Patch the multi-gh-call shape produced by the batched open-only path (#185).
+
+    Routes by argv shape:
+    - `gh api graphql` with `issues(states: OPEN, first: 100)` → synthesized
+      batched response with each open issue and its projectItems embedded
+      (built from `open_issues` + `statuses`).
+    - `gh issue list --state closed --search ...` → top-level JSON list
+      from `closed_issues`.
+    - `gh api graphql` with aliased `i<N>: issue(number: <N>) { projectItems`
+      pattern → synthesized batched response keyed by alias, built from
+      `closed_statuses` (issues missing from the map come back as null).
+    - `gh api graphql` with aliased `i<N>: ... { comments(last:` →
+      `comments_batch_json`, or empty-repository if not provided.
+
+    Most tests only need `open_issues` + `statuses`. Stuck-closed tests
+    additionally provide `closed_issues` + `closed_statuses`. The handoff
+    test needs the comments batch too.
+    """
+    closed_list_json = _json.dumps(closed_issues or [])
+    open_issues = open_issues or []
+    statuses = statuses or {}
+    closed_statuses = closed_statuses or {}
+    empty_comments_json = '{"data": {"repository": {}}}'
+
+    def _open_items_batched_response() -> str:
+        nodes: list[dict[str, object]] = []
+        for issue in open_issues:
+            number = issue.get("number")
+            assert isinstance(number, int)
+            project_items: dict[str, object] = {"nodes": []}
+            if number in statuses:
+                status, priority = statuses[number]
+                project_items = {"nodes": [_projectitems_node(status, priority)]}
+            nodes.append(
+                {
+                    "number": number,
+                    "title": issue.get("title", ""),
+                    "state": issue.get("state", "OPEN"),
+                    "projectItems": project_items,
+                }
+            )
+        return _json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": nodes,
+                        }
+                    }
+                }
+            }
+        )
+
+    def _project_items_batched_response(query_arg: str) -> str:
+        # Extract i<N> aliases from the query string — only fabricate
+        # responses for numbers the test actually requested.
+        import re as _re
+
+        repo_block: dict[str, object] = {}
+        for n_str in _re.findall(r"i(\d+):\s*issue\(number:\s*\d+\)", query_arg):
+            n = int(n_str)
+            if n in closed_statuses:
+                status, priority = closed_statuses[n]
+                repo_block[f"i{n}"] = {
+                    "projectItems": {"nodes": [_projectitems_node(status, priority)]},
+                }
+            else:
+                repo_block[f"i{n}"] = {"projectItems": {"nodes": []}}
+        return _json.dumps({"data": {"repository": repo_block}})
+
+    def fake_run(args: list[str], **_: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue list" in joined and "--state closed" in joined:
+            return FakeGhResult(stdout=closed_list_json)
+        if "api graphql" in joined:
+            query_arg = next(
+                (
+                    args[i + 1]
+                    for i, tok in enumerate(args)
+                    if tok == "-f" and i + 1 < len(args) and args[i + 1].startswith("query=")
+                ),
+                "",
+            )
+            if "issues(states: OPEN" in query_arg:
+                return FakeGhResult(stdout=_open_items_batched_response())
+            if "comments(last:" in query_arg:
+                return FakeGhResult(stdout=comments_batch_json or empty_comments_json)
+            if "projectItems(first: 10)" in query_arg:
+                # Aliased batched form used by fetch_project_items_batch.
+                return FakeGhResult(stdout=_project_items_batched_response(query_arg))
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        fake_run,
     )
 
 
