@@ -8,7 +8,7 @@ Investigation + routing policy for jared's four candidate mechanisms for talking
 - **ProjectV2 operations (jared's core surface) are graphql-only** at the GitHub API layer. No mechanism — including the MCP plugin — exposes ProjectV2 reads or mutations via REST. This is a hard constraint, not a routing preference.
 - **The MCP plugin has no ProjectV2 tools** in its surface. Its scope is issues + PRs + repos + branches + files + tags + releases + reviews + searches. It is therefore **not a contender** for jared's distinctive operations; it is at most an alternative for the issue-CRUD periphery.
 - **Python subprocesses cannot call MCP tools** (per [CLAUDE.md](../CLAUDE.md)). The MCP plugin is reachable only from the conversational layer (Claude Code) — never from `lib/board.py` or the batch scripts.
-- **The graphql-pressure source is `gh project item-list`**, not per-issue reads. One item-list call against jared's projects/4 costs ~200 graphql points; one `gh issue view --json` costs ~1. A long /jared-start cycle (next-session-prompt + summary + ties + move) can burn 600–900 graphql points, matching the operator's observed exhaustion pattern on findajob.
+- **The graphql-pressure source is `gh project item-list`**, not per-issue reads. Cost scales linearly with item count (~10 graphql points per project item, because the call traverses every field value per item). On `jared/projects/4` (~50 items) one call costs ~200 points; on a 500-item board (observed empirically on `findajob/projects/1`) a single call can burn ~5000 graphql points — the entire hourly bucket. By contrast, one `gh issue view --json` costs ~1 graphql point. A long /jared-start cycle (next-session-prompt + summary + ties + move) can burn 600–900 graphql points on jared's small board, matching the operator's observed exhaustion pattern on findajob's larger board.
 - **Routing recommendation (short form):**
   - ProjectV2 reads + mutations → `gh api graphql` (no alternative)
   - Stable per-issue state checks → `gh api repos/.../issues/N` (REST, ETag-cached) — this is the existing [#54](https://github.com/brockamer/jared/issues/54) / [#147](https://github.com/brockamer/jared/issues/147) path; doctrine confirmed
@@ -95,9 +95,11 @@ Per-mechanism bucket attribution, measured empirically against the live `brockam
 
 GitHub rate-limit buckets are shared across the authenticated identity, not per-process. If multiple Claude sessions / jared invocations / direct shell `gh` calls run under the same user concurrently, their consumption mixes into the same counters. A snapshot-call-snapshot measurement can show "this call cost N points" when N is actually `your_call + someone_else_in_the_window`.
 
-For this investigation, several early observations showed large unexplained graphql drops (one snapshot-pair attributed 103 graphql points to a single `gh issue view --json` call; another attributed 437 to a single `gh api repos/.../issues/N` REST call that should have been graphql-free). Re-running the same calls in isolation consistently produced single-digit deltas, confirming the early numbers were noise from concurrent activity.
+The per-call costs in the table below were measured during a deliberately-quiet window on 2026-05-22: graphql freshly reset, other Claude sessions paused, drift verified ≤0 across baseline snapshot pairs. Each REST/MCP call was replicated 3× where the magnitude was small enough that noise might dominate; the high-cost `gh project item-list` call was measured once in the clean window and once previously, with consistent results.
 
-**Trust small deltas (≤5 points); treat large deltas with suspicion unless replicated.** The per-call costs in the table below are the replicated steady-state values, not the early one-off observations.
+Early in the investigation, several observations against an active background showed large unexplained graphql drops (one snapshot-pair attributed 103 graphql points to a single `gh issue view --json` call; another attributed 437 to a single REST call that should have been graphql-free). Re-running the same calls in isolation produced the single-digit deltas now recorded below — the early figures were noise from concurrent sessions, not real costs.
+
+**Trust small deltas (≤5 points) only when replicated; treat large deltas with suspicion unless replicated under verified-quiet conditions.**
 
 ### Bucket quotas
 
@@ -112,18 +114,20 @@ GitHub serves several rate-limit buckets per authenticated user; jared touches f
 
 ### Per-call cost (empirically measured)
 
+All values measured during the 2026-05-22 quiet window. `(3×)` indicates the value was replicated three times consecutively with identical results.
+
 | Call | Bucket | Per-call cost |
 |---|---|---|
-| `gh project item-list 4 --owner brockamer --limit 2000` | graphql | **~203 points** |
-| `Board.fetch_open_issues_for_ties()` (paginated, body + labels + milestone + projectItems + trackedInIssues) | graphql | ~20-50 per page |
-| `gh issue view N --json <any-fields>` | graphql | **1 point** (regardless of field count) |
-| `mcp__github__issue_read` (method=get) | REST core | **2 points** |
-| `gh api repos/.../issues/N` | REST core | 1 point (or 0 with ETag 304) |
-| `mcp__github__add_issue_comment` | REST core | **2 points** |
-| `mcp__github__search_issues` | graphql | **1 point** (MCP routes search via graphql despite REST-shaped response) |
+| `gh project item-list <N> --owner <O> --limit 2000` | graphql | **~10 points per project item.** 203 measured on jared/projects/4 (~50 items); ~5000 observed by operator on findajob/projects/1 (~500 items) — a single call burned the entire hourly bucket. Cost is the chief graphql pressure source. |
+| `Board.fetch_open_issues_for_ties()` (paginated, body + labels + milestone + projectItems + trackedInIssues) | graphql | ~20-50 per page (estimated from board.py docstring; not directly measured this window) |
+| `gh issue view N --json <any-fields>` | graphql | **1 point (3×)** — regardless of field count (minimal `number,title,state` and jared-realistic `body,comments,labels,milestone,title,number,state` both consumed 1 point) |
+| `mcp__github__issue_read` (method=get) | REST core | **1-2 points** (3× consecutive: 2, 2, 1 — subsequent calls on the same issue appear to be MCP-server-side cached, dropping to 1 point. Budget 2 conservatively.) |
+| `gh api repos/.../issues/N` | REST core | **1 point (3×)** — or 0 with ETag 304 (`fetch_issue_state_rest` path) |
+| `mcp__github__add_issue_comment` | REST core | **2 points** (1× — write path; kept replication to one to avoid polluting issues) |
+| `mcp__github__search_issues` | graphql | **0-1 points** (2×: repeated identical query cost 0 from server-side cache; different query cost 1. Budget 1.) |
 | `gh api graphql -f query=mutation {...}` (single ProjectV2 field update) | graphql | 1 point |
-| `Board.add_existing_to_board` (aliased mutation setting Priority + Status + extras) | graphql | 1 point (single round trip) |
-| `gh api rate_limit` | (exempt) | 0 (always free) |
+| `Board.add_existing_to_board` (aliased mutation setting Priority + Status + extras) | graphql | 1 point (single round trip — same cost as a single field update, thanks to GraphQL aliasing) |
+| `gh api rate_limit` | (exempt) | 0 (always free — does not draw from any rate-limit bucket) |
 
 ### What graphql exhaustion looks like
 
@@ -224,23 +228,25 @@ Revisit if a future migration introduces 3+ additional REST callsites (e.g., the
 
 ## Validation log
 
-Each mechanism in the matrix was invoked at least once against `brockamer/jared` projects/4 during this investigation, with rate-limit deltas captured. Per AC: no "should work" claims; everything below is observed.
+Each mechanism in the matrix was invoked at least once against `brockamer/jared` projects/4 during this investigation, with rate-limit deltas captured. Final measurements were taken in a verified-quiet window (other Claude sessions paused, graphql freshly reset). Per AC: no "should work" claims; everything below is observed.
 
-| Mechanism / call | Result | Bucket delta |
-|---|---|---|
-| `gh api rate_limit` (baseline) | OK | 0 |
-| `gh issue view 199 --repo brockamer/jared --json number,title,state` (×3) | OK | +1 graphql per call (consistent) |
-| `gh issue view 199 --json body,comments,labels,milestone,title,number,state` (jared-realistic) | OK | +1 graphql (same as minimal) |
-| `gh api repos/brockamer/jared/issues/199` | OK | +1 REST core |
-| `gh project item-list 4 --owner brockamer --limit 2000 --format json` | OK | +203 graphql |
-| `mcp__github__issue_read` (issue 199, method=get) | OK | +2 REST core |
-| `mcp__github__search_issues` (closed bugs in brockamer/jared) | OK | +1 graphql |
-| `mcp__github__add_issue_comment` (write — on issue #202, intentional investigation artifact) | OK | +2 REST core |
-| `mcp__github__get_me` | OK (same identity as `gh api user`) | +1 REST core (counted under search/baseline noise floor) |
-| `gh auth status` | OK | 0 |
-| `jared next-session-prompt`, `jared summary`, `jared get-item 202`, `jared move 202`, `jared comment 202` | OK | ~200-300 graphql per /jared-start cycle (matches operator's observed pattern) |
+| Mechanism / call | Replication | Result | Bucket delta |
+|---|---|---|---|
+| `gh api rate_limit` (baseline) | n/a | OK | 0 (exempt) |
+| `gh issue view 199 --repo brockamer/jared --json number,title,state` | 3× | OK | +1 graphql per call (1, 1, 1) |
+| `gh issue view 199 --json body,comments,labels,milestone,title,number,state` (jared-realistic) | 1× | OK | +1 graphql (same as minimal field set) |
+| `gh api repos/brockamer/jared/issues/199` | 3× | OK | +1 REST core per call (1, 1, 1) |
+| `gh project item-list 4 --owner brockamer --limit 2000 --format json` | 1× clean + 1× pre-quiet | OK | +203 graphql (consistent across windows) |
+| `mcp__github__issue_read` (issue 199, method=get) | 3× | OK | +1-2 REST core per call (2, 2, 1 — caching effect on repeats) |
+| `mcp__github__search_issues` (different queries) | 2× | OK | +0 graphql (cached identical query) / +1 graphql (different query) |
+| `mcp__github__add_issue_comment` (write — on issue #202, two intentional investigation artifacts) | 2× total (pre-quiet + clean window) | OK | +2 REST core per call |
+| `mcp__github__get_me` | 1× | OK (same identity as `gh api user`) | +1 REST core |
+| `gh auth status` | 1× | OK | 0 |
+| `jared next-session-prompt`, `jared summary`, `jared get-item 202`, `jared move 202`, `jared comment 202` | 1× each | OK | ~200-300 graphql per /jared-start cycle (matches operator's observed pattern) |
 
-The `gh issue view --json` numbers in particular were re-measured after an early one-off observation of 103 points (which turned out to be concurrent-activity noise, not a real cost cliff). The stable per-call cost is 1 graphql point regardless of field selection.
+The `gh issue view --json` numbers in particular were re-measured after an early observation of 103 points (which turned out to be concurrent-activity noise, not a real cost cliff). The stable per-call cost is 1 graphql point regardless of field selection — replicated 3× in the quiet window.
+
+The MCP `issue_read` caching observation (calls 2 and 3 dropped from 2 to 1 REST core) suggests the MCP server maintains some response cache for recent identical reads. Useful in conversational contexts where the same issue is referenced multiple times in a session.
 
 ## What ships next
 
