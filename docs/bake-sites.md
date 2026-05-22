@@ -20,6 +20,7 @@ This file is the formal claim for #167 (v1.0 readiness — verify jared works ag
 - **Kind of work:** Cloudflare Workers project — Garmin inReach SMS-driven assistant. Lower-velocity than findajob; smaller backlog focused on feature work and KV → Durable Object migration.
 - **Project doc location:** `docs/project-board.md` (default).
 - **Quirks:** None observed.
+- **Evidence-of-bake:** trailscribe issue [#201](https://github.com/brockamer/trailscribe/issues/201) carries a 2026-05-21 Session-note comment in canonical jared shape, referencing merged PR [#205](https://github.com/brockamer/trailscribe/pull/205) — one complete `/jared` → start → work → wrap cycle. Issue #206 (`adopt jared doc-sync gate`) confirms jared discipline is in active use.
 
 ## Adding a bake site
 
