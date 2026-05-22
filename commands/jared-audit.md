@@ -60,8 +60,12 @@ Flow:
 7. **Mutations — date proposals are aggressive.** When proposing a new milestone due date during reshape, anchor to:
 
    ```
-   default_due_date = today + (velocity.median_pr_duration_days × remaining_open_children)
+   raw_days     = velocity.median_pr_duration_days × remaining_open_children
+   anchor_days  = max(7, raw_days)
+   default_due_date = today + anchor_days
    ```
+
+   The **7-day floor** exists because `median_pr_duration_days` is a tight proxy for "CI duration" on projects that gate merges on green CI, not for "feature-completion duration." On CI-fast-merge cadences (PRs auto-merging within minutes of green) the raw formula collapses to "today + epsilon" — i.e., "tomorrow" — for every reshape, regardless of remaining work. That's not what anchoring to recent shipping cadence is meant to do. The floor keeps proposals aggressive but realistic (#183).
 
    Bias toward the near term. Default cadence is weeks, not quarters. If the proposed date pushes past this anchor, include a one-line written rationale (e.g., "external dependency lands week of X") in the operator approval prompt — parking a milestone 3–6 months out without an explicit reason is a smell.
 
