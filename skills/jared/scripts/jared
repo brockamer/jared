@@ -645,6 +645,13 @@ def _cmd_set(args: argparse.Namespace) -> int:
     # here). Without this, a `jared move` followed by `jared summary`
     # within TTL returns the pre-move snapshot. (#52 Phase 1.)
     board.invalidate_items()
+    # Status writes are the only first-party path that can move an item
+    # into or out of the closed-cache's set, so invalidate it conditionally
+    # here. Non-Status writes (Priority, Work Stream) leave the closed
+    # snapshot intact — invalidating those would force sweep to re-pull
+    # all closed items every time someone bumped a priority. (#186)
+    if args.field_name == "Status":
+        board.invalidate_closed_items()
     print(f"OK: set {args.field_name}={args.value} on issue #{args.issue_number}")
     return 0
 

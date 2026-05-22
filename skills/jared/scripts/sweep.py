@@ -155,6 +155,71 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
     return items
 
 
+def merge_open_with_closed(
+    open_items: list[dict[str, Any]],
+    closed_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge a fresh open-items pull with the cached closed-items snapshot.
+
+    Dedup rule: open-items wins on number collision. Handles the external-
+    reopen race where an issue was closed (still in closed-cache) but has
+    since been reopened (now in open-items). The fresh open snapshot is
+    authoritative for current state.
+
+    Items without a content.number key are kept on both sides — sweep's
+    checks tolerate that shape via defensive None-guards.
+    """
+    open_numbers = {
+        (i.get("content") or {}).get("number")
+        for i in open_items
+        if (i.get("content") or {}).get("number") is not None
+    }
+    deduped_closed = [
+        i for i in closed_items if (i.get("content") or {}).get("number") not in open_numbers
+    ]
+    return open_items + deduped_closed
+
+
+def fetch_items_with_closed_cache(board: Board, owner: str, project: str) -> list[dict[str, Any]]:
+    """Fetch a sweep-shaped item snapshot, exploiting the closed-items cache (#186).
+
+    Warm path: pull open items via `Board.open_items()` (cost scales with
+    open count, not total board size) and merge with the persistent
+    closed-items cache. No `gh project item-list` call is made — that's
+    the whole point of the optimization.
+
+    Cold path: fall back to the full `fetch_items` pull (which has the
+    `len == limit` truncation guard #185 added), then warm the closed
+    cache from the closed subset for future calls.
+
+    `Board.open_items()` currently raises `GhInvocationError` when the repo
+    has >100 open issues (pagination not implemented). Without a fallback
+    here, sweep would break silently when an active project crosses that
+    threshold. Catch + fall through to the cold path — slower but correct.
+
+    `JARED_NO_CACHE=1` bypasses both layers — every call hits the network.
+    """
+    no_cache = os.environ.get("JARED_NO_CACHE") == "1"
+    if not no_cache:
+        cached_closed = board_cache.get_closed_items(board.project_number)
+        if cached_closed is not None:
+            try:
+                open_items = board.open_items()
+            except GhInvocationError:
+                # >100 open issues or transient open-items failure — fall
+                # through to the cold path rather than break sweep.
+                pass
+            else:
+                return merge_open_with_closed(open_items, cached_closed)
+    # Cold-cache fallback: full-board pull (truncation-guarded). Warm the
+    # closed-cache from the result so subsequent sweeps take the warm path.
+    items = fetch_items(owner, project)
+    if not no_cache:
+        closed_subset = [i for i in items if (i.get("content") or {}).get("state") == "CLOSED"]
+        board_cache.set_closed_items(project_number=board.project_number, items=closed_subset)
+    return items
+
+
 def fetch_open_issues_bulk(repo: str) -> list[dict[str, Any]]:
     """One API call to get all open issues with the data we need."""
     stdout = board_run_gh_raw(
@@ -636,9 +701,10 @@ def main() -> int:
             print(f"sweep: {warning}", file=sys.stderr)
             return 0
 
-    # Resolve owner/project
+    # Resolve owner/project — and the convention doc, if there is one,
+    # so we can instantiate a Board for the closed-cache optimization path.
+    cfg = find_config()
     if not args.owner or not args.project:
-        cfg = find_config()
         if not cfg:
             print("sweep: no project-board.md found and no --owner/--project", file=sys.stderr)
             return 1
@@ -664,9 +730,19 @@ def main() -> int:
     print(f"Run at: {dt.datetime.now(dt.UTC).isoformat()}")
     print()
 
-    # Fetch
+    # Fetch — prefer the closed-cache optimization (#186) when the
+    # convention doc *is* what's selecting the project. If the operator
+    # explicitly passed --owner/--project, take the cold path: the cfg-
+    # derived Board could be a different project, and writing the explicit
+    # project's closed items to cfg's cache file would corrupt subsequent
+    # cfg-default runs.
+    explicit_args = bool(args.owner and args.project)
     try:
-        items = fetch_items(owner, project)
+        if cfg and not explicit_args:
+            board = Board.from_path(cfg)
+            items = fetch_items_with_closed_cache(board, owner, project)
+        else:
+            items = fetch_items(owner, project)
     except (RuntimeError, GhInvocationError) as e:
         print(f"sweep: {e}", file=sys.stderr)
         return 1

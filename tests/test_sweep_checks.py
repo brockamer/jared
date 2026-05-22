@@ -574,3 +574,301 @@ def test_sweep_fetch_items_raises_when_limit_reached(
 
     with pytest.raises(sweep.GhInvocationError, match="truncat"):
         sweep.fetch_items("brockamer", "7")
+
+
+# ---------- fetch_items_with_closed_cache (#186) ----------
+
+
+def test_merge_open_with_closed_dedup_open_wins() -> None:
+    """When an issue appears in both the open pull and the closed-cache
+    (external reopen race), the open-items entry wins. Closed-cache entries
+    matching an open number are dropped.
+    """
+    sweep = import_sweep()
+
+    open_items = [
+        {"content": {"number": 10, "state": "OPEN"}, "status": "In Progress"},
+        {"content": {"number": 11, "state": "OPEN"}, "status": "Backlog"},
+    ]
+    closed_items = [
+        # #10 was reopened externally — stale closed entry should be dropped
+        {"content": {"number": 10, "state": "CLOSED"}, "status": "Done"},
+        {"content": {"number": 99, "state": "CLOSED"}, "status": "Done"},
+    ]
+
+    merged = sweep.merge_open_with_closed(open_items, closed_items)
+    numbers: list[int] = [
+        n for i in merged if isinstance(n := (i.get("content") or {}).get("number"), int)
+    ]
+    assert sorted(numbers) == [10, 11, 99]
+    # The merged #10 must reflect the OPEN snapshot, not the closed cache.
+    item_10 = next(i for i in merged if (i.get("content") or {}).get("number") == 10)
+    assert item_10["status"] == "In Progress"
+    assert item_10["content"]["state"] == "OPEN"
+
+
+def test_merge_open_with_closed_handles_missing_numbers() -> None:
+    """Items without a content.number key are kept on both sides — defensive
+    against unexpected payload shapes from gh."""
+    sweep = import_sweep()
+
+    open_items = [{"content": {"number": 10}}, {"content": {}}]
+    closed_items = [{"content": {"number": 99}}, {}]
+
+    merged = sweep.merge_open_with_closed(open_items, closed_items)
+    assert len(merged) == 4
+
+
+def test_fetch_items_with_closed_cache_warm_hit_returns_merged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the closed-cache is warm, fetch_items_with_closed_cache must
+    call board.open_items() for fresh open items and merge with the cached
+    closed subset. No `gh project item-list` call is made — that's the
+    whole point of the optimization."""
+    import os
+
+    from skills.jared.scripts.lib import cache
+    from skills.jared.scripts.lib.board import Board
+
+    sweep = import_sweep()
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    cache.set_closed_items(
+        project_number=7,
+        items=[
+            {"content": {"number": 50, "state": "CLOSED"}, "status": "Done"},
+            {"content": {"number": 51, "state": "CLOSED"}, "status": "Done"},
+        ],
+        cache_dir=cache_dir,
+    )
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """)
+    )
+    board = Board.from_path(board_md)
+
+    # Patch run_graphql to return the open-items query result; assert no
+    # `gh project item-list` is called (that's the cost we're avoiding).
+    seen_args: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    def fake_run(args: list[str], **_kw: object) -> object:
+        seen_args.append(args)
+        if args[1:3] == ["api", "graphql"]:
+            return FakeResult(
+                json.dumps(
+                    {
+                        "data": {
+                            "repository": {
+                                "issues": {
+                                    "pageInfo": {"hasNextPage": False},
+                                    "nodes": [
+                                        {
+                                            "number": 60,
+                                            "title": "fresh open",
+                                            "state": "OPEN",
+                                            "projectItems": {
+                                                "nodes": [
+                                                    {
+                                                        "id": "PVTI_open60",
+                                                        "project": {"number": 7},
+                                                        "fieldValues": {
+                                                            "nodes": [
+                                                                {
+                                                                    "name": "Up Next",
+                                                                    "field": {"name": "Status"},
+                                                                }
+                                                            ]
+                                                        },
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ],
+                                }
+                            }
+                        }
+                    }
+                )
+            )
+        raise AssertionError(f"Unexpected gh call: {args}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
+
+    # No `gh project item-list` invocation — that's the regression guard.
+    assert all("project" not in a or "item-list" not in a for a in seen_args), (
+        f"Warm closed-cache path must not call `gh project item-list`; saw: {seen_args}"
+    )
+    numbers: list[int] = sorted(
+        n for i in items if isinstance(n := (i.get("content") or {}).get("number"), int)
+    )
+    assert numbers == [50, 51, 60]
+
+
+def test_fetch_items_with_closed_cache_cold_miss_warms_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """On closed-cache miss, fall back to the full board pull, then warm
+    the closed-cache from the closed subset. Next call within TTL must hit
+    the warm path."""
+    import os
+
+    from skills.jared.scripts.lib import cache
+    from skills.jared.scripts.lib.board import Board
+
+    sweep = import_sweep()
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    # Ensure no closed-cache pre-seeded.
+    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) is None
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """)
+    )
+    board = Board.from_path(board_md)
+
+    full_items = [
+        {"content": {"number": 70, "state": "OPEN"}, "status": "In Progress"},
+        {"content": {"number": 80, "state": "CLOSED"}, "status": "Done"},
+        {"content": {"number": 81, "state": "CLOSED"}, "status": "In Progress"},
+    ]
+    patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
+
+    items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
+    assert len(items) == 3
+    # Cache was warmed from the CLOSED subset only — opens go to next live pull.
+    warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir)
+    assert warmed is not None
+    warmed_numbers: list[int] = sorted(
+        n for i in warmed if isinstance(n := (i.get("content") or {}).get("number"), int)
+    )
+    assert warmed_numbers == [80, 81]
+
+
+def test_fetch_items_with_closed_cache_falls_back_when_open_items_paginates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Board.open_items() raises GhInvocationError when >100 open issues exist
+    (pagination not implemented). The warm path must catch this and fall back
+    to the full-pull cold path so sweep doesn't break silently when an active
+    project crosses the threshold."""
+    import os
+
+    from skills.jared.scripts.lib import cache
+
+    sweep = import_sweep()
+    # Use the Board class from sweep's import path — the dual-import gotcha
+    # (see top of conftest.py) means lib.board.Board and
+    # skills.jared.scripts.lib.board.Board are distinct class objects, and
+    # the sweep code catches the former. Same applies to GhInvocationError.
+    Board = sweep.Board  # noqa: N806
+    GhInvocationError = sweep.GhInvocationError  # noqa: N806
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    cache.set_closed_items(
+        project_number=7,
+        items=[{"content": {"number": 50, "state": "CLOSED"}, "status": "Done"}],
+        cache_dir=cache_dir,
+    )
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """)
+    )
+    board = Board.from_path(board_md)
+
+    def fake_open_items(self: Any) -> list[dict[str, Any]]:
+        raise GhInvocationError("open_items() query returned hasNextPage=true; >100 open issues")
+
+    monkeypatch.setattr(Board, "open_items", fake_open_items)
+
+    # Cold path returns the full board pull, then re-warms the cache.
+    full_items = [
+        {"content": {"number": 10, "state": "OPEN"}, "status": "In Progress"},
+        {"content": {"number": 50, "state": "CLOSED"}, "status": "Done"},
+    ]
+    patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
+
+    items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
+    # Must not propagate the pagination error; must return the cold-path result.
+    assert len(items) == 2
+    numbers: list[int] = sorted(
+        n for i in items if isinstance(n := (i.get("content") or {}).get("number"), int)
+    )
+    assert numbers == [10, 50]
+
+
+def test_fetch_items_with_closed_cache_respects_jared_no_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """JARED_NO_CACHE=1 bypasses both the open-items and closed-items caches,
+    forcing a full pull every call."""
+    import os
+
+    from skills.jared.scripts.lib import cache
+    from skills.jared.scripts.lib.board import Board
+
+    sweep = import_sweep()
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    # Pre-seed the closed-cache; JARED_NO_CACHE should ignore it.
+    cache.set_closed_items(
+        project_number=7,
+        items=[{"content": {"number": 999, "state": "CLOSED"}, "status": "Done"}],
+        cache_dir=cache_dir,
+    )
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """)
+    )
+    board = Board.from_path(board_md)
+
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
+
+    full_items = [{"content": {"number": 1, "state": "OPEN"}, "status": "Backlog"}]
+    patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
+
+    items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
+    # Should reflect the fresh full-pull, not the (ignored) stale closed-cache.
+    numbers = [(i.get("content") or {}).get("number") for i in items]
+    assert numbers == [1]
