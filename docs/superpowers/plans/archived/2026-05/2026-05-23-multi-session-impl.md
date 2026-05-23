@@ -1,6 +1,15 @@
+---
+**Shipped in #231, #236 on 2026-05-23. Final decisions captured in issue body.**
+---
+
 # Multi-Session Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+## Issue
+
+- #231 — feat(sessions): worktree-by-default for parallel Claude sessions
+- #236 — feat(multi-session): /jared-start --session flag + sibling-detection prompt
 
 **Goal:** Ship the opt-in worktree-based isolation for parallel Claude sessions on a jared-stewarded repo, with unconditional session-presence locking that makes the B-leg refusal real. Closes #231 (worktree-by-default) + #236 (`/jared-start --session` flag) in one PR.
 
