@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import json as _json
+import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -351,3 +352,34 @@ def patch_gh_by_arg(
         fake_run,
     )
     return calls
+
+
+# ---------------------------------------------------------------------------
+# Shared git-repo helpers (used by test_worktree.py and test_cli.py)
+# ---------------------------------------------------------------------------
+
+
+def git_cmd(repo: Path, *args: str) -> str:
+    """Run a git command in `repo` and return stdout (stripped)."""
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+@pytest.fixture
+def main_repo(tmp_path: Path) -> Path:
+    """Create a fresh git repo with one commit on `main`."""
+    repo = tmp_path / "main-repo"
+    repo.mkdir()
+    git_cmd(repo, "init", "-b", "main")
+    git_cmd(repo, "config", "user.email", "test@example.com")
+    git_cmd(repo, "config", "user.name", "test")
+    (repo / "README.md").write_text("initial\n")
+    git_cmd(repo, "add", "README.md")
+    git_cmd(repo, "commit", "-m", "initial")
+    return repo
