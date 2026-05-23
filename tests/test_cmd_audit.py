@@ -1,4 +1,5 @@
 """Unit tests for /jared-audit — velocity computation + window fetch + CLI."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -83,12 +84,21 @@ def test_compute_velocity_pr_duration(monkeypatch: pytest.MonkeyPatch) -> None:
     merged_prs = json.dumps(
         [
             # 2 days, 1 day, 4 days → median 2
-            {"number": 100, "createdAt": "2026-05-18T00:00:00Z",
-             "mergedAt": "2026-05-20T00:00:00Z"},
-            {"number": 101, "createdAt": "2026-05-19T00:00:00Z",
-             "mergedAt": "2026-05-20T00:00:00Z"},
-            {"number": 102, "createdAt": "2026-05-15T00:00:00Z",
-             "mergedAt": "2026-05-19T00:00:00Z"},
+            {
+                "number": 100,
+                "createdAt": "2026-05-18T00:00:00Z",
+                "mergedAt": "2026-05-20T00:00:00Z",
+            },
+            {
+                "number": 101,
+                "createdAt": "2026-05-19T00:00:00Z",
+                "mergedAt": "2026-05-20T00:00:00Z",
+            },
+            {
+                "number": 102,
+                "createdAt": "2026-05-15T00:00:00Z",
+                "mergedAt": "2026-05-19T00:00:00Z",
+            },
         ]
     )
     patch_gh_by_arg(
@@ -111,12 +121,30 @@ def test_fetch_audit_window_count_returns_oldest_first(
     write_minimal_board(tmp_path)
     issues_payload = json.dumps(
         [
-            {"number": 50, "title": "old", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
-             "labels": [], "milestone": None},
-            {"number": 51, "title": "older", "body": "...", "createdAt": "2025-12-15T00:00:00Z",
-             "labels": [], "milestone": None},
-            {"number": 52, "title": "newest", "body": "...", "createdAt": "2026-03-01T00:00:00Z",
-             "labels": [], "milestone": None},
+            {
+                "number": 50,
+                "title": "old",
+                "body": "...",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 51,
+                "title": "older",
+                "body": "...",
+                "createdAt": "2025-12-15T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 52,
+                "title": "newest",
+                "body": "...",
+                "createdAt": "2026-03-01T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
         ]
     )
     patch_gh_by_arg(
@@ -147,15 +175,30 @@ def test_fetch_audit_window_age_days_filters_by_age(
     now = dt.datetime.now(dt.UTC)
     issues_payload = json.dumps(
         [
-            {"number": 10, "title": "ancient", "body": "...",
-             "createdAt": (now - dt.timedelta(days=120)).isoformat(),
-             "labels": [], "milestone": None},
-            {"number": 11, "title": "stale", "body": "...",
-             "createdAt": (now - dt.timedelta(days=45)).isoformat(),
-             "labels": [], "milestone": None},
-            {"number": 12, "title": "fresh", "body": "...",
-             "createdAt": (now - dt.timedelta(days=5)).isoformat(),
-             "labels": [], "milestone": None},
+            {
+                "number": 10,
+                "title": "ancient",
+                "body": "...",
+                "createdAt": (now - dt.timedelta(days=120)).isoformat(),
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 11,
+                "title": "stale",
+                "body": "...",
+                "createdAt": (now - dt.timedelta(days=45)).isoformat(),
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 12,
+                "title": "fresh",
+                "body": "...",
+                "createdAt": (now - dt.timedelta(days=5)).isoformat(),
+                "labels": [],
+                "milestone": None,
+            },
         ]
     )
     patch_gh_by_arg(
@@ -186,18 +229,31 @@ def test_fetch_audit_window_default_staleness_uses_velocity(
     # Velocity: median age-at-close of 20 → threshold = 2*20 = 40 (within 14..60 band)
     closed_payload = json.dumps(
         [
-            {"number": 1, "createdAt": (now - dt.timedelta(days=20)).isoformat(),
-             "closedAt": now.isoformat()},
+            {
+                "number": 1,
+                "createdAt": (now - dt.timedelta(days=20)).isoformat(),
+                "closedAt": now.isoformat(),
+            },
         ]
     )
     issues_payload = json.dumps(
         [
-            {"number": 10, "title": "older-than-40", "body": "...",
-             "createdAt": (now - dt.timedelta(days=50)).isoformat(),
-             "labels": [], "milestone": None},
-            {"number": 11, "title": "newer-than-40", "body": "...",
-             "createdAt": (now - dt.timedelta(days=30)).isoformat(),
-             "labels": [], "milestone": None},
+            {
+                "number": 10,
+                "title": "older-than-40",
+                "body": "...",
+                "createdAt": (now - dt.timedelta(days=50)).isoformat(),
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 11,
+                "title": "newer-than-40",
+                "body": "...",
+                "createdAt": (now - dt.timedelta(days=30)).isoformat(),
+                "labels": [],
+                "milestone": None,
+            },
         ]
     )
     patch_gh_by_arg(
@@ -226,12 +282,30 @@ def test_fetch_audit_window_issues_returns_only_listed(
     write_minimal_board(tmp_path)
     issues_payload = json.dumps(
         [
-            {"number": 50, "title": "a", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
-             "labels": [], "milestone": None},
-            {"number": 51, "title": "b", "body": "...", "createdAt": "2025-12-15T00:00:00Z",
-             "labels": [], "milestone": None},
-            {"number": 52, "title": "c", "body": "...", "createdAt": "2026-03-01T00:00:00Z",
-             "labels": [], "milestone": None},
+            {
+                "number": 50,
+                "title": "a",
+                "body": "...",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 51,
+                "title": "b",
+                "body": "...",
+                "createdAt": "2025-12-15T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 52,
+                "title": "c",
+                "body": "...",
+                "createdAt": "2026-03-01T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
         ]
     )
     patch_gh_by_arg(
@@ -262,10 +336,22 @@ def test_fetch_audit_window_enriches_open_dependents(
     write_minimal_board(tmp_path)
     issues_payload = json.dumps(
         [
-            {"number": 50, "title": "leaf", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
-             "labels": [], "milestone": None},
-            {"number": 51, "title": "blocks-leaf", "body": "...",
-             "createdAt": "2026-01-02T00:00:00Z", "labels": [], "milestone": None},
+            {
+                "number": 50,
+                "title": "leaf",
+                "body": "...",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
+            {
+                "number": 51,
+                "title": "blocks-leaf",
+                "body": "...",
+                "createdAt": "2026-01-02T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
         ]
     )
     # GraphQL repo-wide blockedBy edges: #51 is blocked by #50, both open
@@ -316,10 +402,22 @@ def test_fetch_audit_window_milestones_returns_open_milestones(
     write_minimal_board(tmp_path)
     milestones_payload = json.dumps(
         [
-            {"number": 1, "title": "v0.21.0", "due_on": "2026-06-01T00:00:00Z",
-             "open_issues": 5, "closed_issues": 2, "state": "open"},
-            {"number": 2, "title": "v1.0.0", "due_on": None,
-             "open_issues": 12, "closed_issues": 0, "state": "open"},
+            {
+                "number": 1,
+                "title": "v0.21.0",
+                "due_on": "2026-06-01T00:00:00Z",
+                "open_issues": 5,
+                "closed_issues": 2,
+                "state": "open",
+            },
+            {
+                "number": 2,
+                "title": "v1.0.0",
+                "due_on": None,
+                "open_issues": 12,
+                "closed_issues": 0,
+                "state": "open",
+            },
         ]
     )
     patch_gh_by_arg(
@@ -348,8 +446,14 @@ def test_cli_audit_fetch_count_emits_json(
     write_minimal_board(tmp_path)
     issues_payload = json.dumps(
         [
-            {"number": 50, "title": "a", "body": "...", "createdAt": "2026-01-01T00:00:00Z",
-             "labels": [], "milestone": None},
+            {
+                "number": 50,
+                "title": "a",
+                "body": "...",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "labels": [],
+                "milestone": None,
+            },
         ]
     )
     patch_gh_by_arg(
