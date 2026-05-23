@@ -422,6 +422,43 @@ For the full contributor setup — Python venv with `uv`, `ruff`,
 `mypy`, the dual-import-path gotcha around the `Board` helper, and the
 testbed configuration — see [`CLAUDE.md`](CLAUDE.md).
 
+### Disk usage for the `file://` install
+
+The `file://` install copies your working tree literally — it does
+**not** honor `.gitignore`. So `.venv/`, `.mypy_cache/`,
+`.pytest_cache/`, `.ruff_cache/`, `jared.egg-info/`, and `tmp/` all
+end up in the install cache alongside the ~1M runtime payload.
+Per-version breakdown on a typical dev checkout:
+
+| Path                  | Size  | Runtime?           |
+|-----------------------|-------|--------------------|
+| `.venv/`              | ~92M  | No (dev tooling)   |
+| `.mypy_cache/`        | ~6.5M | No                 |
+| `docs/`               | ~3.2M | No (source docs)   |
+| `tests/`              | ~1.7M | No                 |
+| Other dev artifacts   | ~1.5M | No                 |
+| **Runtime payload**   | **~1M**   | **Yes**            |
+| **Total per version** | **~105M** |                    |
+
+Each `/plugin update jared` cycle adds another ~105M version to the
+cache. To reclaim disk:
+
+```bash
+rm -rf ~/.claude/plugins/cache/jared-marketplace/jared/
+```
+
+That nukes every cached jared version but leaves other plugins
+untouched. After the wipe, `/plugin update jared` (or a fresh
+`/plugin install jared`) re-creates the current version's cache from
+your working tree — nothing breaks, you've just traded a stack of old
+versions for one fresh ~105M install.
+
+The public install path (`/plugin marketplace add brockamer/jared`)
+clones from GitHub, so it doesn't see your local dev artifacts and
+naturally lands at ~7.3M per version. **This wart is `file://`-only**,
+and a more principled fix would be an upstream plugin-install
+exclusion mechanism — tracked in [#218](https://github.com/brockamer/jared/issues/218).
+
 [pm]: https://code.claude.com/docs/en/plugin-marketplaces.md
 
 ## Testing
