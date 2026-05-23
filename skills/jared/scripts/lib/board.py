@@ -1017,7 +1017,7 @@ def _looks_like_project_mutation(args: list[str]) -> bool:
 
 
 def _format_token_scope_diagnostic() -> str:
-    """Four-part diagnostic block for `Resource not accessible by personal access token`
+    """Diagnostic block for `Resource not accessible by personal access token`
     failures from project mutations. Best-effort — silently skips parts that can't be
     determined.
 
@@ -1025,6 +1025,16 @@ def _format_token_scope_diagnostic() -> str:
     that just failed ran on `gh auth login`'s OAuth session. The realistic remaining
     trigger for this error class is OAuth without `project` scope. Mention the #65
     scrub explicitly so an operator with GH_TOKEN set isn't misled.
+
+    Always appends an MCP note (#210). The GitHub MCP server uses a separate token
+    surface (Claude Code MCP server config), distinct from `gh auth login` and
+    GH_TOKEN. This function is only ever reached from `run_gh_raw`'s failure path —
+    MCP-routed mutations fail inside Claude Code's tool layer and never hit this
+    code. The line is therefore not a detection signal but a UX hint: when the
+    operator is troubleshooting and may also be using MCP, remind them the two
+    auth surfaces are independent so `gh auth refresh -s project` isn't assumed
+    to fix the MCP side. Always-mention is the only viable shape here, since
+    conditional-on-MCP-failure can't be detected from a gh subprocess path.
     """
     lines: list[str] = ["", "Token-scope diagnostic:"]
 
@@ -1044,6 +1054,11 @@ def _format_token_scope_diagnostic() -> str:
 
     lines.append("  Scopes needed: project (write) for project v2 mutations.")
     lines.append("  Suggested fix: gh auth refresh -s project")
+    lines.append(
+        "  MCP note: the GitHub MCP server uses a separate token (Claude Code MCP "
+        "config); its scope requirements are independent of the gh OAuth session "
+        "above, and `gh auth refresh` does not affect it."
+    )
     return "\n".join(lines)
 
 
