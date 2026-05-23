@@ -218,7 +218,8 @@ def not_pullable_reason(item: dict[str, Any]) -> str:
     if _ACCEPTANCE_SECTION.search(body):
         return (
             "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
+            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
         )
 
     if _ACCEPTANCE_HEADING_ANY.search(body):
