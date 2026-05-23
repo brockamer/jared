@@ -164,7 +164,7 @@ cat session-note.md | jared comment <issue_number> --body-file -
 
 ---
 
-## `jared file --title ... (--body ... | --body-file ...) --priority ...`
+## `jared file --title ... (--body ... | --body-file ...) --priority ... (--milestone NAME | --no-milestone)`
 
 **Purpose.** Atomic create-issue + add-to-board + set-Priority + set-Status
 + post-create verification. Kills the `gh issue create` / `gh project
@@ -178,10 +178,12 @@ jared file \
   --priority High \
   --status "Up Next" \
   --label enhancement \
-  --field "Work Stream=Planning"
+  --field "Work Stream=Planning" \
+  --milestone "v1.0 — public install"
 
-# Or inline body, parity with `gh issue create --body`:
-jared file --title "Quick fix" --body "One-line summary of the bug." --priority Low
+# Or inline body + explicit no-milestone for big-idea/wishlist filings:
+jared file --title "Quick fix" --body "One-line summary of the bug." \
+  --priority Low --no-milestone
 ```
 
 **Arguments:**
@@ -191,9 +193,16 @@ jared file --title "Quick fix" --body "One-line summary of the bug." --priority 
 | `--title` | yes | Issue title; keep ≤ 70 chars, verb-first. |
 | `--body` / `--body-file` | yes (exactly one) | `--body "<text>"` for inline content; `--body-file <path>` for a markdown file; `--body-file -` reads stdin. Mutually exclusive. |
 | `--priority {High,Medium,Low}` | yes | Enforced to avoid filing with null Priority. |
+| `--milestone NAME` / `--no-milestone` | yes (exactly one) | Either assign a milestone by title (validated against the repo's open milestones) or opt out explicitly. Filing without either flag is refused with a listing of open milestones — closes the orphan-issue stream that eight consecutive findajob structural reviews had to bulk-absorb. Mutually exclusive. |
 | `--status` | no | Any Status column. Default: `Backlog`. |
 | `--label` | no | Repeatable. |
 | `--field` | no | Repeatable `NAME=VALUE` for additional single-select fields (e.g. `Work Stream=Planning`). |
+
+**Milestone resolution.** `--milestone NAME` is matched by exact title
+against `gh api repos/<owner>/<repo>/milestones?state=open`. An unmatched
+name produces a clear error listing the open milestones — no silent
+fallback, no auto-create. Use `--no-milestone` for filings where assignment
+doesn't make sense yet (wishlist, big-idea items).
 
 **Invariant.** On success, stdout reports `OK: filed #N → <status>,
 Priority=<prio>` and the URL. Any step failing — board add fails, verification
