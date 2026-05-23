@@ -32,6 +32,9 @@ tests/testbed.env
 # Claude Code per-machine runtime state (lock files, scheduled-task state)
 .claude/scheduled_tasks.lock
 
+# Session-presence locks for parallel jared sessions (#231)
+.jared/
+
 # Per-user Claude Code project memory (private, not versioned)
 CLAUDE.local.md
 
