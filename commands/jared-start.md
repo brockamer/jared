@@ -24,6 +24,55 @@ Flow:
 
    No drift-check is needed: the posture is computed from current board state at this moment, so the recommendation cannot be stale by construction.
 
+1b. **Session-presence resolution.** Before mutating the board, decide whether this is a solo session, a multi-session opt-in, or a B-leg refusal.
+
+   Parse arguments for two new flags (in addition to the issue reference):
+   - `--session N` — operator's claim of which parallel session this is (1, 2, ...). Triggers worktree creation.
+   - `--no-worktree` — explicit acknowledgment of shared-`.git/HEAD` risk. Mutually exclusive with `--session N`.
+
+   Resolve the repo's lock directory:
+
+   ```bash
+   GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
+   REPO_ROOT=$(dirname "$GIT_COMMON_DIR")  # handles both main checkout and worktrees
+   ```
+
+   Walk the active locks and decide the action via the Python lib:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-resolve \
+     --repo-root "$REPO_ROOT" \
+     ${SESSION_FLAG:+--session $SESSION_FLAG} \
+     ${NO_WORKTREE_FLAG:+--no-worktree}
+   ```
+
+   (The `jared session-resolve` subcommand wraps `lib.session_lock.list_active_locks` + `resolve_action` and prints a single line: `PROCEED_SOLO`, `PROCEED_MULTI`, `PROCEED_ACK_RISK`, or one of the REFUSE_* outcomes plus the rendered error message.)
+
+   **On REFUSE_BLEG, REFUSE_DUP_SESSION_N, REFUSE_CONFLICTING_FLAGS:** print the CLI's error message verbatim and STOP. Do NOT proceed to the WIP check or move the issue. The board is unchanged.
+
+   **On PROCEED_MULTI:** create the worktree before continuing:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared worktree-add \
+     --repo-root "$REPO_ROOT" \
+     --issue <N> \
+     --session "$SESSION_FLAG"
+   ```
+
+   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from `origin/main`, and emits the target path on stdout. CWD shifts to the worktree for the remainder of the session.
+
+   **In all PROCEED cases:** write the session lock:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-write \
+     --repo-root "$REPO_ROOT" \
+     --issue <N> \
+     ${SESSION_FLAG:+--session $SESSION_FLAG} \
+     ${WORKTREE_PATH:+--worktree-path $WORKTREE_PATH}
+   ```
+
+   Solo sessions (`--session` absent) still write a lock with `session=null, worktree_path=null`. This is load-bearing: it lets a later sibling session detect the solo one and refuse with guidance, rather than silently sharing `.git/HEAD`.
+
 2. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` and read the `In Progress (N)` header — that `N` is the current count. If it's already at the project's configured cap (default 3), STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
 3. **Check pullable state.** Read the target issue's body and verify:
