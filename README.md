@@ -256,6 +256,15 @@ Archive? [Y/n] y
 
     Without `project` scope, board mutations fail silently or with
     confusing 404s.
+- **Heads up — stale `GH_TOKEN` / `GITHUB_TOKEN`.** If either env var
+  is exported from another tool (a CI helper, an old script, whatever),
+  `gh auth status` will show a confusing split: a *failed* token-auth
+  line **and** a *successful* keyring-auth line side-by-side. Jared
+  scrubs both env vars before calling `gh` (see
+  [#65](https://github.com/brockamer/jared/issues/65)), so the keyring
+  is what actually gets used — but the `gh auth status` output stays
+  misleading. Either `unset GH_TOKEN GITHUB_TOKEN` to clean up the
+  output, or ignore the token-failure line.
 - **A GitHub Projects v2 board.** Either an existing one you want to
   steward, or a fresh empty project at
   `https://github.com/users/<you>/projects`. Jared works with any
