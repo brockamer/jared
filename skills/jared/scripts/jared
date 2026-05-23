@@ -1307,7 +1307,10 @@ def _render_refusal_message(
         )
         return
     if action == session_lock.Action.REFUSE_BLEG:
-        sib = siblings[0]
+        # When the resolver refuses on solo-sibling priority (per the two-pass
+        # logic in resolve_action), render that solo sibling rather than the
+        # arbitrary first entry — the operator needs to see the actual trap shape.
+        sib = next((s for s in siblings if s.session is None), siblings[0])
         mode = (
             f"session-{sib.session}" if sib.session is not None else "solo (on shared .git/HEAD)"
         )
