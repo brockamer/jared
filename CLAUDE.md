@@ -105,6 +105,23 @@ docs/bake-sites.md        Projects (beyond jared/jared-testbed) where jared runs
 
 Use `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared <subcommand>`. **Never hardcode `~/.claude/skills/...` paths** — the plugin cache location is an implementation detail of Claude Code's install system.
 
+## Evolving Jared's discipline
+
+When adding a new Jared rule (kill switch, project-level toggle, body-shape convention, naming rule), default to **doctrine** — SKILL.md, slash-command stubs, or a `references/` doc. Claude reads the doc when composing or evaluating and follows the rule.
+
+Reach for Python parsing in `lib/board.py` **only when a CLI surface gates on the value programmatically.** If no subcommand refuses, accepts, or branches based on the field, parsing it creates dead code: the field exists, the test passes, and nothing reads it. The #114 model-guidance feature shipped a parsed field with a four-case unit test in Phase 4 that Phase 6 reverted — the consumers were slash-command surfaces that read the doc directly.
+
+Corollary: when investigation (audit, bake test, code review, sweep, reshape) produces findings, default to NOT filing follow-up issues. See `skills/jared/SKILL.md` § "Discovered scope" for the discipline.
+
+## Branch + PR workflow
+
+Main is protected — every substantive change lands via a PR (`gh pr create` → `gh pr merge --merge --delete-branch`). Direct `git push origin main` is reserved for post-merge hotfixes or release-tag pushes the operator explicitly requested.
+
+- **Feature branches** are disposable and pre-authorized. Pattern: `feature/<issue>-<slug>` (or `chore/...`, `fix/...`). WIP-style commits are fine — the PR is the review surface.
+- **Phase-numbered commits.** When implementing from a plan with explicit phases, prefix commits with `(Phase N.M)`: e.g., `feat(jared): wire next-session-prompt CLI (Phase 3.2)`. Preserves the phase trail when squashing isn't used.
+- **Merge strategy is `--merge`, not squash or rebase.** Preserves the phase-by-phase commit trail on main — git archaeology depends on it (e.g., v0.2.0's merge commit walks back through 33 phase commits).
+- **Parallel sessions must use git worktrees**, not `git checkout -b` in the shared repo — the shared `.git/HEAD` is the trap. See `skills/jared/references/parallel-sessions.md`.
+
 ## Versioning
 
 Semantic versioning in `.claude-plugin/plugin.json` and mirrored in `pyproject.toml`. Git tag `v<x.y.z>` per release. `pyproject.toml` configures dev tooling and pins venv deps but isn't published as a package — the version field exists for parity, not distribution. Check `.claude-plugin/plugin.json` for the current version rather than relying on this paragraph (which used to hardcode it).

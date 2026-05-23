@@ -44,6 +44,8 @@ Flow:
    - Any plan or spec linked from `## Planning` — read and summarize
    - Git state: current branch, uncommitted changes, last 5 commits touching related files
 
+   **Drift check (issues filed >7d ago).** When the body cites specific file paths, function names, or call sites, verify they still exist before acting — refactors silently invalidate filed plans. Surface any drift in the announce as a "Drift since filing" note so the operator decides between refile / update body / accept-and-call-out.
+
 6. **Model guidance backstop.** Scan the issue body for an `## Model & execution guidance` H2.
 
    - If present: load it as part of context; surface its content in step 8's announce so the user can confirm or amend.
