@@ -169,13 +169,14 @@ def resolve_action(siblings: list[Lock], flags: Flags) -> Action:
         # Sibling exists, no flag → refuse with guidance.
         return Action.REFUSE_BLEG
 
-    # flags.session is not None — multi-session opt-in.
+    # flags.session is not None — multi-session opt-in. Two-pass scan so
+    # the refusal reason is deterministic regardless of sibling order.
+    # Solo-sibling refusal takes priority: it surfaces the actual trap shape
+    # (sibling on shared HEAD) which is more actionable than a flag collision.
     for sib in siblings:
         if sib.session is None:
-            # Solo sibling on shared HEAD: this session would be safe in its
-            # worktree, but the solo sibling is still on shared HEAD and can
-            # still hit the trap. Refuse so the operator handles the sibling first.
             return Action.REFUSE_BLEG
+    for sib in siblings:
         if sib.session == flags.session:
             return Action.REFUSE_DUP_SESSION_N
 
