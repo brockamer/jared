@@ -155,6 +155,8 @@ Before writing code, editing docs, or making any change with durable effect, con
 
 Move the item to In Progress. WIP caps at the project's configured limit (default: 3). If the cap is hit, the user decides what moves out or pauses — Jared does not silently exceed WIP.
 
+**Cross-session check.** If In Progress shows another `session-N` label that isn't yours, that's another Claude session actively touching code in this repo — check file-surface overlap before pulling adjacent work. See `references/parallel-sessions.md` for the worktree pattern and surface-overlap discipline.
+
 Before writing code, load the full context for this issue:
 
 - Issue body (including `## Current state` and `## Decisions` sections)
@@ -169,6 +171,8 @@ Announce the plan for the session in a short preamble. This primes you *and* cre
 Two kinds of things happen mid-work, and both need to land somewhere:
 
 **Discovered scope.** You notice tech debt, a missing feature, a gap in documentation, or anything actionable beyond the current issue's boundary. File it immediately as a new issue (see "Before substantive work"). Do not park it in a comment on the current issue. Do not inflate the current issue's scope. Do not write a TODO.
+
+**Post-investigation findings — different reflex.** When an investigation pass (bake test, audit, code review, sweep, structural reshape) *produces* a list of findings, the discipline above inverts: default to NOT filing. The writeup is the durable artifact; tracked issues are for work that actually gates. For each finding, ask: would a real user file this themselves? If not, fold it into the writeup and skip the issue. Sprawl from reflexive post-investigation filings is more expensive than the gaps that go un-tracked — every future sweep/audit/groom touches the issue, and that cost has to be paid back by either fixing it or carrying it productively.
 
 **Evolving understanding.** Design decisions made while implementing, gotchas discovered, assumptions that turned out to be wrong, sub-items intentionally deferred. This is the content that otherwise disappears. It goes on the *current* issue in structured form:
 

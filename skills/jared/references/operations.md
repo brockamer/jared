@@ -85,6 +85,8 @@ When the graphql bucket is pressured (`graphql_budget()` reports < 1000 remainin
 
 When graphql is healthy, either path is fine; the choice becomes a UX call (gh's CLI conventions vs MCP's typed-tool ergonomics). ProjectV2 operations stay on graphql via `jared` regardless — there is no MCP alternative.
 
+**Rate-limit recovery — direct REST for comments and edits.** When GraphQL is exhausted (0/5000 remaining), `gh issue comment` itself fails with "GraphQL: API rate limit already exceeded" — `gh` does a GraphQL preflight to resolve the issue → node ID even though the POST is REST. Fallback: post directly via `gh api -X POST /repos/<owner>/<repo>/issues/<N>/comments --input -` with a `{"body": "..."}` payload. The same pattern applies to `gh issue edit --milestone <name>` (broken by the same preflight); use `gh api PATCH /repos/<o>/<r>/issues/<N> -f milestone=<n>` direct. When GraphQL is dry but REST is healthy, the REST endpoint is the escape hatch.
+
 Full investigation, capability matrix, per-call costs, and auth-surface details: [`docs/github-api-tool-selection.md`](../../../docs/github-api-tool-selection.md).
 
 ## Raw `gh` fallback — the minimum escape-hatch set
