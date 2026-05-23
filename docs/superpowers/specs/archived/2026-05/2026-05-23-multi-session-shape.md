@@ -1,3 +1,7 @@
+---
+**Shipped in #232 on 2026-05-23. Final decisions captured in issue body.**
+---
+
 # Spec: multi-session — stage/start/git hygiene for parallel Claude sessions
 
 **Issue:** #232
