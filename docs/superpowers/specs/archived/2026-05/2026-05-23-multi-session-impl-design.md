@@ -1,3 +1,7 @@
+---
+**Shipped in #231, #236 on 2026-05-23. Final decisions captured in issue body.**
+---
+
 # Spec: multi-session implementation — opt-in worktree + session-presence locking
 
 **Issues:** #231 (worktree-by-default) + #236 (`/jared-start --session` flag), bundled
