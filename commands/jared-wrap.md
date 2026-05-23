@@ -92,6 +92,13 @@ Flow:
    - Apply non-close reconciliation: `jared move <N> "Backlog"` (or `"Up Next"`) for abandoned ones, `jared file ...` for newly-filed scope
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
+   - Clear this session's presence lock:
+     ```bash
+     GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
+     REPO_ROOT=$(dirname "$GIT_COMMON_DIR")
+     ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root "$REPO_ROOT"
+     ```
+     Removes `<repo>/.jared/session-<pid>.lock` so the next `/jared-start` doesn't see this session as a live sibling. Sibling sessions' locks are left untouched (the clear is PID-keyed).
 
 6. **Confirm and close out.** Render the closing line in voice:
 
