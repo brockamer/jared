@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -155,3 +156,141 @@ def test_cli_gh_invocation_error_is_clean(
     assert rc == 1
     captured = capsys.readouterr()
     _assert_clean_error(captured.out, captured.err, "gh")
+
+
+# ---------------------------------------------------------------------------
+# session-resolve / session-lock-write / session-lock-clear / worktree-add
+# ---------------------------------------------------------------------------
+
+
+def test_session_resolve_proceeds_solo_when_no_siblings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod = import_cli()
+    result = mod.main(["session-resolve", "--repo-root", str(tmp_path)])
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "PROCEED_SOLO" in captured.out
+
+
+def test_session_resolve_proceeds_multi_with_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod = import_cli()
+    result = mod.main(["session-resolve", "--repo-root", str(tmp_path), "--session", "1"])
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "PROCEED_MULTI" in captured.out
+
+
+def test_session_resolve_refuses_when_sibling_present(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from skills.jared.scripts.lib import session_lock
+
+    # Write a sibling lock with the current PID (alive).
+    session_lock.write_lock(
+        repo_root=tmp_path,
+        lock=session_lock.Lock(
+            pid=os.getpid(),
+            started="2026-05-23T14:00:00Z",
+            session=1,
+            worktree_path="/fake",
+            issue=200,
+        ),
+    )
+    mod = import_cli()
+    result = mod.main(["session-resolve", "--repo-root", str(tmp_path)])
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "REFUSE_BLEG" in captured.out or "REFUSE_BLEG" in captured.err
+
+
+def test_session_lock_write_creates_file(tmp_path: Path) -> None:
+    mod = import_cli()
+    result = mod.main(
+        [
+            "session-lock-write",
+            "--repo-root",
+            str(tmp_path),
+            "--issue",
+            "231",
+            "--session",
+            "1",
+            "--worktree-path",
+            "/home/u/Code/jared-231",
+        ]
+    )
+    assert result == 0
+    pid = os.getpid()
+    lock_path = tmp_path / ".jared" / f"session-{pid}.lock"
+    assert lock_path.exists()
+
+
+def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
+    from skills.jared.scripts.lib import session_lock
+
+    session_lock.write_lock(
+        repo_root=tmp_path,
+        lock=session_lock.Lock(
+            pid=os.getpid(),
+            started="2026-05-23T14:00:00Z",
+            session=None,
+            worktree_path=None,
+            issue=231,
+        ),
+    )
+    mod = import_cli()
+    result = mod.main(["session-lock-clear", "--repo-root", str(tmp_path)])
+    assert result == 0
+    lock_path = tmp_path / ".jared" / f"session-{os.getpid()}.lock"
+    assert not lock_path.exists()
+
+
+def test_worktree_add_creates_at_sibling_path(
+    main_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod = import_cli()
+    result = mod.main(
+        [
+            "worktree-add",
+            "--repo-root",
+            str(main_repo),
+            "--issue",
+            "231",
+        ]
+    )
+    assert result == 0
+    captured = capsys.readouterr()
+    expected_target = main_repo.parent / f"{main_repo.name}-231"
+    assert str(expected_target) in captured.out
+    assert expected_target.exists()
+
+
+def test_session_resolve_refuse_bleg_renders_solo_sibling_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When a solo sibling triggers REFUSE_BLEG, the rendered message
+    must say 'solo (on shared .git/HEAD)' — the trap-shape framing."""
+    import tests.conftest as conftest
+    from skills.jared.scripts.lib import session_lock
+
+    session_lock.write_lock(
+        repo_root=tmp_path,
+        lock=session_lock.Lock(
+            pid=os.getpid(),
+            started="2026-05-23T14:00:00Z",
+            session=None,  # SOLO sibling
+            worktree_path=None,
+            issue=200,
+        ),
+    )
+    mod = conftest.import_cli()
+    result = mod.main(["session-resolve", "--repo-root", str(tmp_path)])
+    assert result == 1
+    captured = capsys.readouterr()
+    # action.name on stdout
+    assert "REFUSE_BLEG" in captured.out
+    # rendered refusal on stderr must call out the solo / shared-HEAD shape
+    assert "solo" in captured.err.lower()
+    assert "shared" in captured.err.lower() or ".git" in captured.err.lower()

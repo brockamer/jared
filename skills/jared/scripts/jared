@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -31,6 +32,8 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     print_redaction_diff,
     resolve_body,
 )
+from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
+from lib import worktree as _worktree  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _normalize_priority(s: str) -> str:
@@ -59,6 +62,10 @@ ALL_SUBCOMMANDS = [
     "blocked-by",
     "next-session-prompt",
     "ties",
+    "session-resolve",
+    "session-lock-write",
+    "session-lock-clear",
+    "worktree-add",
 ]
 
 
@@ -300,6 +307,75 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit_fetch.add_argument("--cache", help="gh cache duration, e.g. '60s'.")
     audit_fetch.set_defaults(func=_cmd_audit_fetch)
+
+    sr = sub.add_parser(
+        "session-resolve",
+        help=(
+            "Resolve the action for a /jared-start invocation given current sibling locks. "
+            "Prints the action name (PROCEED_SOLO, PROCEED_MULTI, REFUSE_BLEG, etc.) and "
+            "exits non-zero on REFUSE_* actions."
+        ),
+    )
+    sr.add_argument(
+        "--repo-root",
+        required=True,
+        help="Path to the main checkout (where .jared/ lock files live).",
+    )
+    sr.add_argument(
+        "--session",
+        type=int,
+        default=None,
+        help="Session index (N) — signals multi-session opt-in, requires a worktree.",
+    )
+    sr.add_argument(
+        "--no-worktree",
+        action="store_true",
+        help="Acknowledge shared-.git/HEAD risk; skip worktree creation.",
+    )
+    sr.set_defaults(func=_cmd_session_resolve)
+
+    slw = sub.add_parser(
+        "session-lock-write",
+        help="Write a lock file for this PID into <repo-root>/.jared/.",
+    )
+    slw.add_argument("--repo-root", required=True, help="Path to the main checkout.")
+    slw.add_argument("--issue", type=int, required=True, help="Issue number being worked.")
+    slw.add_argument(
+        "--session",
+        type=int,
+        default=None,
+        help="Session index (N) for multi-session tracking.",
+    )
+    slw.add_argument(
+        "--worktree-path",
+        default=None,
+        help="Absolute path to the worktree for this session.",
+    )
+    slw.set_defaults(func=_cmd_session_lock_write)
+
+    slc = sub.add_parser(
+        "session-lock-clear",
+        help="Remove the lock file for this PID (called by /jared-wrap).",
+    )
+    slc.add_argument("--repo-root", required=True, help="Path to the main checkout.")
+    slc.set_defaults(func=_cmd_session_lock_clear)
+
+    wa = sub.add_parser(
+        "worktree-add",
+        help=(
+            "Create a git worktree at <parent-of-repo>/<repo-basename>-<issue>/ "
+            "on a fresh branch. Prints the created path."
+        ),
+    )
+    wa.add_argument("--repo-root", required=True, help="Path to the main checkout.")
+    wa.add_argument("--issue", type=int, required=True, help="Issue number — used to name the worktree.")
+    wa.add_argument(
+        "--session",
+        type=int,
+        default=None,
+        help="Session index (accepted for forward-compat; currently unused).",
+    )
+    wa.set_defaults(func=_cmd_worktree_add)
 
     return parser
 
@@ -1205,6 +1281,104 @@ def _cmd_audit_fetch(args: argparse.Namespace) -> int:
         cache=args.cache,
     )
     print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def _render_refusal_message(
+    action: session_lock.Action,
+    siblings: list[session_lock.Lock],
+    flags: session_lock.Flags,
+) -> None:
+    """Print a human-readable refusal message to stderr."""
+    if action == session_lock.Action.REFUSE_CONFLICTING_FLAGS:
+        print(
+            "ERROR: --session and --no-worktree are mutually exclusive.\n"
+            "  --session N tells this session it should isolate via worktree.\n"
+            "  --no-worktree explicitly acknowledges shared-HEAD risk.\n"
+            "  Pick one or neither, not both.",
+            file=sys.stderr,
+        )
+        return
+    if action == session_lock.Action.REFUSE_DUP_SESSION_N:
+        print(
+            f"ERROR: another active jared session is already using --session {flags.session}.\n"
+            f"  session-N values must be unique per repo. Pick a different N.",
+            file=sys.stderr,
+        )
+        return
+    if action == session_lock.Action.REFUSE_BLEG:
+        # When the resolver refuses on solo-sibling priority (per the two-pass
+        # logic in resolve_action), render that solo sibling rather than the
+        # arbitrary first entry — the operator needs to see the actual trap shape.
+        sib = next((s for s in siblings if s.session is None), siblings[0])
+        mode = (
+            f"session-{sib.session}" if sib.session is not None else "solo (on shared .git/HEAD)"
+        )
+        print(
+            f"ERROR: another active jared session detected.\n"
+            f"  Sibling: PID {sib.pid}, started {sib.started}, issue #{sib.issue}\n"
+            f"  Sibling mode: {mode}\n"
+            f"\n"
+            f"Choose one:\n"
+            f"  - Wrap the sibling session first, then start fresh with --session N\n"
+            f"  - /jared-start <N> --session <unique N>  (creates a worktree for THIS session)\n"
+            f"  - /jared-start <N> --no-worktree  (acknowledge risk, share .git/HEAD)\n",
+            file=sys.stderr,
+        )
+
+
+def _cmd_session_resolve(args: argparse.Namespace) -> int:
+    """Walk active locks, resolve the action for the supplied flags, print result."""
+    repo_root = Path(args.repo_root)
+    siblings = session_lock.list_active_locks(repo_root)
+    flags = session_lock.Flags(session=args.session, no_worktree=args.no_worktree)
+    action = session_lock.resolve_action(siblings=siblings, flags=flags)
+    print(action.name)
+    if action.name.startswith("REFUSE_"):
+        _render_refusal_message(action, siblings, flags)
+        return 1
+    return 0
+
+
+def _cmd_session_lock_write(args: argparse.Namespace) -> int:
+    """Write a lock file for this PID."""
+    import datetime
+
+    repo_root = Path(args.repo_root)
+    started = (
+        datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+    lock = session_lock.Lock(
+        pid=os.getpid(),
+        started=started,
+        session=args.session,
+        worktree_path=args.worktree_path,
+        issue=args.issue,
+    )
+    session_lock.write_lock(repo_root=repo_root, lock=lock)
+    return 0
+
+
+def _cmd_session_lock_clear(args: argparse.Namespace) -> int:
+    """Clear this PID's lock file."""
+    session_lock.clear_lock(repo_root=Path(args.repo_root), pid=os.getpid())
+    return 0
+
+
+def _cmd_worktree_add(args: argparse.Namespace) -> int:
+    """Create a worktree at <parent-of-repo>/<repo-basename>-<issue>/ on a fresh branch."""
+    repo_root = Path(args.repo_root).resolve()
+    repo_basename = repo_root.name
+    target = repo_root.parent / f"{repo_basename}-{args.issue}"
+    branch = f"feature/{args.issue}-worktree"
+    try:
+        created = _worktree.create_worktree(repo=repo_root, target=target, branch=branch, base="main")
+    except _worktree.WorktreeError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(str(created))
     return 0
 
 

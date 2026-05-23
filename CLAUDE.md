@@ -122,6 +122,34 @@ Main is protected — every substantive change lands via a PR (`gh pr create` �
 - **Merge strategy is `--merge`, not squash or rebase.** Preserves the phase-by-phase commit trail on main — git archaeology depends on it (e.g., v0.2.0's merge commit walks back through 33 phase commits).
 - **Parallel sessions must use git worktrees**, not `git checkout -b` in the shared repo — the shared `.git/HEAD` is the trap. See `skills/jared/references/parallel-sessions.md`.
 
+## Multi-session work — `--session N` opt-in
+
+When running two or more Claude sessions against this repo simultaneously, pass
+`--session N` to `/jared-start` to opt into worktree isolation:
+
+- `/jared-start <issue>` (solo, default) — no worktree. CWD unchanged. Writes
+  a session-presence lock at `<repo>/.jared/session-<pid>.lock` so a later
+  session can detect this one.
+- `/jared-start <issue> --session 1` — creates `~/Code/<repo>-<issue>/`, checks
+  out a fresh `feature/<issue>-<slug>` branch from `origin/main`, shifts CWD
+  into the worktree. The `session=1` claim is the durable per-session identity
+  (operator applies the `session-1` GitHub label separately, per the labeling
+  discipline).
+- `/jared-start <issue> --no-worktree` — explicit acknowledgment of the
+  shared-`.git/HEAD` risk when starting alongside another active session.
+  Use sparingly.
+
+If `/jared-start` detects an active sibling session and neither flag is passed,
+it refuses with guidance. Solo work is the common case; the lock + refusal layer
+exists so the moment a second session enters the picture, the discipline kicks
+in automatically.
+
+`/jared-wrap` clears the lock at session end. Stale locks (from crashed sessions)
+are caught and cleared by the next `/jared-start`'s PID-liveness check.
+
+For background and the recovery-sequence incident that motivated this mechanism,
+see issue #231 and `docs/superpowers/specs/2026-05-23-multi-session-impl-design.md`.
+
 ## Versioning
 
 Semantic versioning in `.claude-plugin/plugin.json` and mirrored in `pyproject.toml`. Git tag `v<x.y.z>` per release. `pyproject.toml` configures dev tooling and pins venv deps but isn't published as a package — the version field exists for parity, not distribution. Check `.claude-plugin/plugin.json` for the current version rather than relying on this paragraph (which used to hardcode it).
