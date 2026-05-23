@@ -166,3 +166,13 @@ This file is the minimum. See the skill's references for:
 - `references/board-sweep.md` — grooming checklist
 - `references/plan-spec-integration.md` — if this project uses plan/spec artifacts
 - `references/session-continuity.md` — Session note format
+
+## Jared config
+
+Project-level knobs that change Jared's behavior on this board. Each bullet is `name: value`. Omit any line to use its default.
+
+- `session-handoff-prompt: ask` — when `/jared-wrap` finishes, ask whether to draft a session handoff prompt for the next session. Values: `ask` (default), `always`, `never`. Used by `/jared-wrap`. The prompt is written to `tmp/next-session-prompt-<TIMESTAMP>.md` and is `.gitignore`d — ephemeral by design.
+
+- `model-guidance: enabled` — controls whether new issues carry a `## Model & execution guidance` section (file-time composition) and whether `/jared-start` evaluates missing guidance lazily (start-time backstop). Values: `enabled` (default), `disabled`. Used by `/jared-file` and `/jared-start`. See SKILL.md § "Model & execution guidance" for the rendered shape.
+
+- `voice: enabled` — controls whether the Jared character voice is rendered in slash-command dialogue (`/jared`, `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default), `disabled`. When `disabled`, every slash-command stub renders user-facing output in plain technical prose — same structural content, Jared-isms stripped. Used by every slash-command stub. The voice activation lives entirely in the plugin (no user-local Claude Code settings, no SessionStart hooks, no memory entries required); this bullet is the only way to opt out. See SKILL.md § "Project-level kill switch" (under the voice doctrine) and `references/voice.md` for the full spec.
