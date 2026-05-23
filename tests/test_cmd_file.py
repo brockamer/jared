@@ -1,3 +1,4 @@
+import json as _json
 import subprocess as _subprocess
 from io import StringIO
 from pathlib import Path
@@ -100,6 +101,7 @@ def test_file_sequences_create_add_status_priority(
             str(body_file),
             "--priority",
             "High",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -148,6 +150,7 @@ def test_file_with_custom_status_and_extra_field(
             "Up Next",
             "--field",
             "Work Stream=Planning",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -207,6 +210,7 @@ def test_file_preserves_staged_body_on_create_failure(
             inline_body,
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -265,6 +269,7 @@ def test_file_unlinks_staged_body_on_success(
             "OK body",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -318,6 +323,7 @@ def test_file_inline_body_staging_round_trip_mismatch_errors(
             "Real body content that will not survive the round-trip.",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -385,6 +391,7 @@ def test_file_emits_recovery_command_on_post_create_failure(
             "Up Next",
             "--field",
             "Work Stream=Planning",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -453,6 +460,7 @@ def test_file_emits_recovery_command_on_field_mutation_failure(
             str(body_file),
             "--priority",
             "Medium",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -522,6 +530,7 @@ def test_file_with_inline_body(
             "## Hello\n\nLiteral inline markdown.",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -549,6 +558,7 @@ def test_file_with_body_file_dash_stdin(
             "-",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -580,6 +590,7 @@ def test_file_rejects_both_body_and_body_file(
                 str(body_file),
                 "--priority",
                 "Low",
+                "--no-milestone",
             ]
         )
     assert excinfo.value.code != 0
@@ -615,6 +626,7 @@ def test_file_rejects_body_prefix_abbrev(
                 "hello world",
                 "--priority",
                 "Low",
+                "--no-milestone",
             ]
         )
     assert excinfo.value.code != 0
@@ -666,6 +678,7 @@ def test_file_makes_no_item_list_calls(
             str(body_file),
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
 
@@ -733,6 +746,7 @@ def test_cmd_file_refuses_on_dirty_pre_flight_report(
             f"While testing I noticed {leaky_phrase} stops responding under load.",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -771,6 +785,7 @@ def test_cmd_file_proceeds_on_clean_pre_flight_report(
             "Wholly unrelated body about the public weather service.",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -812,6 +827,7 @@ def test_cmd_file_clean_when_no_claude_local(
             "Some content with no special meaning.",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -855,6 +871,7 @@ def test_cmd_file_refuses_when_run_from_subdir(
             f"Note: {leaky_phrase} is flaky.",
             "--priority",
             "Low",
+            "--no-milestone",
         ]
     )
     captured = capsys.readouterr()
@@ -862,4 +879,261 @@ def test_cmd_file_refuses_when_run_from_subdir(
     assert "pre-flight redaction check failed" in captured.err
     assert not any("issue" in c and "create" in c for c in calls), (
         f"redactor must short-circuit before gh; calls: {calls}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# --milestone / --no-milestone enforcement (#238)
+#
+# Every issue filed via `jared file` must declare its milestone intent — either
+# `--milestone NAME` (validated against the repo's open milestones) or
+# `--no-milestone` (explicit opt-out). Filing with neither flag is refused
+# with a listing of open milestones. This closes the orphan-issue stream that
+# eight consecutive findajob structural reviews (Decisions 17, 19, 22, 23, 24,
+# 27, 28, 29) had to absorb as bulk-fix work.
+# ---------------------------------------------------------------------------
+
+
+def _open_milestones_json(titles: list[str]) -> str:
+    """Mock body for `gh api repos/<owner>/<repo>/milestones?state=open`.
+
+    GitHub returns a top-level JSON list; we synthesize the minimum shape
+    `_cmd_file` needs (title + number). Real responses include more fields
+    but the milestone lookup only cares about title-match.
+    """
+    return _json.dumps(
+        [{"title": t, "number": i + 1, "state": "open"} for i, t in enumerate(titles)]
+    )
+
+
+def _routed_fake_with_milestones(
+    monkeypatch: pytest.MonkeyPatch,
+    open_milestones: list[str],
+    *,
+    verify_number: int = 42,
+) -> list[list[str]]:
+    """Like `_routed_fake` but also routes the milestone-list REST lookup.
+
+    The `gh api repos/.../milestones` call is matched by substring 'milestones'
+    in argv (it appears in the path); response shape is the list-form
+    `_open_milestones_json` produces.
+    """
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        calls.append(args)
+        joined = " ".join(args)
+        if "milestones" in joined and "api" in joined:
+            return FakeGhResult(stdout=_open_milestones_json(open_milestones))
+        if "issue create" in joined:
+            return FakeGhResult(
+                stdout=f"https://github.com/brockamer/findajob/issues/{verify_number}\n"
+            )
+        if "item-add" in joined:
+            return FakeGhResult(stdout='{"id": "PVTI_new"}')
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        fake_run,
+    )
+    return calls
+
+
+def test_file_with_milestone_assigns_via_gh_create(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Happy path: `--milestone "v1.0 — public install"` looks up open milestones,
+    finds a title match, and passes `--milestone "<title>"` to `gh issue create`.
+
+    The title-match strategy (vs. number-resolution) keeps the surface small —
+    gh accepts the title directly, so we don't need to translate to a milestone
+    number, just validate it exists in the open set first.
+    """
+    board_md = _write_full_board(tmp_path)
+    target = "v1.0 — public install"
+    calls = _routed_fake_with_milestones(monkeypatch, [target, "v1.1 — first public showcase"])
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Body.",
+            "--priority",
+            "Medium",
+            "--milestone",
+            target,
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+
+    # Milestone lookup happened (single REST call).
+    milestone_lookups = [c for c in calls if "milestones" in " ".join(c) and "api" in c]
+    assert len(milestone_lookups) == 1, (
+        f"expected exactly one milestone lookup; got {len(milestone_lookups)}: {milestone_lookups}"
+    )
+
+    # gh issue create was invoked with --milestone "<title>".
+    create_calls = [c for c in calls if "issue" in c and "create" in c]
+    assert len(create_calls) == 1, f"expected one issue create; got {create_calls}"
+    create_argv = create_calls[0]
+    assert "--milestone" in create_argv, (
+        f"--milestone must be passed to gh issue create; argv: {create_argv}"
+    )
+    idx = create_argv.index("--milestone")
+    assert create_argv[idx + 1] == target, (
+        f"milestone title must be passed verbatim; got {create_argv[idx + 1]!r}"
+    )
+
+
+def test_file_with_no_milestone_skips_lookup_and_create_without_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--no-milestone` is the explicit opt-out path: no REST lookup, no
+    --milestone argv to gh. Mostly serves wishlist/big-idea filings where
+    milestone assignment doesn't make sense yet.
+
+    The 'skips lookup' assertion matters because the lookup costs one REST
+    call per filing; the opt-out path must be free."""
+    board_md = _write_full_board(tmp_path)
+    # Pass open_milestones so that *if* the lookup fired despite --no-milestone,
+    # the call would route to the milestones branch (not return {}); the
+    # assertion below would catch it either way.
+    calls = _routed_fake_with_milestones(monkeypatch, ["v1.0 — public install"])
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Body.",
+            "--priority",
+            "Low",
+            "--no-milestone",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+
+    # No milestone lookup should have happened.
+    milestone_lookups = [c for c in calls if "milestones" in " ".join(c) and "api" in c]
+    assert milestone_lookups == [], (
+        f"--no-milestone must skip the milestone REST lookup; got {milestone_lookups}"
+    )
+
+    # gh issue create must NOT have been passed --milestone.
+    create_calls = [c for c in calls if "issue" in c and "create" in c]
+    assert len(create_calls) == 1
+    assert "--milestone" not in create_calls[0], (
+        f"--no-milestone must not pass --milestone to gh; argv: {create_calls[0]}"
+    )
+
+
+def test_file_rejects_neither_milestone_flag_with_listing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Filing without --milestone or --no-milestone is refused with a stderr
+    message that lists the open milestones on the board.
+
+    The whole point of the issue (Option a — enforce at file time): make the
+    omission impossible at the source instead of catching it in every
+    subsequent structural review. The listing in stderr keeps the recovery
+    one paste-back away.
+    """
+    board_md = _write_full_board(tmp_path)
+    open_titles = ["v1.0 — public install", "v1.1 — first public showcase"]
+    calls = _routed_fake_with_milestones(monkeypatch, open_titles)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Body.",
+            "--priority",
+            "Low",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    # Non-zero exit so callers know the filing did not complete.
+    assert rc != 0, captured.err
+
+    # Both open milestones must appear in the listing.
+    for title in open_titles:
+        assert title in captured.err, (
+            f"open milestone {title!r} must be listed in stderr; got:\n{captured.err}"
+        )
+
+    # The error must signpost both flags so the user knows the two valid recoveries.
+    assert "--milestone" in captured.err, captured.err
+    assert "--no-milestone" in captured.err, captured.err
+
+    # Critical: gh issue create must NOT have been invoked. Refusal happens
+    # before any write. (The milestone lookup itself is allowed; it's a read.)
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"refusal must short-circuit before gh issue create; calls: {calls}"
+    )
+
+
+def test_file_rejects_unmatched_milestone_with_listing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--milestone "Nonexistent"` is refused with a clear error that names the
+    requested title and lists the open milestones the user could have meant.
+
+    No silent fallback (would land an orphan), no auto-create (silently
+    creating milestones from typos is worse than failing loudly).
+    """
+    board_md = _write_full_board(tmp_path)
+    open_titles = ["v1.0 — public install", "v1.1 — first public showcase"]
+    calls = _routed_fake_with_milestones(monkeypatch, open_titles)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Body.",
+            "--priority",
+            "Low",
+            "--milestone",
+            "Nonexistent v9.9",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc != 0, captured.err
+
+    # The requested-but-unmatched name appears in the error so the user can
+    # spot the typo immediately.
+    assert "Nonexistent v9.9" in captured.err, captured.err
+
+    # Every open milestone is listed so the user can pick from them.
+    for title in open_titles:
+        assert title in captured.err, (
+            f"open milestone {title!r} must be listed; got:\n{captured.err}"
+        )
+
+    # No silent fallback: gh issue create must not have been invoked.
+    assert not any("issue" in c and "create" in c for c in calls), (
+        f"unmatched milestone must short-circuit; calls: {calls}"
     )
