@@ -415,9 +415,7 @@ def test_close_with_body_when_close_fails_after_comment_posts(
         f"comment must precede close, got: {kinds}"
     )
     # No item-edit (defense-in-depth Status=Done) should run when close fails.
-    assert "item-edit" not in kinds, (
-        f"item-edit must not run when close fails; kinds={kinds}"
-    )
+    assert "item-edit" not in kinds, f"item-edit must not run when close fails; kinds={kinds}"
     # Comment URL surfaced — the operator knows what landed before the error.
     assert "OK: commented on #42" in captured.out
     assert comment_url in captured.out
