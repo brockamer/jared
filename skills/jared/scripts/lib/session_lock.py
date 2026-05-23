@@ -88,6 +88,13 @@ def is_alive(pid: int) -> bool:
     return True
 
 
+def clear_lock(repo_root: Path, pid: int) -> None:
+    """Remove the lock file for this PID. No-op if absent."""
+    path = _lock_path(repo_root, pid)
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
 def list_active_locks(repo_root: Path) -> list[Lock]:
     """Enumerate all live session locks for this repo. Clears stale entries.
 
