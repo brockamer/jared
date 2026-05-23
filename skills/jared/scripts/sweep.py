@@ -28,7 +28,7 @@ Usage:
   sweep.py --owner X --project N       # explicit owner/project
   sweep.py --repo owner/repo           # explicit repo for issue-level queries
   sweep.py --plan-dir path             # plan/spec directory (default: docs/superpowers/plans)
-  sweep.py --wip-limit N               # override WIP limit (default: 3)
+  sweep.py --wip-limit N               # override WIP limit (default: 4)
   sweep.py --staleness-days N          # aging threshold for High Backlog (default: 14)
 
 Output: prose findings, grouped by check. Exit 0 regardless of findings.
@@ -350,7 +350,7 @@ def check_wip(items: list[dict[str, Any]], limit: int) -> list[str]:
     return findings
 
 
-def check_up_next_size(items: list[dict[str, Any]], limit: int = 3) -> list[str]:
+def check_up_next_size(items: list[dict[str, Any]], limit: int = 8) -> list[str]:
     up_next = [i for i in items if i.get("status") == "Up Next"]
     if len(up_next) > limit:
         return [
@@ -665,7 +665,7 @@ def main() -> int:
         help="Plan/spec directory to scan (can pass multiple times). "
         "Default: docs/superpowers/plans and docs/superpowers/specs if they exist.",
     )
-    parser.add_argument("--wip-limit", type=int, default=3, help="In Progress cap")
+    parser.add_argument("--wip-limit", type=int, default=4, help="In Progress cap")
     parser.add_argument("--staleness-days", type=int, default=14, help="High Backlog age threshold")
     parser.add_argument(
         "--blocked-aging-days",

@@ -329,7 +329,7 @@ def _count_status(items: list[dict[str, Any]], status: str) -> int:
 def stage_proposals(
     items: list[dict[str, Any]],
     *,
-    up_next_cap: int = 3,
+    up_next_cap: int = 8,
     today: date,
 ) -> StageProposals:
     """Compute one /jared-stage evaluation pass over the given items.
@@ -453,8 +453,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--up-next-cap",
         type=int,
-        default=3,
-        help="Maximum items allowed in Up Next column (default: 3).",
+        default=8,
+        help="Maximum items allowed in Up Next column (default: 8).",
     )
     args = parser.parse_args(argv)
 
