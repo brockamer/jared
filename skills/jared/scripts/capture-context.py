@@ -54,7 +54,10 @@ SECTION_ORDER = [
 
 
 def fetch_body(repo: str, number: int) -> str:
-    data = board_run_gh(["issue", "view", str(number), "--repo", repo, "--json", "body"])
+    # REST `core` bucket instead of graphql (#208); same pattern as
+    # lib.board.fetch_issue_state_rest. No new wrapper per acceptance criteria —
+    # inline at the call site keeps the seam visible.
+    data = board_run_gh(["api", f"repos/{repo}/issues/{number}"])
     return data.get("body") or ""
 
 
