@@ -62,7 +62,7 @@ def test_is_alive_returns_false_for_dead_pid(monkeypatch: pytest.MonkeyPatch) ->
     def fake_kill(pid: int, sig: int) -> None:
         raise ProcessLookupError()
 
-    monkeypatch.setattr(session_lock.os, "kill", fake_kill)  # type: ignore[attr-defined]
+    monkeypatch.setattr(os, "kill", fake_kill)
     assert session_lock.is_alive(9999999) is False
 
 
@@ -71,7 +71,7 @@ def test_is_alive_returns_true_when_permission_denied(monkeypatch: pytest.Monkey
     def fake_kill(pid: int, sig: int) -> None:
         raise PermissionError()
 
-    monkeypatch.setattr(session_lock.os, "kill", fake_kill)  # type: ignore[attr-defined]
+    monkeypatch.setattr(os, "kill", fake_kill)
     assert session_lock.is_alive(1) is True
 
 
@@ -116,7 +116,7 @@ def test_list_active_locks_clears_stale_locks(
             raise ProcessLookupError()
         original_kill(pid, sig)
 
-    monkeypatch.setattr(session_lock.os, "kill", fake_kill)  # type: ignore[attr-defined]
+    monkeypatch.setattr(os, "kill", fake_kill)
     active = session_lock.list_active_locks(repo_root=tmp_path)
 
     assert active == []
