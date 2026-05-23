@@ -91,3 +91,26 @@ def test_no_worktree_ack_with_any_sibling_proceeds() -> None:
         flags=Flags(session=None, no_worktree=True),
     )
     assert action == Action.PROCEED_ACK_RISK
+
+
+def test_multi_flag_prioritizes_solo_refusal_over_dup_n() -> None:
+    """When BOTH a solo sibling AND a same-N sibling exist, REFUSE_BLEG wins.
+
+    Refusal reason must be deterministic regardless of which sibling appears
+    first in the list — solo-sibling refusal surfaces the trap shape and is
+    the more actionable message for the operator.
+    """
+    siblings = [_multi_sibling(1), _solo_sibling()]
+    action = session_lock.resolve_action(
+        siblings=siblings,
+        flags=Flags(session=1, no_worktree=False),
+    )
+    assert action == Action.REFUSE_BLEG
+
+    # Reverse order — must still be REFUSE_BLEG.
+    siblings_reversed = [_solo_sibling(), _multi_sibling(1)]
+    action_reversed = session_lock.resolve_action(
+        siblings=siblings_reversed,
+        flags=Flags(session=1, no_worktree=False),
+    )
+    assert action_reversed == Action.REFUSE_BLEG
