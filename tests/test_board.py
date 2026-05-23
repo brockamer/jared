@@ -447,6 +447,53 @@ def test_token_scope_diagnostic_mentions_gh_token_scrub_when_set(
     assert "#65" in str(exc.value)
 
 
+def test_token_scope_diagnostic_includes_mcp_note(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The diagnostic always mentions MCP-token scope as a separate auth surface (#210).
+    MCP-routed mutations never reach this code path (they fail inside Claude Code's tool
+    layer), but operators troubleshooting a gh-OAuth failure may also be using MCP — the
+    line is a UX hint that `gh auth refresh` doesn't fix the MCP side."""
+    from skills.jared.scripts.lib.board import Board, GhInvocationError
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "GraphQL: Resource not accessible by personal access token (addProjectV2ItemById)"
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        if args[:2] == ["gh", "auth"]:
+
+            class AuthResult:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return AuthResult()  # type: ignore[return-value]
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    with pytest.raises(GhInvocationError) as exc:
+        b.run_gh(
+            [
+                "api",
+                "graphql",
+                "-f",
+                'query=mutation { addProjectV2ItemById(input: {projectId: "x", contentId: "y"}) '
+                "{ item { id } } }",
+            ]
+        )
+    msg = str(exc.value)
+    assert "MCP note:" in msg
+    assert "separate token" in msg
+    assert "Claude Code MCP" in msg
+    # The MCP line must not pre-empt the gh fix — gh-OAuth diagnostic stays primary.
+    assert msg.index("Suggested fix: gh auth refresh") < msg.index("MCP note:")
+
+
 def test_find_item_id_finds_match(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from skills.jared.scripts.lib.board import Board, ItemNotFound
     from tests.conftest import FakeGhResult, graphql_item_response
