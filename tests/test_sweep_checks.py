@@ -755,13 +755,15 @@ def test_fetch_items_with_closed_cache_cold_miss_warms_cache(
     full_items = [
         {"content": {"number": 70, "state": "OPEN"}, "status": "In Progress"},
         {"content": {"number": 80, "state": "CLOSED"}, "status": "Done"},
-        {"content": {"number": 81, "state": "CLOSED"}, "status": "In Progress"},
+        {"content": {"number": 81, "state": "CLOSED"}, "status": "Done"},
     ]
     patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
 
     items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
     assert len(items) == 3
-    # Cache was warmed from the CLOSED subset only — opens go to next live pull.
+    # Cache was warmed from the Done subset only — opens go to next live pull.
+    # (#189: filter on top-level `status`, not `content.state` — the latter
+    # is not populated by `gh project item-list`.)
     warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir)
     assert warmed is not None
     warmed_numbers: list[int] = sorted(
@@ -872,3 +874,68 @@ def test_fetch_items_with_closed_cache_respects_jared_no_cache(
     # Should reflect the fresh full-pull, not the (ignored) stale closed-cache.
     numbers = [(i.get("content") or {}).get("number") for i in items]
     assert numbers == [1]
+
+
+# ---------- Regression: realistic `gh project item-list` shape (#189) ----------
+
+
+def test_fetch_items_with_closed_cache_filters_by_status_on_realistic_shape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression for #189. `gh project item-list --format json` does NOT
+    populate `content.state` — only top-level `status` is reliable across
+    the cold path. The closed_subset filter must use `status == "Done"`,
+    not `content.state == "CLOSED"`. Fixture uses the realistic shape:
+    content carries body/number/title/url but no `state` key, and `status`
+    sits at the top level of each item.
+    """
+    import os
+
+    from skills.jared.scripts.lib import cache
+    from skills.jared.scripts.lib.board import Board
+
+    sweep = import_sweep()
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) is None
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+    """)
+    )
+    board = Board.from_path(board_md)
+
+    # Realistic shape: no `content.state` key, `status` at top level.
+    realistic_items = [
+        {"content": {"number": 10, "title": "T10"}, "status": "Backlog"},
+        {"content": {"number": 11, "title": "T11"}, "status": "In Progress"},
+        {"content": {"number": 20, "title": "T20"}, "status": "Done"},
+        {"content": {"number": 21, "title": "T21"}, "status": "Done"},
+    ]
+    patch_gh(monkeypatch, stdout=json.dumps({"items": realistic_items}))
+
+    items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
+    assert len(items) == 4
+
+    # The pre-fix filter (`content.state == "CLOSED"`) would warm an empty
+    # cache because `content.state` is absent from every realistic item.
+    # The fix filters on top-level `status` so only the two Done items are
+    # cached.
+    warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir)
+    assert warmed is not None
+    warmed_numbers: list[int] = sorted(
+        n for i in warmed if isinstance(n := (i.get("content") or {}).get("number"), int)
+    )
+    assert warmed_numbers == [20, 21]
+
+    # Counter math derived from the same fixture: items with status != Done.
+    # This is the "Open items on board: N" preamble logic in main().
+    total_open = sum(1 for i in realistic_items if i.get("status") != "Done")
+    assert total_open == 2  # #10 Backlog + #11 In Progress; #20 / #21 Done are excluded
