@@ -213,9 +213,13 @@ def fetch_items_with_closed_cache(board: Board, owner: str, project: str) -> lis
                 return merge_open_with_closed(open_items, cached_closed)
     # Cold-cache fallback: full-board pull (truncation-guarded). Warm the
     # closed-cache from the result so subsequent sweeps take the warm path.
+    # Filter on top-level `status` rather than `content.state`: `gh project
+    # item-list --format json` does not populate `content.state`, so the
+    # earlier `state == "CLOSED"` check was a no-op and the cache never
+    # warmed. `status` is populated by both fetch paths.
     items = fetch_items(owner, project)
     if not no_cache:
-        closed_subset = [i for i in items if (i.get("content") or {}).get("state") == "CLOSED"]
+        closed_subset = [i for i in items if i.get("status") == "Done"]
         board_cache.set_closed_items(project_number=board.project_number, items=closed_subset)
     return items
 
@@ -757,7 +761,11 @@ def main() -> int:
         except (RuntimeError, GhInvocationError) as e:
             print(f"sweep: issue fetch failed: {e}", file=sys.stderr)
 
-    total_open = sum(1 for i in items if (i.get("content") or {}).get("state") != "CLOSED")
+    # Filter on top-level `status` rather than `content.state`: `gh project
+    # item-list --format json` does not populate `content.state`, so the
+    # earlier `state != "CLOSED"` filter was a no-op and the counter equalled
+    # total board size. See #189.
+    total_open = sum(1 for i in items if i.get("status") != "Done")
     print(f"Open items on board: {total_open}")
     if repo:
         print(f"Open issues in {repo}: {len(issues_by_number)}")
