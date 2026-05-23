@@ -168,6 +168,47 @@ def test_parse_referenced_issues_accepts_bare_line_at_column_zero() -> None:
     assert ap.parse_referenced_issues(text) == [229, 230]
 
 
+def test_parse_referenced_issues_accepts_bold_ref_in_list_item() -> None:
+    """#204 — `- **#N** — desc` is a common human-readable form for spec
+    Issue sections. Two findajob specs used this in the 2026-05-22 grooming
+    pass and archive-plan refused to archive them. The carrier position
+    (list marker + bold) is still anchored at line start — mid-line bold
+    refs in prose remain skipped (see negative tests below).
+    """
+    text = (
+        "# Plan\n\n## Issues\n\n"
+        "- **#622** — Investigate cost gate\n"
+        "- **#650** — operator controls\n\n"
+        "## Body\n"
+    )
+    assert ap.parse_referenced_issues(text) == [622, 650]
+
+
+def test_parse_referenced_issues_bold_form_url_variant() -> None:
+    """The bold wrapper accepted at the carrier position also tolerates the
+    URL form inside it. Not strictly required by #204's AC but consistent
+    with how the regex composes."""
+    text = "# Plan\n\n## Issue\n\n- **https://github.com/o/r/issues/42** — desc\n\n## Body\n"
+    assert ap.parse_referenced_issues(text) == [42]
+
+
+def test_parse_referenced_issues_bold_form_does_not_match_mid_line_prose() -> None:
+    """#204 AC negative case — bold refs that aren't at the carrier position
+    (e.g. inside a prose paragraph between bullets and the next heading)
+    must still be skipped. The carrier-position anchoring via `re.match`
+    plus the limited prefix slots is what prevents prose recapture; this
+    test guards that boundary explicitly.
+    """
+    text = (
+        "# Plan\n\n## Issue\n\n"
+        "- #408\n"
+        "- #310\n\n"
+        "As noted in **#42**, this needs follow-up; see also **PR #100**.\n\n"
+        "## Body\n"
+    )
+    assert ap.parse_referenced_issues(text) == [408, 310]
+
+
 def test_parse_shipped_section_returns_pr_numbers() -> None:
     """The `## Shipped` section is the same shape as `## Issue` — list-item
     refs whose meaningful content starts with `#NNN` or a URL.

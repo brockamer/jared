@@ -1173,7 +1173,8 @@ _PLAN_ISSUE_REF_RE = re.compile(
 # only if it's either:
 #   1. a bare line-start ref (`#229 — Metric Layer C.0`, no list marker), or
 #   2. a list item (`- ...`/`* ...`) whose first content is a ref, optionally
-#      preceded by a `PR ` / `Issue ` label (e.g. `- PR #415`).
+#      preceded by a `PR ` / `Issue ` label (e.g. `- PR #415`) and/or wrapped
+#      in bold around the ref token (e.g. `- **#622** — short desc`).
 #
 # Mid-line refs in narrative prose are deliberately ignored — they are the
 # source of #86/#87 false positives. The label is gated behind a list marker
@@ -1181,6 +1182,7 @@ _PLAN_ISSUE_REF_RE = re.compile(
 _PLAN_LINE_REF_RE = re.compile(
     r"^[\s]*"
     r"(?:[-*]\s+(?:(?:PR|Issue)\s+)?)?"  # optional list marker + optional PR/Issue label
+    r"(?:\*\*)?"  # optional bold-open around the ref token (`- **#N**` form)
     r"(?:\[)?"  # optional opening of a markdown link `[#N](...)`
     r"(?:https?://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/(\d+)"
     r"|(?:[\w.-]+/[\w.-]+)?#(\d+))",
