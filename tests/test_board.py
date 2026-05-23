@@ -1536,7 +1536,7 @@ def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
                 f"expected closed:>= search filter, got {search_value!r}"
             )
             # The date portion after `closed:>=` must be %Y-%m-%d (10 chars: YYYY-MM-DD)
-            date_part = search_value[len("closed:>="):]
+            date_part = search_value[len("closed:>=") :]
             assert len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-", (
                 f"expected YYYY-MM-DD cutoff, got {date_part!r}"
             )
@@ -1548,9 +1548,7 @@ def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
 
     monkeypatch.setattr(board_mod, "run_gh", fake_run_gh)
 
-    result = board_mod.fetch_recent_closed_prs_with_files(
-        "brockamer/jared", days=7
-    )
+    result = board_mod.fetch_recent_closed_prs_with_files("brockamer/jared", days=7)
     assert result == [
         {"number": 100, "closedAt": "2026-05-20T10:00:00Z", "files": ["src/foo.py", "CLAUDE.md"]},
         {"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]},
