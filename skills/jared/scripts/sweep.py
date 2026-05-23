@@ -297,14 +297,15 @@ def check_metadata(items: list[dict[str, Any]]) -> list[str]:
     work_stream_in_use = any(
         field(i, "work Stream", "workStream", "workstream")
         for i in items
-        if (i.get("content") or {}).get("state") != "CLOSED"
+        if i.get("status") != "Done"
     )
     missing = []
     for i in items:
         content = i.get("content") or {}
-        # gh project item-list sometimes returns content.state == None for closed
-        # items, so also skip anything the board has already moved to Done.
-        if content.get("state") == "CLOSED" or i.get("status") == "Done":
+        # Skip Done items — no point enforcing metadata on a closed item.
+        # `gh project item-list --format json` does not populate
+        # `content.state`, so filter on the reliable top-level Project Status.
+        if i.get("status") == "Done":
             continue
         n = content.get("number")
         prio = field(i, "priority")
@@ -366,7 +367,7 @@ def check_stale_high_backlog(
     stale = []
     for i in items:
         content = i.get("content") or {}
-        if content.get("state") == "CLOSED":
+        if i.get("status") == "Done":
             continue
         if i.get("status") != "Backlog":
             continue
@@ -393,7 +394,7 @@ def check_in_progress_staleness(
     stale = []
     for i in items:
         content = i.get("content") or {}
-        if content.get("state") == "CLOSED":
+        if i.get("status") == "Done":
             continue
         if i.get("status") != "In Progress":
             continue
@@ -475,8 +476,8 @@ def check_off_board_issues(
 
     Caller passes `issues_by_number` already filtered to repo-open
     issues (see `fetch_open_issues_bulk` which uses `--state open`).
-    A board item with content.state=CLOSED still counts as "on the
-    board" — that's a different drift handled by `check_closed_not_done`.
+    A board item with Status=Done still counts as "on the board" —
+    that's a different drift handled by `check_closed_not_done`.
     """
     on_board = {
         (i.get("content") or {}).get("number")
@@ -564,7 +565,7 @@ def check_session_note_freshness(
     in_progress_numbers: list[int] = []
     for i in items:
         content = i.get("content") or {}
-        if content.get("state") == "CLOSED":
+        if i.get("status") == "Done":
             continue
         if i.get("status") != "In Progress":
             continue

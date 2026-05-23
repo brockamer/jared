@@ -170,9 +170,9 @@ Wait for sign-off before bulk changes. The sweep is advisory.
 
 ## Item-level semantics — "open" means Project status, not GitHub state
 
-The sweep's "Open items on board: N" preamble counts items where the **Project board `status` is not `Done`** — not items where the underlying GitHub issue's `state` is `OPEN`. The two signals usually agree but can diverge (e.g., when the "Item closed → Done" workflow is off, or when the #156-family revert leaves a closed issue with Status≠Done). Sweep is a Project-board audit tool, so the Project-board signal is authoritative for its purposes.
+All sweep filters that distinguish open from closed items rely on the **Project board `status`** field (`status == "Done"` for closed), not the GitHub issue `state` field. The two signals usually agree but can diverge (e.g., when the "Item closed → Done" workflow is off, or when the #156-family revert leaves a closed issue with Status≠Done). Sweep is a Project-board audit tool, so the Project-board signal is authoritative.
 
-This matters because `gh project item-list --format json` does not populate `content.state` — only the top-level `status` field is reliable across both fetch paths (`Board.open_items()` GraphQL warm path and `gh project item-list` cold path). Filters on `content.state` silently return wrong values on the cold path. See #189.
+This matters because `gh project item-list --format json` does not populate `content.state` — the field is absent from every item in the cold-path response. Only the top-level `status` field is reliable across both fetch paths (`Board.open_items()` GraphQL warm path and `fetch_items()` cold path via `gh project item-list`). The single exception is `check_native_dependencies`, which inspects `blockedBy` edges from a GraphQL query that does populate `state` — that one site correctly uses `state == "CLOSED"`. See #189.
 
 ## When the sweep finds nothing
 
