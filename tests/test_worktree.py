@@ -89,3 +89,50 @@ def test_commit_in_worktree_lands_on_worktree_branch(main_repo: Path, tmp_path: 
     # But IS visible on the worktree's branch (via the shared object database).
     worktree_log = _git(main_repo, "log", "feature/231-test", "--oneline")
     assert "from worktree" in worktree_log
+
+
+def test_list_worktrees_includes_main(main_repo: Path) -> None:
+    entries = worktree.list_worktrees(repo=main_repo)
+    paths = [e.path for e in entries]
+    assert main_repo in paths
+
+
+def test_list_worktrees_includes_added_worktrees(main_repo: Path, tmp_path: Path) -> None:
+    target = tmp_path / "main-repo-231"
+    worktree.create_worktree(repo=main_repo, target=target, branch="feature/231-test", base="main")
+    entries = worktree.list_worktrees(repo=main_repo)
+    paths = [e.path for e in entries]
+    assert target in paths
+    assert main_repo in paths
+
+
+def test_create_worktree_at_existing_registered_path_returns_existing(
+    main_repo: Path, tmp_path: Path
+) -> None:
+    """Common shape: laptop crashed, ~/Code/jared-231/ still exists and is registered.
+    create_worktree returns the existing path rather than failing."""
+    target = tmp_path / "main-repo-231"
+    worktree.create_worktree(repo=main_repo, target=target, branch="feature/231-test", base="main")
+
+    # Second call — same target, expect to resume.
+    result = worktree.create_worktree(
+        repo=main_repo,
+        target=target,
+        branch="feature/231-test",
+        base="main",
+    )
+    assert result == target
+
+
+def test_create_worktree_at_orphan_path_raises(main_repo: Path, tmp_path: Path) -> None:
+    """Path exists but is NOT a registered worktree — error with remediation."""
+    target = tmp_path / "main-repo-231"
+    target.mkdir()
+    (target / "stray.txt").write_text("not a worktree\n")
+    with pytest.raises(worktree.WorktreeError) as exc_info:
+        worktree.create_worktree(
+            repo=main_repo, target=target, branch="feature/231-test", base="main"
+        )
+    msg = str(exc_info.value)
+    assert "not a registered worktree" in msg.lower() or "exists" in msg.lower()
+    assert str(target) in msg
