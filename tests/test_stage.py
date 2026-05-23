@@ -184,7 +184,8 @@ class TestNotPullableReason:
         assert (
             stage.not_pullable_reason(item)
             == "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
+            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
         )
 
     def test_numbered_list_bullets_fail(self) -> None:
@@ -204,7 +205,8 @@ class TestNotPullableReason:
         assert (
             stage.not_pullable_reason(item)
             == "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
+            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
         )
 
     def test_prose_only_acceptance_fails(self) -> None:
@@ -223,8 +225,30 @@ class TestNotPullableReason:
         assert (
             stage.not_pullable_reason(item)
             == "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail)"
+            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
+            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
         )
+
+    def test_bullet_style_message_restates_wrapper_requirement(self) -> None:
+        """#195: when bullets are wrong-style but the `<details>` wrapper is
+        present, the error message must explicitly restate that the wrapper
+        should be preserved. Otherwise a fixer reading only this message
+        could drop the wrapper while fixing the bullets, landing in the
+        non-canonical-wrapper-missing failure mode on the next stage."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n\n"
+                "<details>\n<summary>Expand</summary>\n\n"
+                "1. First criterion\n"
+                "2. Second criterion\n\n"
+                "</details>"
+            )
+        }
+        reason = stage.not_pullable_reason(item)
+        assert "<details><summary>Expand</summary>" in reason
+        assert "wrapper" in reason
 
     def test_non_canonical_heading_short_form(self) -> None:
         """`## Acceptance` (no `criteria` suffix), no <details> wrapper."""
