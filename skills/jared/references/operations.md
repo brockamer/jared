@@ -65,6 +65,28 @@ To avoid re-pulling the full mature-board history every sweep cycle, sweep maint
 
 The 60s `--cache` discipline above is unaffected: it governs `gh` HTTP-response caching, which is keyed by request shape; the 24h closed-cache governs Jared's own on-disk snapshot.
 
+## GitHub API mechanism selection
+
+`gh` exposes four mechanisms for talking to GitHub: subcommands (`gh issue view`, `gh project item-list`, …), raw REST (`gh api repos/…`), raw GraphQL (`gh api graphql`), and — only in the conversational layer — the GitHub MCP plugin (`mcp__plugin_github_github__*`). Each draws from a different rate-limit bucket. Routing matters most when the graphql bucket is pressured (`gh project item-list` on a large board can burn ~5000 graphql points in one call).
+
+**CLI doctrine** (what `lib/board.py` and the batch scripts do):
+
+- **ProjectV2 reads + mutations** — `gh api graphql` only. No alternative; the MCP plugin exposes no ProjectV2 tools at all. The cost levers are caching (`Board.board_items()` 3-layer cache), batched aliased mutations, and the `graphql_budget()` pre-flight.
+- **Stable per-issue state checks** — `gh api repos/.../issues/N` with ETag-conditional GET (`_fetch_issue_rest_with_etag`). Steady-state cost is 0 REST core (304 short-circuit). Used by `archive-plan.py` closed-issue scans and `dependency-graph.py` open-state filters.
+- **Full issue-body reads in batch scripts** — REST migration target (`gh issue view --json body` is 1 graphql/call; `gh api repos/.../issues/N` is 1 REST core/call). Marginal per call, cumulative in loops over plans and snapshots.
+- **Issue CRUD** — `gh issue create / comment / close / edit` already route via REST under the hood. No change.
+
+**Conversational doctrine** (Claude Code sessions, not the CLI):
+
+When the graphql bucket is pressured (`graphql_budget()` reports < 1000 remaining, or operator-observed exhaustion), prefer:
+
+- `mcp__plugin_github_github__issue_read` over `gh issue view --json` — saves ~1 graphql, costs ~2 REST core.
+- `mcp__plugin_github_github__add_issue_comment` over `gh issue comment` — no graphql delta (both REST), but bypasses `gh` subprocess overhead.
+
+When graphql is healthy, either path is fine; the choice becomes a UX call (gh's CLI conventions vs MCP's typed-tool ergonomics). ProjectV2 operations stay on graphql via `jared` regardless — there is no MCP alternative.
+
+Full investigation, capability matrix, per-call costs, and auth-surface details: [`docs/github-api-tool-selection.md`](../../../docs/github-api-tool-selection.md).
+
 ## Raw `gh` fallback — the minimum escape-hatch set
 
 ### Inspect the board
@@ -183,16 +205,16 @@ These remain raw-gh territory; none are used often enough to pull into the CLI.
 
 ## MCP equivalents
 
-When the GitHub MCP plugin is loaded, prefer its typed tools over `gh`:
+For issue + PR work, the GitHub MCP plugin's typed tools are a viable alternative to `gh` — see "GitHub API mechanism selection" above for when to prefer one over the other. The actual tool surface (as enumerated in `docs/github-api-tool-selection.md` § "MCP plugin tool surface"):
 
-| Operation | gh command | MCP tool (typical) |
+| Operation | gh command | MCP tool |
 |---|---|---|
-| Create issue | `gh issue create` | `create_issue` |
+| Create issue | `gh issue create` | `issue_write` (method=`create`) |
+| Read issue | `gh issue view --json` | `issue_read` (method=`get`) |
 | Comment | `gh issue comment` | `add_issue_comment` |
-| Close | `gh issue close` | `update_issue` with `state: closed` |
-| Edit body | `gh issue edit --body-file` | `update_issue` with `body` |
-| Project item add | `gh project item-add` | `add_project_item` |
-| Field edit | `gh project item-edit` | `update_project_item_field_value` |
+| Close | `gh issue close` | `issue_write` (method=`update`, state=closed) |
+| Edit body | `gh issue edit --body-file` | `issue_write` (method=`update`, body=…) |
+| Read PR | `gh pr view` | `pull_request_read` (method=`get`) |
+| **ProjectV2 ops** (`item-add`, `item-edit`, field reads, blocked-by edges, …) | `gh project …` / `gh api graphql` | **Not available — the MCP plugin exposes no ProjectV2 tools.** Use `jared` (which wraps the graphql calls) or raw `gh api graphql`. |
 
-Exact tool names depend on the MCP server version. Use `tool_search` to
-discover what's actually loaded rather than assuming.
+Tool names can shift across MCP server versions. Use `tool_search` to confirm what's actually loaded rather than assuming.

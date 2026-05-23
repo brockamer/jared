@@ -91,7 +91,9 @@ This file is the contract. It holds: project URL and IDs, field and option IDs (
 
 For any board operation, pick the right tier:
 
-**Tier 1 — single-call conversational ops.** Comment on an issue, close an issue, read an issue body, set one field. Prefer the GitHub MCP plugin's typed tools (`add_issue_comment`, `update_issue`, `issue_read`, `update_project_item_field_value`, etc.) when loaded. If MCP is absent, fall back to `jared <cmd>` below. Raw `gh` is a last resort.
+**Tier 1 — single-call conversational ops.** Comment on an issue, close an issue, read an issue body. Prefer the GitHub MCP plugin's typed tools (`add_issue_comment`, `issue_write`, `issue_read`, etc.) when loaded. If MCP is absent, fall back to `jared <cmd>` below. Raw `gh` is a last resort. **ProjectV2 field edits are not Tier 1** — the MCP plugin exposes no ProjectV2 tools, so Status / Priority / project membership go through `jared` (Tier 2).
+
+**MCP routing when graphql is pressured.** For issue + PR work — never ProjectV2, which MCP can't reach — the conversational MCP path saves graphql at the cost of REST core: `mcp__plugin_github_github__issue_read` costs ~2 REST core vs `gh issue view --json`'s ~1 graphql, and `mcp__plugin_github_github__add_issue_comment` skips the `gh` subprocess overhead. Worth switching when `graphql_budget()` reports < 1000 remaining, or when graphql exhaustion is being observed. When graphql is healthy, either path is fine — choose on UX. Per-call costs, capability matrix, and the full investigation: [`docs/github-api-tool-selection.md`](../../docs/github-api-tool-selection.md).
 
 **Tier 2 — multi-step orchestrations.** Any operation that would take more than one underlying call: filing an issue (create + add-to-board + set fields), moving an issue (lookup item-id + set Status), closing with verification (close + confirm auto-move), dependency edges (resolve both node-IDs + graphql mutation). Always use the `jared` CLI:
 
