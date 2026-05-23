@@ -12,6 +12,7 @@ See docs/superpowers/specs/2026-05-23-multi-session-impl-design.md for design.
 from __future__ import annotations
 
 import contextlib
+import enum
 import json
 import os
 import sys
@@ -121,3 +122,61 @@ def list_active_locks(repo_root: Path) -> list[Lock]:
                 file=sys.stderr,
             )
     return active
+
+
+class Action(enum.Enum):
+    """Resolution outcome for a `/jared-start` invocation."""
+
+    PROCEED_SOLO = "proceed_solo"
+    PROCEED_MULTI = "proceed_multi"
+    PROCEED_ACK_RISK = "proceed_ack_risk"
+    REFUSE_BLEG = "refuse_bleg"
+    REFUSE_DUP_SESSION_N = "refuse_dup_session_n"
+    REFUSE_CONFLICTING_FLAGS = "refuse_conflicting_flags"
+
+
+@dataclass(frozen=True)
+class Flags:
+    """Operator-supplied flags to `/jared-start`."""
+
+    session: int | None
+    no_worktree: bool
+
+
+def resolve_action(siblings: list[Lock], flags: Flags) -> Action:
+    """Decide what `/jared-start` should do given current sibling locks and flags.
+
+    Maps to the six-row action table in
+    docs/superpowers/specs/2026-05-23-multi-session-impl-design.md § D3.
+    Pure function — no I/O, no side effects.
+    """
+    # --session and --no-worktree are mutually exclusive: one says "isolate me",
+    # the other says "I'm accepting the shared-HEAD risk".
+    if flags.session is not None and flags.no_worktree:
+        return Action.REFUSE_CONFLICTING_FLAGS
+
+    if not siblings:
+        if flags.session is not None:
+            return Action.PROCEED_MULTI
+        return Action.PROCEED_SOLO
+
+    # At least one live sibling.
+    if flags.no_worktree:
+        # Operator acknowledged the trap explicitly.
+        return Action.PROCEED_ACK_RISK
+
+    if flags.session is None:
+        # Sibling exists, no flag → refuse with guidance.
+        return Action.REFUSE_BLEG
+
+    # flags.session is not None — multi-session opt-in.
+    for sib in siblings:
+        if sib.session is None:
+            # Solo sibling on shared HEAD: this session would be safe in its
+            # worktree, but the solo sibling is still on shared HEAD and can
+            # still hit the trap. Refuse so the operator handles the sibling first.
+            return Action.REFUSE_BLEG
+        if sib.session == flags.session:
+            return Action.REFUSE_DUP_SESSION_N
+
+    return Action.PROCEED_MULTI
