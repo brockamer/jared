@@ -11,8 +11,10 @@ See docs/superpowers/specs/2026-05-23-multi-session-impl-design.md for design.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -69,3 +71,46 @@ def read_lock(path: Path) -> Lock | None:
         )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def is_alive(pid: int) -> bool:
+    """Check whether a process with this PID exists.
+
+    Uses `os.kill(pid, 0)`: ProcessLookupError (ESRCH) means dead;
+    PermissionError (EPERM) means alive but not signalable (e.g., init).
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def list_active_locks(repo_root: Path) -> list[Lock]:
+    """Enumerate all live session locks for this repo. Clears stale entries.
+
+    Walks `<repo>/.jared/session-*.lock`, reads each, drops any with a dead
+    PID (deleting the stale file and emitting a one-line stderr warning).
+    Malformed lock files are silently skipped — they may be partial writes
+    from a crashed write that didn't reach os.replace.
+    """
+    lockdir = _lock_dir(repo_root)
+    if not lockdir.exists():
+        return []
+    active: list[Lock] = []
+    for path in sorted(lockdir.glob("session-*.lock")):
+        lock = read_lock(path)
+        if lock is None:
+            continue
+        if is_alive(lock.pid):
+            active.append(lock)
+        else:
+            with contextlib.suppress(OSError):
+                path.unlink()
+            print(
+                f"warning: cleared stale lock for PID {lock.pid} (no longer running): {path}",
+                file=sys.stderr,
+            )
+    return active
