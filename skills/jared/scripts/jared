@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -845,6 +846,39 @@ def _cmd_set(args: argparse.Namespace) -> int:
     return 0
 
 
+_SESSION_LABEL_RE = re.compile(r"^session-(\d+)$")
+
+
+def _session_labels(labels: Sequence[str]) -> list[str]:
+    """Extract `session-N` labels from an item's label set, sorted by N.
+
+    Any label not matching `session-<digits>` is ignored — peer labels
+    (enhancement, bug, etc.) don't participate in per-session arithmetic.
+    """
+    matched = [name for name in labels if _SESSION_LABEL_RE.match(name)]
+    return sorted(matched, key=lambda s: int(s.split("-", 1)[1]))
+
+
+def _count_workstreams(items: list[dict[str, Any]]) -> int:
+    """Per-session WIP arithmetic for In Progress items (#235).
+
+    Workstream count = |distinct session-N labels seen| + |items with no
+    session-N label|. An unlabeled item is its own workstream; same-session
+    items collapse into one. An item carrying both session-1 and session-2
+    (operator-error case the discipline exists to prevent) adds both
+    labels to the workstream set — set-union, no special case.
+    """
+    distinct_sessions: set[str] = set()
+    unlabeled = 0
+    for item in items:
+        sessions = _session_labels(item.get("labels") or ())
+        if sessions:
+            distinct_sessions.update(sessions)
+        else:
+            unlabeled += 1
+    return len(distinct_sessions) + unlabeled
+
+
 def _cmd_summary(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     if getattr(args, "fresh", False):
@@ -863,6 +897,17 @@ def _cmd_summary(args: argparse.Namespace) -> int:
             return f"  #{num} [{prio}] {title}"
         return f"  #{num} {title}"
 
+    def render_in_progress_item(item: dict[str, Any]) -> str:
+        # Suffix any session-N labels so the collapse rendering is legible.
+        # Dual-session labels on one item shouldn't happen — that's the
+        # collision the discipline exists to prevent — but if they do,
+        # show both rather than silently picking one.
+        sessions = _session_labels(item.get("labels") or ())
+        base = render_item(item)
+        if sessions:
+            return f"{base} ({', '.join(sessions)})"
+        return base
+
     # Stuck-closed items: closed issues whose Status never auto-moved to
     # Done (typical drift path: PR-merge auto-close on a project where
     # the built-in "Item closed → Done" workflow is off). open_items()
@@ -875,11 +920,19 @@ def _cmd_summary(args: argparse.Namespace) -> int:
     up_next = up_next_all[:3]
     blocked = by_status("Blocked")
 
+    workstreams = _count_workstreams(in_progress)
+    if workstreams < len(in_progress):
+        in_progress_header = (
+            f"In Progress ({workstreams} workstreams · {len(in_progress)} items):"
+        )
+    else:
+        in_progress_header = f"In Progress ({len(in_progress)}):"
+
     print(f"Board: {board.project_url}")
     print()
-    print(f"In Progress ({len(in_progress)}):")
+    print(in_progress_header)
     for it in in_progress:
-        print(render_item(it))
+        print(render_in_progress_item(it))
     if stuck_closed:
         print()
         print(f"Stuck closed ({len(stuck_closed)}) — closed issues not on Done:")
@@ -1085,12 +1138,18 @@ def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
 
 
 def _render_in_flight(item: dict[str, Any], note_one_liner: str | None) -> None:
-    """Print one bullet for an In Progress item with optional last Session-note one-liner."""
+    """Print one bullet for an In Progress item with optional last Session-note one-liner.
+
+    Suffixes any `session-N` labels so the handoff carries the same
+    grouping signal `jared summary` shows (#235).
+    """
     content = item.get("content") or {}
     num = content.get("number")
     prio = item.get("priority") or "-"
     title = content.get("title", "")
-    print(f"- #{num} [{prio}] {title}")
+    sessions = _session_labels(item.get("labels") or ())
+    suffix = f" ({', '.join(sessions)})" if sessions else ""
+    print(f"- #{num} [{prio}] {title}{suffix}")
     if note_one_liner is not None:
         print(f'  Last session: "{note_one_liner}"')
 

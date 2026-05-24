@@ -462,6 +462,7 @@ class Board:
             number
             title
             state
+            labels(first: 20) { nodes { name } }
             projectItems(first: 10) {
               nodes {
                 id
@@ -522,6 +523,10 @@ class Board:
             flat = _flatten_project_item_for_project(issue.get("projectItems"), self.project_number)
             if flat is None:
                 continue
+            labels_node = issue.get("labels") or {}
+            label_names = tuple(
+                n["name"] for n in (labels_node.get("nodes") or []) if "name" in n
+            )
             items.append(
                 {
                     "content": {
@@ -531,6 +536,7 @@ class Board:
                     },
                     "status": flat.get("status"),
                     "priority": flat.get("priority"),
+                    "labels": label_names,
                 }
             )
         return items

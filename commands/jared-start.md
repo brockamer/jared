@@ -73,7 +73,12 @@ Flow:
 
    Solo sessions (`--session` absent) still write a lock with `session=null, worktree_path=null`. This is load-bearing: it lets a later sibling session detect the solo one and refuse with guidance, rather than silently sharing `.git/HEAD`.
 
-2. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` and read the `In Progress (N)` header — that `N` is the current count. If it's already at the project's configured cap (default 3), STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
+2. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary`. The In Progress header has two shapes (per #235):
+
+   - `In Progress (N):` — no `session-N` labels in play. `N` is the workstream count, equal to the item count.
+   - `In Progress (M workstreams · N items):` — `session-N` labels collapse same-session items into one workstream. `M` (the leading number) is what to compare against the cap. `N` (the item count) is for operator orientation only.
+
+   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
 3. **Check pullable state.** Read the target issue's body and verify:
    - First paragraph is a clear summary
