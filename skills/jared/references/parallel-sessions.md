@@ -11,6 +11,56 @@ When the board shows an issue In Progress with a `session-N` label (N = 1,
 The label outlives the conversation; it's the durable claim that survives
 the next session-start.
 
+**Exact format.** `session-<positive-integer>` — `session-1`, `session-2`,
+…. The parser is a strict regex (`^session-(\d+)$`); `session-a`,
+`Session-1`, `sess-1` don't count. Peer labels (`enhancement`, `bug`, …)
+sit alongside without interfering — the per-session arithmetic only
+considers labels matching the strict shape.
+
+**Who applies and when.** The *operator* applies `session-N` labels at
+parallel-session start (option 1a from the v1.1 multi-session shape spec).
+Not Jared, not `/jared-stage`, not `/jared-start`. Auto-application was
+considered and deferred — see `docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-shape.md` § "Workstream 1".
+
+## Pre-parallel-session operator ritual
+
+Before launching two or more Claude sessions against the same repo:
+
+1. Glance at Up Next + In Progress and partition the next pull candidates
+   by *surface overlap* — which issues touch the same files, modules, or
+   shared helpers.
+2. Apply `session-1` to the group session 1 will own, `session-2` to the
+   group session 2 will own, etc. Items with no surface overlap stay
+   unlabeled and act as floats either session can claim.
+3. Start the sessions with `/jared-start <issue> --session N`. The flag
+   tells the session-presence resolver which claim it represents.
+
+The discipline is operator vigilance, not mechanism. The mechanism that
+*does* land per #235: `jared summary`'s WIP arithmetic collapses items
+sharing a `session-N` label into a single workstream count, so two
+session-1 issues + one session-2 issue render as "2 workstreams · 3 items"
+rather than three independent items pressuring the WIP cap.
+
+## How per-session WIP arithmetic renders
+
+`jared summary` and `jared next-session-prompt` show the collapse when it
+applies:
+
+- **No `session-N` labels in play** (common case): `In Progress (N):` —
+  unchanged, no parenthetical, no per-item suffix.
+- **`session-N` labels present**: `In Progress (M workstreams · N items):`
+  with each item suffixed by its session tag, e.g.
+  `#235 [High] Per-session WIP (session-1)`.
+
+The leading number is the workstream count — that's what `/jared-start`'s
+WIP-cap check compares against the project's configured cap. Two
+session-1 items + one session-2 item read as 2 workstreams, not 3 items.
+
+An item carrying both `session-1` and `session-2` is malformed (the
+discipline exists to prevent exactly that collision) but the set-union
+arithmetic handles it without special-casing: both labels contribute to
+the workstream set, the item contributes zero to the unlabeled count.
+
 **Before pulling a new issue:**
 
 1. Scan In Progress for items labeled `session-M` where M ≠ your session
