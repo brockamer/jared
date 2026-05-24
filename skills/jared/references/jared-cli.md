@@ -127,19 +127,19 @@ Closing first then failing to comment would leave a closed issue without
 a Session note — the discipline this flag exists to enforce against the
 audit/wrap doctrine that treats close-with-comment as one atom.
 
-**Audit-emission rail (#227).** When the issue body carries
-`## Model & execution guidance` and the project's
-`docs/project-board.md` § `## Jared config` does NOT set
+**Audit-emission rail (#227, decoupled in #228).** Unless the project's
+`docs/project-board.md` § `## Jared config` sets
 `- model-guidance: disabled`, `jared close` refuses unless either the
 body (`--body` / `--body-file`) contains `## Guidance audit (#N)` OR
 `--no-audit <reason>` is passed. The escape posts a tiny
 `_Audit-exempt close: <reason>_` marker comment for measurement.
 Acceptable reasons: `epic-rollup`, `scope-question`, `no-work-session`,
-`docs-trivia`, `already-emitted` (recovery path above).
+`docs-trivia`, `already-emitted` (recovery path above). Decoupled from
+`## Model & execution guidance` section presence in #228 so the rail
+fires on every close, not just on issues that pre-date the cut.
 
 ```
-jared close <issue_number>                                # OK when issue lacks model guidance
-jared close <issue_number> --body "Done — shipped in v0.21."
+jared close <issue_number> --body "Done — shipped in v0.21." --no-audit no-work-session
 jared close <issue_number> --body-file close-note.md      # body must contain ## Guidance audit (#N)
 cat close-note.md | jared close <issue_number> --body-file -
 jared close <issue_number> --no-audit scope-question      # explicit exempt close

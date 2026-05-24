@@ -7,6 +7,12 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.24.0 — 2026-05-24
+
+**Doctrine**
+- `## Model & execution guidance` section cut from new issue bodies. Cheap/Standard tier classifications and the Execution sketch carried ~75% of the section's per-render token cost but produced no measurable session-shift behavior in the 73-audit corpus underlying the #228 audit (combined jared + findajob, 2026-05-20 → present). The `advisor()` directive — the one prescription that holds at 96.5% adoption — is preserved via SKILL.md doctrine and the wrap-audit Q1 close-time prompt (which is the feedback loop that makes adoption stick). 30-day re-audit gate (≤ 2026-06-23) on Q1 ≥ 90% AND Q3 ≤ 25%; either degrades → restore. Saves ~340 tokens per `/jared-start` render. Existing issues retain their section. (#228)
+- Audit-emission rail decoupled from `## Model & execution guidance` section presence. Post-cut, `jared close` requires `## Guidance audit (#N)` or `--no-audit <reason>` on every close (unless the project-level kill switch `- model-guidance: disabled` is set), not just on issues that carried the now-cut section. The decoupling ensures the 30-day re-audit measures sessions where the section was actually absent. (#228)
+
 ## v0.23.1 — 2026-05-24
 
 **Bug fixes**
