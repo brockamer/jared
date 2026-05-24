@@ -139,6 +139,113 @@ def test_summary_no_stuck_closed_section_when_clean(
     assert "Stuck closed" not in out
 
 
+def test_summary_collapses_same_session_in_progress_into_one_workstream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Per-session WIP arithmetic (#235): two In Progress items sharing
+    `session-1` plus one with `session-2` render as 2 workstreams · 3 items,
+    not as a flat count of 3. The leading number is what /jared-start's
+    WIP-cap check reads; the parenthetical item count keeps the operator
+    oriented on what they're actually looking at.
+    """
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 1, "title": "A in session-1", "state": "OPEN"},
+            {"number": 2, "title": "B in session-1", "state": "OPEN"},
+            {"number": 3, "title": "C in session-2", "state": "OPEN"},
+        ],
+        statuses={
+            1: ("In Progress", "High"),
+            2: ("In Progress", "High"),
+            3: ("In Progress", "Medium"),
+        },
+        labels_by_number={
+            1: ["session-1", "enhancement"],
+            2: ["session-1"],
+            3: ["session-2"],
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "summary"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "In Progress (2 workstreams · 3 items)" in out
+    # Each item renders its session tag so the grouping is legible.
+    assert "(session-1)" in out
+    assert "(session-2)" in out
+
+
+def test_summary_unlabeled_in_progress_counts_as_own_workstream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An In Progress item with no `session-N` label is its own workstream.
+    Two session-1 items + one unlabeled = 2 workstreams · 3 items.
+    """
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 1, "title": "A in session-1", "state": "OPEN"},
+            {"number": 2, "title": "B in session-1", "state": "OPEN"},
+            {"number": 3, "title": "C solo", "state": "OPEN"},
+        ],
+        statuses={
+            1: ("In Progress", "High"),
+            2: ("In Progress", "High"),
+            3: ("In Progress", "Medium"),
+        },
+        labels_by_number={
+            1: ["session-1"],
+            2: ["session-1"],
+            # #3 has no labels → its own workstream
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "summary"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "In Progress (2 workstreams · 3 items)" in out
+
+
+def test_summary_no_collapse_when_no_session_labels_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Common case — no parallel-session labels in play. Header stays as
+    `In Progress (N):`. Workstream-count parenthetical is the *changed*
+    shape; it must not leak into the no-collapse path."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 1, "title": "Alone", "state": "OPEN"},
+            {"number": 2, "title": "Also alone", "state": "OPEN"},
+        ],
+        statuses={
+            1: ("In Progress", "High"),
+            2: ("In Progress", "High"),
+        },
+        labels_by_number={
+            1: ["enhancement"],
+            # #2 has no labels at all
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "summary"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "In Progress (2):" in out
+    assert "workstreams" not in out
+    assert "(session-" not in out
+
+
 def test_summary_up_next_truncates_to_three(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
