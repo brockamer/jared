@@ -182,3 +182,70 @@ class TestCombineEdgeCases:
         hits = [_hit(99, "milestone", "strong")]
         ties = combine(hits, "weak", _target(), _open_issues())
         assert ties == []
+
+
+class TestCombineSignalPriority:
+    """When multiple signals fire at the same confidence for one related_n,
+    _SIGNAL_PRIORITY picks the primary — not analyzer call order. Structured-
+    edge signals beat text-scrape signals."""
+
+    def test_blocked_by_beats_cross_ref_when_both_strong(self) -> None:
+        """Native blocked-by edge wins the primary tag over body cross-ref,
+        regardless of which analyzer ran first. This is the canonical
+        bug-#230 case: an issue with both a native blockedBy edge AND a
+        body mention of the same blocker."""
+        target = OpenIssueForTies(
+            number=1,
+            title="t",
+            body="references #2",
+            labels=(),
+            milestone=None,
+            status="In Progress",
+            priority="High",
+            blocked_by=(2,),
+        )
+        # Insert cross_ref FIRST to prove insertion order doesn't bind.
+        hits = [
+            _hit(2, "cross_ref", "strong", evidence="target #1 body mentions #2"),
+            _hit(2, "blocked_by", "strong", evidence="target #1 is blocked by #2"),
+        ]
+        ties = combine(hits, "medium", target, _open_issues((2, "B")))
+        assert ties[0].primary_relationship == "blocker"
+        assert "cross-ref" in ties[0].secondary_relationships
+        # Suggested action is blocker-flavored, not cross-ref-flavored.
+        assert "sequence" in ties[0].suggested_action.lower()
+
+    def test_blocked_by_beats_cross_ref_reverse_insertion_order(self) -> None:
+        """Same as above but with blocked_by inserted FIRST — the result
+        must still be blocked-by-primary. Guards against a regression where
+        only stable-sort happens to put it first."""
+        target = OpenIssueForTies(
+            number=1,
+            title="t",
+            body="references #2",
+            labels=(),
+            milestone=None,
+            status="In Progress",
+            priority="High",
+            blocked_by=(2,),
+        )
+        hits = [
+            _hit(2, "blocked_by", "strong", evidence="target #1 is blocked by #2"),
+            _hit(2, "cross_ref", "strong", evidence="target #1 body mentions #2"),
+        ]
+        ties = combine(hits, "medium", target, _open_issues((2, "B")))
+        assert ties[0].primary_relationship == "blocker"
+
+    def test_title_tokens_beats_labels_when_both_weak(self) -> None:
+        """Priority axis is independent of confidence: when two weak signals
+        fire for the same related_n, title_tokens (priority 4) beats labels
+        (priority 5)."""
+        hits = [
+            _hit(2, "labels", "weak"),
+            _hit(2, "title_tokens", "weak"),
+        ]
+        ties = combine(hits, "weak", _target(), _open_issues((2, "B")))
+        assert ties[0].primary_relationship == "adjacent"
+        # Both labels and title_tokens map to "adjacent"; primary's source
+        # hit is the first sorted element, which should be title_tokens.
+        assert ties[0].hits[0].name == "title_tokens"

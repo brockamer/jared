@@ -43,7 +43,7 @@ _GRAPHQL_RESPONSE_FULL: dict[str, Any] = {
                                 }
                             ]
                         },
-                        "trackedInIssues": {"nodes": []},
+                        "blockedBy": {"nodes": []},
                     },
                     {
                         "number": 20,
@@ -59,7 +59,7 @@ _GRAPHQL_RESPONSE_FULL: dict[str, Any] = {
                                 }
                             ]
                         },
-                        "trackedInIssues": {"nodes": [{"number": 10}]},
+                        "blockedBy": {"nodes": [{"number": 10}]},
                     },
                 ],
                 "pageInfo": {"hasNextPage": False, "endCursor": None},
@@ -109,7 +109,7 @@ def test_fetch_partial_mode_omits_body(tmp_path: Path) -> None:
                                     }
                                 ]
                             },
-                            "trackedInIssues": {"nodes": []},
+                            "blockedBy": {"nodes": []},
                         }
                     ],
                     "pageInfo": {"hasNextPage": False, "endCursor": None},
