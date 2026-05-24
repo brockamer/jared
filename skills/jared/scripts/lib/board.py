@@ -756,7 +756,7 @@ class Board:
                     }}
                   }}
                 }}
-                trackedInIssues(first: 10) {{ nodes {{ number }} }}
+                blockedBy(first: 20) {{ nodes {{ number }} }}
               }}
               pageInfo {{ hasNextPage endCursor }}
             }}
@@ -780,7 +780,7 @@ class Board:
                 status_field = project_item.get("fieldValueByName") or {}
                 priority_field = project_item.get("priority") or {}
                 milestone_obj = node.get("milestone") or {}
-                tracked_in = node.get("trackedInIssues", {}).get("nodes") or []
+                blocked_by_nodes = node.get("blockedBy", {}).get("nodes") or []
                 all_records.append(
                     OpenIssueForTies(
                         number=int(node["number"]),
@@ -792,7 +792,7 @@ class Board:
                         milestone=milestone_obj.get("title"),
                         status=str(status_field.get("name") or "Backlog"),
                         priority=priority_field.get("name"),
-                        blocked_by=tuple(int(t["number"]) for t in tracked_in),
+                        blocked_by=tuple(int(t["number"]) for t in blocked_by_nodes),
                     )
                 )
             if not page["pageInfo"]["hasNextPage"]:

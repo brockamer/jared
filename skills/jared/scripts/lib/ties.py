@@ -49,6 +49,21 @@ MAX_TIES_DISPLAYED = 8
 # deterministic hits — neither is bullet-proof, both deserve operator attention.
 CONFIDENCE_WEIGHT: dict[Confidence, int] = {"strong": 3, "medium": 2, "weak": 1, "llm": 2}
 
+# Tiebreaker when multiple signals fire at the same confidence for one related_n.
+# Structured-edge signals beat text-scrape signals — native blocked-by is a
+# deterministic GraphQL edge, cross-ref is a regex match on issue-body prose.
+# Lower number = higher precedence (sorted ascending as secondary key in combine()).
+_SIGNAL_PRIORITY: dict[SignalName, int] = {
+    "blocked_by": 0,
+    "file_paths": 1,
+    "cross_ref": 2,
+    "milestone": 3,
+    "title_tokens": 4,
+    "labels": 5,
+    "possibly_already_done": 6,
+    "semantic_overlap": 7,
+}
+
 # Score cap so a single candidate firing every signal doesn't dominate sorting.
 MAX_COMBINED_SCORE = 5
 
@@ -453,8 +468,13 @@ def combine(
             continue
 
         # Sort hits strong → weak so primary is the strongest signal.
-        # Within same confidence, keep stable order.
-        sorted_hits = sorted(related_hits, key=lambda h: -CONFIDENCE_WEIGHT[h.confidence])
+        # Within same confidence, break ties by _SIGNAL_PRIORITY so structured
+        # edges (blocked_by) beat text-scrape signals (cross_ref) deterministically,
+        # not by analyzer call order.
+        sorted_hits = sorted(
+            related_hits,
+            key=lambda h: (-CONFIDENCE_WEIGHT[h.confidence], _SIGNAL_PRIORITY[h.name]),
+        )
         primary_signal = sorted_hits[0].name
         primary_label = _RELATIONSHIP_LABELS[primary_signal]
         secondary_labels: list[str] = []
