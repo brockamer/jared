@@ -222,6 +222,7 @@ def patch_gh_multi(
     closed_issues: list[dict[str, object]] | None = None,
     closed_statuses: dict[int, tuple[str, str]] | None = None,
     comments_batch_json: str | None = None,
+    labels_by_number: dict[int, list[str]] | None = None,
 ) -> None:
     """Patch the multi-gh-call shape produced by the batched open-only path (#185).
 
@@ -245,6 +246,7 @@ def patch_gh_multi(
     open_issues = open_issues or []
     statuses = statuses or {}
     closed_statuses = closed_statuses or {}
+    labels_by_number = labels_by_number or {}
     empty_comments_json = '{"data": {"repository": {}}}'
 
     def _open_items_batched_response() -> str:
@@ -256,11 +258,13 @@ def patch_gh_multi(
             if number in statuses:
                 status, priority = statuses[number]
                 project_items = {"nodes": [_projectitems_node(status, priority)]}
+            label_nodes = [{"name": name} for name in labels_by_number.get(number, [])]
             nodes.append(
                 {
                     "number": number,
                     "title": issue.get("title", ""),
                     "state": issue.get("state", "OPEN"),
+                    "labels": {"nodes": label_nodes},
                     "projectItems": project_items,
                 }
             )
