@@ -69,9 +69,12 @@ class Board:
     # defaults to ['src/**']. See sweep.check_doc_sync_gate (#163).
     operator_docs: list[str] = field(default_factory=list)
     code_surface: list[str] = field(default_factory=list)
-    # Project-level kill switch for the wrap-time guidance audit (#227).
-    # Set in `## Jared config` as `- model-guidance: disabled`. When True,
-    # `_cmd_close` skips the audit-emission rail entirely. False = rail active.
+    # Project-level kill switch for the wrap-time audit-emission rail
+    # (#227, decoupled from section presence in #228). Set in `## Jared
+    # config` as `- model-guidance: disabled`. When True, `_cmd_close`
+    # skips the audit-emission rail entirely. False = rail active. The
+    # field/config-key name is historical — it originally controlled the
+    # file-time `## Model & execution guidance` body section, cut in #228.
     model_guidance_disabled: bool = False
     # Cached `gh project item-list` result, populated on first board_items()
     # call and reused for the lifetime of this instance. None means uncached.

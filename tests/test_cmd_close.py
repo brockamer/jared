@@ -10,6 +10,41 @@ from tests.conftest import FakeGhResult, import_cli, patch_gh_by_arg
 
 
 def _write_board_with_status(tmp_path: Path) -> Path:
+    """Default board fixture with the audit-emission rail OFF (kill switch on).
+
+    Most tests exercise behavior unrelated to the rail; pre-#228 they got the
+    rail-off behavior implicitly because their issue bodies lacked the
+    `## Model & execution guidance` H2 the rail used to gate on. Post-#228
+    the rail is decoupled from section presence and fires on every close
+    unless this kill switch is set, so this default now bakes the switch
+    in. Tests that EXERCISE the rail use `_write_board_with_status_rail_on`.
+    """
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+        - model-guidance: disabled
+
+        ### Status
+        - Field ID: PVTSSF_status
+        - Backlog: OPTION_backlog
+        - In Progress: OPTION_in_progress
+        - Done: OPTION_done
+    """)
+    )
+    return board_md
+
+
+def _write_board_with_status_rail_on(tmp_path: Path) -> Path:
+    """Like `_write_board_with_status` but with the audit-emission rail ON
+    (no kill switch). Used by tests that exercise the rail directly."""
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
     board_md.write_text(
@@ -501,38 +536,16 @@ _SESSION_NOTE_WITHOUT_AUDIT = (
 )
 
 
-def _write_board_with_status_and_killswitch(tmp_path: Path) -> Path:
-    """Like _write_board_with_status, but with `model-guidance: disabled` set."""
-    board_md = tmp_path / "docs" / "project-board.md"
-    board_md.parent.mkdir(parents=True)
-    board_md.write_text(
-        dedent("""\
-        - Project URL: https://github.com/users/brockamer/projects/7
-        - Project number: 7
-        - Project ID: PVT_kwHO_xyz
-        - Owner: brockamer
-        - Repo: brockamer/findajob
-
-        ## Jared config
-        - model-guidance: disabled
-
-        ### Status
-        - Field ID: PVTSSF_status
-        - Backlog: OPTION_backlog
-        - In Progress: OPTION_in_progress
-        - Done: OPTION_done
-    """)
-    )
-    return board_md
-
-
 def test_close_refuses_when_guidance_present_and_no_body_no_escape(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Bare `jared close <N>` on a guidance-bearing issue MUST refuse (#227 rail).
+    """Bare `jared close <N>` MUST refuse when the rail is on (#227 rail).
     No comment, no close, no item-edit. Stderr names both escape paths.
+    Post-#228, the rail's gating is independent of body shape, but the
+    `## Model & execution guidance` issue body is preserved as fixture
+    bait so the test exercises the same refusal that pre-#228 tests did.
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     calls, _bodies = _patch_gh_capture_close_with_body(
         monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
     )
@@ -560,7 +573,7 @@ def test_close_refuses_when_body_lacks_audit_h2(
     `jared close --body-file` but forgets to append the audit (10 of 24
     direct-with-session-note closures fell into this shape).
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     note = tmp_path / "session.md"
     note.write_text(_SESSION_NOTE_WITHOUT_AUDIT)
     calls, _bodies = _patch_gh_capture_close_with_body(
@@ -583,7 +596,7 @@ def test_close_passes_when_body_has_audit_h2(
     """Body containing both `## Session ...` and `## Guidance audit (#N)`
     passes the rail — comment posts, close runs. The happy path.
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     note = tmp_path / "session.md"
     note.write_text(_SESSION_NOTE_WITH_AUDIT)
     calls, bodies = _patch_gh_capture_close_with_body(
@@ -610,7 +623,7 @@ def test_close_no_audit_escape_posts_marker_no_body(
     scope-question, no-work-session). Marker is grep-able for future
     `(audits + explicit --no-audits) / closures` measurement.
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     calls, bodies = _patch_gh_capture_close_with_body(
         monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
     )
@@ -636,7 +649,7 @@ def test_close_no_audit_with_body_posts_session_then_marker_then_closes(
     marker, then close. Order matters — if close fails mid-flow, the Session
     note is durable (per #184 invariant) and the marker is durable too.
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     note = tmp_path / "session.md"
     note.write_text(_SESSION_NOTE_WITHOUT_AUDIT)
     calls, bodies = _patch_gh_capture_close_with_body(
@@ -680,10 +693,11 @@ def test_close_rail_skipped_when_model_guidance_disabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`docs/project-board.md` § `## Jared config` contains `- model-guidance:
-    disabled` → rail is bypassed. Bare close on a guidance-bearing issue runs
-    to completion. The kill switch is what lets opt-out projects coexist.
+    disabled` → rail is bypassed. Bare close runs to completion. The kill
+    switch is what lets opt-out projects coexist. (Post-#228 this is also
+    the default board fixture used by tests unrelated to the rail.)
     """
-    board_md = _write_board_with_status_and_killswitch(tmp_path)
+    board_md = _write_board_with_status(tmp_path)
     calls, _bodies = _patch_gh_capture_close_with_body(
         monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
     )
@@ -697,24 +711,31 @@ def test_close_rail_skipped_when_model_guidance_disabled(
     assert "close" in kinds, f"expected close to run with kill switch on; got {kinds}"
 
 
-def test_close_rail_skipped_when_issue_body_lacks_guidance_h2(
+def test_close_rail_fires_regardless_of_body_shape(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Issue body without `## Model & execution guidance` → rail doesn't fire.
-    Pre-existing closes on guidance-free issues continue to work unchanged,
-    which is critical for the backward-compatibility contract.
+    """Issue body without `## Model & execution guidance` → rail still fires.
+    Post-#228, the audit-emission rail is decoupled from section presence;
+    every close requires either an audit or `--no-audit`, regardless of body
+    shape. (Pre-#228, the rail skipped guidance-free issues for backward
+    compat with pre-#227 closures; the cut in #228 removed that gating so
+    the post-cut re-audit pool isn't bounded by pre-cut issues.)
     """
-    board_md = _write_board_with_status(tmp_path)
-    # Default fixture issue_body="" → no guidance H2 → rail passes.
+    board_md = _write_board_with_status_rail_on(tmp_path)
+    # Default fixture issue_body="" → no guidance H2 → rail still fires.
     calls, _bodies = _patch_gh_capture_close_with_body(monkeypatch)
 
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "close", "42"])
 
     captured = capsys.readouterr()
-    assert rc == 0, captured.err
+    assert rc == 2, captured.err
     kinds = _call_kinds(calls)
-    assert "close" in kinds, f"expected close to run on guidance-free issue; got {kinds}"
+    assert "close" not in kinds, (
+        f"rail should refuse on guidance-free issue post-#228; got {kinds}"
+    )
+    assert "## Guidance audit" in captured.err
+    assert "--no-audit" in captured.err
 
 
 def test_close_rejects_empty_no_audit_reason(
@@ -724,7 +745,7 @@ def test_close_rejects_empty_no_audit_reason(
     unhelpful `_Audit-exempt close: _` marker. The CLI rejects empty / whitespace-
     only reasons with a clear error and an example-reason hint.
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     calls, _bodies = _patch_gh_capture_close_with_body(
         monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
     )
@@ -747,7 +768,7 @@ def test_audit_required_error_message_includes_template_and_escape(
     UX-pinning test — the message text matters because it's shown at the
     moment of frustration.
     """
-    board_md = _write_board_with_status(tmp_path)
+    board_md = _write_board_with_status_rail_on(tmp_path)
     _patch_gh_capture_close_with_body(monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE)
 
     mod = import_cli()

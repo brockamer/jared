@@ -185,7 +185,7 @@ See `references/context-capture.md` for the trigger patterns and the helper scri
 
 Close via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>` — the CLI closes the issue and polls for the board's auto-move to Done, falling back to an explicit `Status=Done` set if the auto-move hasn't fired. A PR merge closes the issue too; same verification applies, so re-run `jared close` (idempotent) or `jared summary` to confirm the item landed in Done.
 
-**Audit-emission rail (#227).** When the issue body carries `## Model & execution guidance` and the project kill switch is off, `jared close` refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed (e.g., `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`, `already-emitted`). The typical wrap path is `jared close <N> --body-file -` piping a Session note + audit; the typical exempt path is `jared close <N> --no-audit no-work-session` for closures that don't warrant an audit. See `commands/jared-wrap.md` § "Audit-emission rail" for the full doctrine.
+**Audit-emission rail (#227, decoupled in #228).** Unless the project kill switch is on, `jared close` refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed (e.g., `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`, `already-emitted`). The typical wrap path is `jared close <N> --body-file -` piping a Session note + audit; the typical exempt path is `jared close <N> --no-audit no-work-session` for closures that don't warrant an audit. See `commands/jared-wrap.md` § "Audit-emission rail" for the full doctrine.
 
 After close, Jared asks two questions:
 
@@ -285,44 +285,13 @@ A reader glancing at the board must understand the state of the world. Enforce:
 
 See `references/human-readable-board.md` for title/body templates and `assets/issue-body.md.template` for the default body scaffold.
 
-## Model & execution guidance — every issue declares its tier mix
+## Decision-point discipline — `advisor()` at smart-tier moments
 
-Every issue body carries a `## Model & execution guidance` section that classifies parts of the work into tier categories (Cheap / Standard / Smart) and prescribes `advisor()` at named decision points. The point: when a session pulls the issue, **work classification** is a property of the issue, and **decision-point discipline** is reliably prescribed up front. Model and dispatch *choices* belong to the session — work size is unknown at file-time, and operators correctly resize at session-time.
+Route smart-tier decisions through `advisor()`. The wrap audit Q1 will ask whether you did.
 
-**Framing is classification + decision-point prescription, not task-tier dispatch prescription.** The section started life as imperative dispatch directives ("USE a Haiku subagent for X", "USE a Sonnet subagent for Y"; introduced in #126). A 47-audit retrospective (#162) found that task-tier dispatch prescriptions held a **23–43% worked-rate**, while `advisor()` decision-point prescriptions held a **95% worked-rate**. The diagnostic insight: *decision-point prescriptions work because the operator recognizes the decision point regardless of work size; task-tier prescriptions fail because work size is unknown at file-time and the operator correctly resizes at session-time.* The current shape reflects that — tier headers without dispatch directives, `advisor()` retained as the load-bearing prescription, and a leading caveat that names the discipline explicitly.
+That's the whole doctrine. The earlier `## Model & execution guidance` section in issue bodies — which classified work into Cheap/Standard/Smart tiers and listed an Execution sketch — was cut in #228 after an audit found that only the `advisor()` prescription was producing measurable session-shift behavior, and that prescription is also reinforced by the system-prompt tool description, this SKILL.md doctrine, and the wrap-audit Q1 close-time prompt. The per-issue body section was the most expensive of those four surfaces and the most-likely-redundant; cutting it saved ~340 tokens per `/jared-start` render with a 30-day re-audit gate as the safety net (see #228's verdict comment for the full data).
 
-**File-time composition is the contract.** When you compose the body of a new issue in `/jared-file`, fill in the three tier subsections (Cheap / Standard / Smart) + the Execution sketch + the leading caveat. Use the abstract tier labels — model names age faster than the cost structure does. Name real Claude Code primitives only when the dispatch is genuinely load-bearing (e.g., `Explore` for a surface-map task that exceeds the parent session's read budget); mention them inline in the Execution sketch step rather than as a separate Subagent-dispatches block.
-
-**Start-time backstop.** When `/jared-start` pulls an issue whose body has no `## Model & execution guidance` H2, the start flow generates the evaluation on the fly and surfaces it as part of the proposed-plan announce. User confirmation in step 8 implicitly approves the evaluation; on approval, jared posts it as a Session-note-shaped comment on the issue (timestamped `## Session YYYY-MM-DD — Model & execution guidance (start-time backstop)`). The body is not retroactively amended — comments are append-only and durable, body edits are not. See `commands/jared-start.md` for the exact step ordering.
-
-**Project-level kill switch.** A project that doesn't want this can add `- model-guidance: disabled` to the `## Jared config` section of `docs/project-board.md`. The kill switch is doctrinal: when `/jared-file` and `/jared-start` are about to compose or generate guidance, they read this bullet from the doc and skip when it says `disabled`. Only the literal value `disabled` flips it off — typos and other values fail safe toward the discipline being on. Default is enabled.
-
-**Rendered example — what a filled-in section looks like:**
-
-```markdown
-## Model & execution guidance
-
-*Tiers below classify the work — they do not prescribe dispatch. Use judgment at
-session-time; the wrap audit will ask you to evaluate that judgment honestly.*
-
-**Cheap-tier work:**
-- Reading existing test fixtures and identifying the patch surface in `lib/board.py`.
-- Generating the placeholder docstring for the new public method.
-
-**Standard-tier work:**
-- Implementing `Board.parse_optional_field` and wiring it into `_parse`.
-- Writing the unit test for the three input cases (default, explicit, missing).
-
-**Smart-tier moments (USE `advisor()`):**
-- Final review pass before the PR opens — verifying the field-name choice doesn't collide with existing parsing and that the default-False behavior is right.
-
-**Execution sketch:**
-1. Explore the existing parse pattern for one optional field (use `Explore` if the parent session's read budget can't carry it inline).
-2. Implement + test the new field in one phase.
-3. Advisor review, then commit + PR.
-```
-
-**This section is classification + decision-point prescription, not task-tier dispatch prescription.** Jared doesn't validate that the puller actually used a particular model or dispatched a particular subagent — those are session-time judgment calls. The value is in making the work classification visible up front, and in reliably prescribing `advisor()` at decision points where the prescription is portable across work sizes. The wrap-time `## Guidance audit (#N)` block closes the loop by asking the operator to evaluate their judgment, not their compliance.
+Operators self-resize at session-time. Tier classifications are not what shapes session dispatch — session-time judgment is. The wrap-time `## Guidance audit (#N)` block closes the loop by asking the operator to evaluate their judgment honestly.
 
 ## Bootstrapping a new project
 

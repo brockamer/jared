@@ -25,7 +25,7 @@ Flow:
 
    **Pre-flight redaction.** Session notes and `## Current state` updates posted via `jared comment` are scanned by the same pre-flight as `jared file`. Drafts referencing private content from `CLAUDE.local.md` will be refused on post — fix the draft, don't fight the redactor. See `references/pii-pre-flight.md`.
 
-   **Guidance audit append.** If this issue carries `## Model & execution guidance` (in its body OR in a prior `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)` comment), append a `## Guidance audit (#N)` H2 to the Session-note draft as a sibling section to `## Session YYYY-MM-DD` — not a bold-labeled field inside it. One comment per wrap, two H2s inside. Three judgment-evaluation questions, honest self-report:
+   **Guidance audit append.** Append a `## Guidance audit (#N)` H2 to the Session-note draft as a sibling section to `## Session YYYY-MM-DD` — not a bold-labeled field inside it. One comment per wrap, two H2s inside. Three judgment-evaluation questions, honest self-report:
 
    ```
    ## Guidance audit (#N)
@@ -42,18 +42,16 @@ Flow:
 
    `N/A` is appropriate when no work of the relevant type happened in this session (e.g., no decision points to route through `advisor()`); `N/A` does not require a why.
 
-   **Skip the audit append when:**
-   - `docs/project-board.md`'s `## Jared config` contains `- model-guidance: disabled`, OR
-   - The touched issue has no `## Model & execution guidance` H2 anywhere (no body section, no start-time backstop comment).
+   **Skip the audit append when** `docs/project-board.md`'s `## Jared config` contains `- model-guidance: disabled`. (The config key name is historical — it now disables the audit rail.) For closures that don't warrant an audit (epic rollups, scope-question issues, no-work sessions, doc trivia), use `jared close --no-audit <reason>` instead — that posts a small exempt-marker comment so the closure is countable as exempt.
 
-   **Audit-emission rail (#227).** `jared close <N>` enforces this contract at the CLI: when the issue carries `## Model & execution guidance` and the kill switch is off, the close refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed. The escape posts a `_Audit-exempt close: <reason>_` marker comment so the closure is countable as exempt. Acceptable reasons name the shape of the legitimate skip — `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`. The rail closes the silent-skip path that left ~37% of post-v0.19.0 closures audit-less, and forces every close on a guidance-bearing issue into one of three buckets: audit-emitted, `--no-audit`-exempt, or refused.
+   **Audit-emission rail (#227, decoupled in #228).** `jared close <N>` enforces this contract at the CLI: unless the kill switch is on, the close refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed. The escape posts a `_Audit-exempt close: <reason>_` marker comment so the closure is countable as exempt. Acceptable reasons name the shape of the legitimate skip — `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`. The rail closes the silent-skip path that left ~37% of post-v0.19.0 closures audit-less, and forces every close into one of three buckets: audit-emitted, `--no-audit`-exempt, or refused. Decoupled from `## Model & execution guidance` section presence in #228 (which cut the section); the rail now fires on every close.
 
-   **The audit evaluates judgment, not compliance.** The original 2026-05-13 findajob#150 surfacing concern (Claude proceeded at parent-session model without dispatching for cheap-tier work) is preserved by question 3, which names the failure-mode work types explicitly to force forensic examination rather than relying on the operator to surface a feeling. The over-prescription pattern from the 2026-05-20 #162 audit is surfaced by question 2 ("well-matched to the work size"). The decision-point discipline that works at 95% (`advisor()`) is preserved by question 1. The audit's value is the trigger — asking the question at wrap-time removes the dependency on the operator noticing the gap. See SKILL.md § "Model & execution guidance" for the file-time framing the audit reflects against.
+   **The audit evaluates judgment, not compliance.** The original 2026-05-13 findajob#150 surfacing concern (Claude proceeded at parent-session model without dispatching for cheap-tier work) is preserved by question 3, which names the failure-mode work types explicitly to force forensic examination rather than relying on the operator to surface a feeling. The over-prescription pattern from the 2026-05-20 #162 audit is surfaced by question 2 ("well-matched to the work size"). The decision-point discipline that works at 95% (`advisor()`) is preserved by question 1. The audit's value is the trigger — asking the question at wrap-time removes the dependency on the operator noticing the gap.
 
 3. **Reconcile drift.** Before posting, check for:
    - In Progress items that were actually completed → propose closing
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why
-   - Scope discovered but not filed → propose filing new issues now (can use `/jared-file`-style flow inline). New issue bodies must include the `## Model & execution guidance` section per SKILL.md § "Model & execution guidance" — file-time is the contract; the start-time backstop is a fallback. Skip the section when `- model-guidance: disabled` appears in `## Jared config` of `docs/project-board.md`.
+   - Scope discovered but not filed → propose filing new issues now (can use `/jared-file`-style flow inline).
    - Plans/specs whose issues just closed → propose archival via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py`
    - **Doc-sync flag (advisory).** For each touched issue, scan its merged PRs (or unpushed commits) — if code changed but no `.md` outside `docs/sessions/` was touched, surface: *"#N's PR touched code but no doc surface — was a doc update relevant?"* Flag, do not enforce. Most well-maintained projects pair code with doc updates by convention; the flag prompts the human to confirm rather than gates the wrap on it.
 
