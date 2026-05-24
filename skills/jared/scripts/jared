@@ -508,8 +508,10 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # is cheaper than catching it in every sweep.
     milestone_title: str | None = None
     if not args.no_milestone:
+        # Query params on the URL — `gh api -f key=value` is a request body
+        # field, and on /milestones a body flips GET-list into POST-create.
         milestones = board.run_gh(
-            ["api", f"repos/{board.repo}/milestones", "-f", "state=open", "-f", "per_page=100"]
+            ["api", f"repos/{board.repo}/milestones?state=open&per_page=100"]
         )
         # Defensive: REST returns a list; an empty/missing payload is treated
         # as "no open milestones" rather than crashing on attribute access.
