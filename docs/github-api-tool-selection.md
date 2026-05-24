@@ -119,7 +119,7 @@ All values measured during the 2026-05-22 quiet window. `(3×)` indicates the va
 | Call | Bucket | Per-call cost |
 |---|---|---|
 | `gh project item-list <N> --owner <O> --limit 2000` | graphql | **~10 points per project item.** 203 measured on jared/projects/4 (~50 items); ~5000 observed by operator on findajob/projects/1 (~500 items) — a single call burned the entire hourly bucket. Cost is the chief graphql pressure source. |
-| `Board.fetch_open_issues_for_ties()` (paginated, body + labels + milestone + projectItems + trackedInIssues) | graphql | ~20-50 per page (estimated from board.py docstring; not directly measured this window) |
+| `Board.fetch_open_issues_for_ties()` (paginated, body + labels + milestone + projectItems + blockedBy) | graphql | ~20-50 per page (estimated from board.py docstring; not directly measured this window) |
 | `gh issue view N --json <any-fields>` | graphql | **1 point (3×)** — regardless of field count (minimal `number,title,state` and jared-realistic `body,comments,labels,milestone,title,number,state` both consumed 1 point) |
 | `mcp__github__issue_read` (method=get) | REST core | **1-2 points** (3× consecutive: 2, 2, 1 — subsequent calls on the same issue appear to be MCP-server-side cached, dropping to 1 point. Budget 2 conservatively.) |
 | `gh api repos/.../issues/N` | REST core | **1 point (3×)** — or 0 with ETag 304 (`fetch_issue_state_rest` path) |
@@ -224,7 +224,7 @@ Revisit if a future migration introduces 3+ additional REST callsites (e.g., the
 
 - **MCP scope diagnostic**: `_format_token_scope_diagnostic` in `board.py` only knows about `gh`'s token. If a future MCP-routed mutation fails with the same `Resource not accessible by personal access token` signature, the diagnostic won't fire. Likely a one-line addition if the doctrine of "MCP for conversational issue CRUD" takes hold.
 - **Search bucket exposure**: `gh issue list --search` may eventually pressure the tight `search` bucket on larger projects. Not a current concern; flag if pre-flight checks ever surface it.
-- **blocked-by via REST**: `trackedInIssues` is exposed via GraphQL but the equivalent REST endpoint (issue dependencies) may have different shape/scope. Not investigated — `fetch_blocked_by_edges` stays graphql for now.
+- **blocked-by via REST**: the native GraphQL `blockedBy` connection (GitHub's issue-dependency feature) is what `fetch_blocked_by_edges` and `fetch_open_issues_for_ties` both read. The equivalent REST endpoint (issue dependencies) may have different shape/scope. Not investigated — both functions stay graphql for now. Note: `blockedBy` is distinct from `trackedInIssues` (the task-list parent/child connection); the two were briefly conflated in `fetch_open_issues_for_ties` until #230.
 
 ## Validation log
 
