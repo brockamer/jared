@@ -7,6 +7,11 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.23.1 — 2026-05-24
+
+**Bug fixes**
+- `jared file --milestone NAME` failed with HTTP 422 (`"title" wasn't supplied`) since v0.23.0 — the open-milestones fetch passed `-f state=open -f per_page=100` to `gh api`, which sends those as a POST body and hits the create-milestone endpoint instead of listing. Filters moved to the URL query string. Argv-shape regression test added (the previous tests routed by substring match on `"milestones"` and returned a synthetic list, green-lighting the malformed call). (#256, closes #254)
+
 ## v0.23.0 — 2026-05-23
 
 **Features**
