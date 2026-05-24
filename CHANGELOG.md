@@ -7,6 +7,34 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.23.0 — 2026-05-23
+
+**Features**
+- Multi-session discipline — solo sessions still write a presence lock at `<repo>/.jared/session-<pid>.lock` so siblings can detect them; `/jared-start <issue> --session N` opts into worktree isolation (creates `~/Code/<repo>-<issue>/`, fresh `feature/<issue>-<slug>` branch off `origin/main`, CWD shifts). `/jared-start <issue> --no-worktree` explicitly acknowledges shared-`.git/HEAD` risk. `/jared-wrap` clears the lock; stale locks are caught by the next session's PID-liveness check. (#247, #250, closes #231, #235, #236)
+- Per-session WIP arithmetic — `jared summary` now collapses In Progress items sharing a `session-N` label into one workstream count; the WIP cap compares against workstreams, not items. (#250, Phase 1.1)
+- `jared file` requires `--milestone NAME` or `--no-milestone` — stops the orphan-issue stream that motivated the findajob 2026-04-24 incident. Breaking CLI contract; no auto-default. (#239, closes #238)
+- Default WIP caps raised to **8 Up Next / 4 In Progress** (was 5/3). (#245)
+- MCP-token-scope mentioned in the token-scope diagnostic to disambiguate `gh`-CLI from MCP-plugin auth. (#213, closes #210)
+
+**Bug fixes**
+- Native blocked-by edges in ties detection now tagged `[blocker]`, not `[cross-ref]` — fixes mislabeling on edges created via `jared blocked-by`. (#249, closes #230)
+- `/jared-start` default-cap doctrine drift — stub said 3, canonical is 4. (#250, Phase 1.3)
+- Sweep counter + closed-cache filter use Status, not `content.state` — restores correct counts after the Status-column migration. (#224, closes #189)
+- `/jared-stage` bullet-style error message restates the `<details>` wrapper requirement so the fix is in the error itself. (#225, closes #195)
+- Plan `## Issue` section list items accept bold-wrapped refs (`- **#123** ...`). (#214, closes #204)
+
+**Performance**
+- `capture-context.py` + `archive-plan.py` body reads migrated to REST (was graphql) — drops the graphql-pressure cost of these batch operations. (#212, closes #208)
+
+**Doctrine**
+- GitHub API mechanism selection — four-mechanism routing policy in `operations.md` + `SKILL.md`. (#211, closes #207, #209)
+- CHANGELOG.md backfilled with all 25 shipped tags; convention pinned. (#221, closes #165)
+- `file://` install dev-artifact leakage documented with cleanup recipe. (#219, closes #198)
+- Stale `GH_TOKEN` env-var confusion called out in README prereqs. (#246, closes #138)
+- Memory→doctrine consolidation + `parallel-sessions.md` reference + session-N semantics + pre-parallel ritual + WIP arithmetic doc. (#244, #250 Phase 1.2)
+- Multi-session stage/start/git hygiene design spec recorded. (#234, closes #232)
+- `## Jared config` section backfilled into jared/jared's own project-board doc. (#222, closes #203)
+
 ## v0.22.1 — 2026-05-22
 
 **Doctrine**
