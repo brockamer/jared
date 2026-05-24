@@ -153,9 +153,9 @@ Before writing code, editing docs, or making any change with durable effect, con
 
 ### When starting work — move to In Progress, load context
 
-Move the item to In Progress. WIP caps at the project's configured limit (default: 4). If the cap is hit, the user decides what moves out or pauses — Jared does not silently exceed WIP.
+Move the item to In Progress. WIP caps at the project's configured limit (default: 4) — counted in *workstreams*, not items: In Progress issues sharing a `session-N` label collapse into one workstream (per #235). If the cap is hit, the user decides what moves out or pauses — Jared does not silently exceed WIP.
 
-**Cross-session check.** If In Progress shows another `session-N` label that isn't yours, that's another Claude session actively touching code in this repo — check file-surface overlap before pulling adjacent work. See `references/parallel-sessions.md` for the worktree pattern and surface-overlap discipline.
+**Cross-session check.** If In Progress shows another `session-N` label that isn't yours, that's another Claude session actively touching code in this repo — check file-surface overlap before pulling adjacent work. See `references/parallel-sessions.md` for the worktree pattern, the `session-N` label semantics, the pre-parallel-session operator ritual, and how `jared summary` renders the per-session collapse.
 
 Before writing code, load the full context for this issue:
 
@@ -262,7 +262,7 @@ See `references/session-continuity.md` for details.
 
 ## WIP, blocked, pullable — the lean core
 
-**WIP limits.** In Progress caps at the project's configured limit (default 4). Up Next caps at 8 — more than that is overstocking, since only the top gets pulled anyway.
+**WIP limits.** In Progress caps at the project's configured limit (default 4), counted in *workstreams* — In Progress items sharing a `session-N` label collapse into one workstream count, so two `session-1`-labeled issues + one `session-2`-labeled issue = 2 workstreams against the cap. Up Next caps at 8 — more than that is overstocking, since only the top gets pulled anyway.
 
 **Blocked is a state, not a vibe.** When an issue is blocked, it gets the `blocked` label AND a `## Blocked by` section in the body naming the blocker and the owner of unblocking. Blocked items stay in their current column but visually flag. "Waiting for so-and-so" without an owner and a specific expected outcome is not blocked, it's abandoned.
 
