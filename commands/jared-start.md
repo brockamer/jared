@@ -100,19 +100,7 @@ Flow:
 
    **Drift check (issues filed >7d ago).** When the body cites specific file paths, function names, or call sites, verify they still exist before acting — refactors silently invalidate filed plans. Surface any drift in the announce as a "Drift since filing" note so the operator decides between refile / update body / accept-and-call-out.
 
-6. **Model guidance backstop.** Scan the issue body for an `## Model & execution guidance` H2.
-
-   - If present: load it as part of context; surface its content in step 8's announce so the user can confirm or amend.
-   - If absent AND the project's `docs/project-board.md` does not have `- model-guidance: disabled` in `## Jared config`: generate a fresh evaluation in the standard shape — leading caveat (*"Tiers below classify the work — they do not prescribe dispatch. Use judgment at session-time; the wrap audit will ask you to evaluate that judgment honestly."*), then each acceptance criterion (and the issue summary) classified under tier headers (**Cheap-tier work**, **Standard-tier work**, **Smart-tier moments (USE `advisor()`)**), then an Execution sketch (inline subagent mentions only when the dispatch is genuinely load-bearing). Use the same shape the file-time section uses — see SKILL.md § "Model & execution guidance" for the rendered example.
-   - If absent AND the kill switch is set: skip; load no guidance.
-
-   When generated at start-time, the guidance is surfaced in step 8 as a labeled block (`Model & execution guidance (generated at start-time)`) so the user can confirm or amend before step 9.
-
-   On user confirmation in step 9, post the approved guidance as a comment on the issue using the Session-note shape, with the header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`. This makes the evaluation a durable artifact without retroactively amending the body. The `jared comment` CLI handles the post (subject to the standard pre-flight redaction). If the user amends the guidance during step 9, post the amended version, not the originally-generated one.
-
-   The approved-comment post is best-effort: a `gh` failure here surfaces the error but does not block the session start. The issue is already In Progress at this point; the missing comment is recoverable but starting work is not.
-
-7. **Run tied-issues pre-pull analysis.** Run:
+6. **Run tied-issues pre-pull analysis.** Run:
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared ties <N>
@@ -141,30 +129,13 @@ Flow:
 
    This intentionally lives in the conversational layer rather than as a Python LLM call inside `jared ties`. The active Claude session already has the full context; spending API tokens on a fresh subprocess to redo work the conversation can do natively is duplicative. See `references/llm-assistance.md` (when filed per #123) for the broader doctrine on LLM-in-CLI vs LLM-in-conversation.
 
-8. **Announce the session plan.** Render the announce as in-voice prose around the structured blocks. The CLI outputs (posture, guidance, ties) are emitted verbatim and stay structured — voice wraps around them, doesn't transform them.
+7. **Announce the session plan.** Render the announce as in-voice prose around the structured blocks. The CLI outputs (posture, ties) are emitted verbatim and stay structured — voice wraps around them, doesn't transform them.
 
    **Opening line.** Frame the moment with warmth before laying out the board state. Something like:
 
    > Before we pull #<N>, gosh, a quick read of where we are first.
 
    **Posture block (always present, verbatim from step 1).** Print the `jared next-session-prompt` output as-is.
-
-   **Guidance block (when present — body has `## Model & execution guidance`, or step 6 generated one).** Wrap with a one-line voice intro, then render the structured block. Label the source so the user knows what they're confirming:
-
-   > A word about the work itself, before we dive in — here's how the issue body classifies the lift (from issue body | generated at start-time, your call whether to amend before we begin):
-   >
-   > *Tiers below classify the work — they do not prescribe dispatch. Use judgment at session-time; the wrap audit will ask you to evaluate that judgment honestly.*
-   >
-   >   Cheap-tier work:
-   >     - <bullet>
-   >   Standard-tier work:
-   >     - <bullet>
-   >   Smart-tier moments (USE `advisor()`):
-   >     - <bullet>
-   >   Execution sketch:
-   >     1. <step — may name a subagent inline if the dispatch is genuinely load-bearing>
-
-   When the kill switch is set, omit the guidance block entirely.
 
    **Ties block (when present).** Wrap with a one-line voice intro:
 
@@ -198,22 +169,10 @@ Flow:
    >
    > Please tell me if anything looks off before I touch a file.
 
-   The posture block is always present (the CLI runs in step 1). The guidance block is omitted when the model-guidance kill switch is set. Up to four visually-separated blocks when all are present: posture (cross-issue), guidance (model & execution), ties (cross-issue), per-issue announcement.
+   The posture block is always present (the CLI runs in step 1). Up to three visually-separated blocks when all are present: posture (cross-issue), ties (cross-issue), per-issue announcement.
 
    **A note on restraint.** Voice carries the framing — the structural content (acceptance criteria, plan steps, git state) stays scannable. If a voice-y phrasing would obscure a fact the user needs to read at a glance, the fact wins. Voice supports the answer; it never replaces it.
 
-9. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
-
-   When step 6 generated guidance at start-time and the user confirms, post the (possibly amended) guidance as a comment on the issue:
-
-   ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> --body-file <path>
-   ```
-
-   The comment body uses the Session-note shape with header
-   `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`
-   followed by the four-tier block. A `jared comment` failure surfaces the error
-   but does not roll back step 4's move to In Progress. Re-run the comment post
-   manually if needed; the body retains the In Progress status either way.
+8. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
 
 This replaces the pattern of manually reading the issue, the plan, and a handoff prompt before starting. The handoff *is* current board state plus the issue's latest Session note — assembled on-demand by `jared next-session-prompt`, never stored as a file.

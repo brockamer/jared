@@ -146,39 +146,9 @@ gh api graphql --cache 1h -f query='
 
 **Pre-flight redaction.** Every `jared file` and `jared comment` runs a pre-flight scan against gitignored claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`). On a hit, the call is refused with a structured diff and exit 2; nothing is posted. Full reference: `references/pii-pre-flight.md`.
 
-## Model & execution guidance — section + kill switch
+## Wrap-audit emission rail — kill switch
 
-Every issue body filed through `/jared-file` carries a `## Model & execution guidance` H2 between `## Acceptance criteria` and `## Planning`. Three tier subsections + Execution sketch + a leading caveat:
-
-```markdown
-## Model & execution guidance
-
-*Tiers below classify the work — they do not prescribe dispatch. Use judgment at
-session-time; the wrap audit will ask you to evaluate that judgment honestly.*
-
-**Cheap-tier work:**
-- <bullet>
-
-**Standard-tier work:**
-- <bullet>
-
-**Smart-tier moments (USE `advisor()`):**
-- <bullet>
-
-**Execution sketch:**
-1. <step — name a subagent inline if the dispatch is genuinely load-bearing (e.g., `Explore` for a surface-map task that exceeds the parent session's read budget)>
-```
-
-Headers classify work, they do not prescribe dispatch — Cheap/Standard tier headers carry no `USE` directive because work size is unknown at file-time and operators correctly resize at session-time (per #162 audit: task-tier dispatch prescriptions held 23–43% worked-rate). Only the `advisor()` directive in Smart-tier is prescribed, because decision-point prescriptions hold regardless of work size (95% worked-rate). Use abstract tier labels (Cheap / Standard / Smart) — model names age faster than the cost structure. Full doctrine and rendered example in SKILL.md § "Model & execution guidance".
-
-**Two enforcement points:**
-
-| When | Where | What |
-|---|---|---|
-| File-time | `/jared-file` body composition | Section is part of every new issue body. |
-| Start-time | `/jared-start` step 6 | If the body has no `## Model & execution guidance` H2, generate evaluation, surface in announce, post as Session-note-shaped comment on user approval. |
-
-**Project-level kill switch.** Add this bullet to `## Jared config` in `docs/project-board.md`:
+The wrap-time `## Guidance audit (#N)` block is required on every `jared close` unless the project disables the audit rail. Add this bullet to `## Jared config` in `docs/project-board.md` to disable:
 
 ```markdown
 ## Jared config
@@ -186,9 +156,7 @@ Headers classify work, they do not prescribe dispatch — Cheap/Standard tier he
 - model-guidance: disabled
 ```
 
-The kill switch is doctrinal: `/jared-file` reads this bullet from `docs/project-board.md` and skips composition when it says `disabled`; `/jared-start` does the same for the backstop. Default is enabled. Only the literal value `disabled` flips it off — typos and other values fail safe toward the discipline being on.
-
-**Where the start-time evaluation lands.** Posted as a comment on the issue with header `## Session <YYYY-MM-DD> — Model & execution guidance (start-time backstop)`, using `jared comment <N> --body-file <path>`. The body is not retroactively amended — comments are append-only and durable, body edits are not. Subject to the standard pre-flight redaction.
+When set, `jared close` skips the audit-emission rail entirely. Default is enabled. Only the literal value `disabled` flips it off — typos and other values fail safe toward the rail being active. (The config key name is historical — it originally controlled the file-time `## Model & execution guidance` body section, cut in #228; it now controls only the wrap-audit rail.)
 
 ## `/jared-audit`
 
