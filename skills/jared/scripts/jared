@@ -142,6 +142,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--body-file",
         help='Path to markdown comment body, or "-" for stdin. Posted before close.',
     )
+    # --no-audit REASON (#227). For issues that carry `## Model & execution
+    # guidance`, `_cmd_close` requires either a body with `## Guidance audit
+    # (#N)` OR an explicit `--no-audit <reason>` acknowledging the skip.
+    # Posts a `_Audit-exempt close: <reason>_` marker comment before close
+    # so future emission-rate measurements can subtract these from the
+    # denominator. Naming mirrors `--no-milestone` from #238.
+    close_p.add_argument(
+        "--no-audit",
+        metavar="REASON",
+        help=(
+            "Acknowledge intentional skip of the wrap-time guidance audit "
+            "(e.g., 'epic-rollup', 'scope-question', 'no-work-session'). "
+            "Posts a marker comment so the closure is countable as exempt."
+        ),
+    )
     close_p.set_defaults(func=_cmd_close)
 
     comment = sub.add_parser(
@@ -410,21 +425,91 @@ def _cmd_move(args: argparse.Namespace) -> int:
     return _cmd_set(args)
 
 
+_GUIDANCE_AUDIT_H2_RE = re.compile(r"^## Guidance audit \(#", re.MULTILINE)
+
+
+def _print_audit_required_error(issue_number: int) -> None:
+    """Stderr diagnostic for the audit-emission rail's refusal paths (#227).
+
+    Printed when a close on an issue that carries `## Model & execution
+    guidance` is attempted without an audit-bearing body and without the
+    `--no-audit <reason>` escape. The message names the two paths so the
+    operator can choose between completing the audit or acknowledging the
+    intentional skip.
+    """
+    print(
+        f"error: #{issue_number} carries ## Model & execution guidance, but the "
+        "close has no ## Guidance audit (#N) (see #227).",
+        file=sys.stderr,
+    )
+    print("", file=sys.stderr)
+    print("  Either include the audit template in --body-file:", file=sys.stderr)
+    print("", file=sys.stderr)
+    print(f"      ## Guidance audit (#{issue_number})", file=sys.stderr)
+    print("", file=sys.stderr)
+    print(
+        "      - Smart-tier decisions: routed through `advisor()`?                [yes / no / N/A]",
+        file=sys.stderr,
+    )
+    print(
+        "      - Were your session's model and dispatch choices well-matched"
+        " to the work size?                                                 "
+        "  [yes / no / N/A]",
+        file=sys.stderr,
+    )
+    print(
+        "      - Looking back, did any cheap-tier or surface-mapping work run"
+        " inline that would have been better dispatched? [yes / no / N/A —"
+        ' if no, name the closest call you considered]',
+        file=sys.stderr,
+    )
+    print("", file=sys.stderr)
+    print(
+        "  OR pass --no-audit <reason> to acknowledge intentional skip",
+        file=sys.stderr,
+    )
+    print(
+        "    (e.g., 'epic-rollup', 'scope-question', 'no-work-session', 'docs-trivia').",
+        file=sys.stderr,
+    )
+
+
 def _cmd_close(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
+
+    # Resolve --body / --body-file once upfront so the audit-emission rail
+    # (#227) can inspect it AND the comment-post step can reuse it without
+    # double-consuming stdin (--body-file - is one-shot).
+    body: str | None = None
+    if args.body is not None or args.body_file is not None:
+        body = resolve_body(args.body, args.body_file)
+        report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
+        if not report.clean:
+            print_redaction_diff(report, file=sys.stderr)
+            return 2
+
+    # Audit-emission rail (#227). When the issue carries `## Model & execution
+    # guidance` AND the project-level kill switch is off, the close must
+    # either include `## Guidance audit (#N)` in its body OR pass
+    # --no-audit <reason> acknowledging the skip. Closes the silent-skip path
+    # that left ~37% of post-v0.19.0 closures audit-less.
+    if not board.model_guidance_disabled and args.no_audit is None:
+        issue_body = board.fetch_issue_body(args.issue_number)
+        has_guidance = "## Model & execution guidance" in issue_body
+        if has_guidance:
+            if body is None:
+                _print_audit_required_error(args.issue_number)
+                return 2
+            if not _GUIDANCE_AUDIT_H2_RE.search(body):
+                _print_audit_required_error(args.issue_number)
+                return 2
 
     # Optional comment-before-close (#184). Post the Session note first so a
     # close failure leaves a recoverable state (open issue + stray comment,
     # user re-runs `jared close <N>` without --body). The opposite order would
     # close the issue and then fail to post the note — a discipline violation
     # since the audit/wrap doctrine treats close-with-comment as one atom.
-    has_comment = args.body is not None or args.body_file is not None
-    if has_comment:
-        body = resolve_body(args.body, args.body_file)
-        report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
-        if not report.clean:
-            print_redaction_diff(report, file=sys.stderr)
-            return 2
+    if body is not None:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
             tf.write(body)
             tmp_path = tf.name
@@ -443,6 +528,24 @@ def _cmd_close(args: argparse.Namespace) -> int:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         print(f"OK: commented on #{args.issue_number} ({comment_url})")
+
+    # --no-audit marker (#227). Posted as a small standalone italic comment so
+    # the audit-rate measurement can subtract acknowledged-exempt closures
+    # from the denominator: `(audits + explicit --no-audits) / closures`.
+    if args.no_audit is not None:
+        marker = f"_Audit-exempt close: {args.no_audit}_"
+        marker_url = board.run_gh_raw(
+            [
+                "issue",
+                "comment",
+                str(args.issue_number),
+                "--repo",
+                board.repo,
+                "--body",
+                marker,
+            ]
+        )
+        print(f"OK: marked exempt on #{args.issue_number} ({marker_url})")
 
     board.run_gh(
         [
