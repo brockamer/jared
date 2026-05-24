@@ -78,7 +78,7 @@ Flow:
    - `In Progress (N):` — no `session-N` labels in play. `N` is the workstream count, equal to the item count.
    - `In Progress (M workstreams · N items):` — `session-N` labels collapse same-session items into one workstream. `M` (the leading number) is what to compare against the cap. `N` (the item count) is for operator orientation only.
 
-   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 3). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
+   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
 3. **Check pullable state.** Read the target issue's body and verify:
    - First paragraph is a clear summary
