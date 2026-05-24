@@ -717,6 +717,28 @@ def test_close_rail_skipped_when_issue_body_lacks_guidance_h2(
     assert "close" in kinds, f"expected close to run on guidance-free issue; got {kinds}"
 
 
+def test_close_rejects_empty_no_audit_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--no-audit ""` is technically allowed by argparse but would post an
+    unhelpful `_Audit-exempt close: _` marker. The CLI rejects empty / whitespace-
+    only reasons with a clear error and an example-reason hint.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    calls, _bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--no-audit", ""])
+
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    assert "non-empty reason" in captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" not in kinds and "close" not in kinds
+
+
 def test_audit_required_error_message_includes_template_and_escape(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
