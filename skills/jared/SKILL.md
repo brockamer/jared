@@ -102,7 +102,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." (--body "...
 # --priority accepts High/Medium/Low (canonical) or high/medium/low/med (normalized by CLI)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName>
-${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> [(--body "..." | --body-file <path or ->) | --no-audit <reason>]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --body-file <path or ->)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>     # JSON lookup helper
@@ -184,6 +184,8 @@ See `references/context-capture.md` for the trigger patterns and the helper scri
 ### When completing work — close and verify
 
 Close via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>` — the CLI closes the issue and polls for the board's auto-move to Done, falling back to an explicit `Status=Done` set if the auto-move hasn't fired. A PR merge closes the issue too; same verification applies, so re-run `jared close` (idempotent) or `jared summary` to confirm the item landed in Done.
+
+**Audit-emission rail (#227).** When the issue body carries `## Model & execution guidance` and the project kill switch is off, `jared close` refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed (e.g., `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`, `already-emitted`). The typical wrap path is `jared close <N> --body-file -` piping a Session note + audit; the typical exempt path is `jared close <N> --no-audit no-work-session` for closures that don't warrant an audit. See `commands/jared-wrap.md` § "Audit-emission rail" for the full doctrine.
 
 After close, Jared asks two questions:
 

@@ -448,19 +448,18 @@ def _print_audit_required_error(issue_number: int) -> None:
     print(f"      ## Guidance audit (#{issue_number})", file=sys.stderr)
     print("", file=sys.stderr)
     print(
-        "      - Smart-tier decisions: routed through `advisor()`?                [yes / no / N/A]",
+        "      - Smart-tier decisions: routed through `advisor()`? [yes / no / N/A]",
         file=sys.stderr,
     )
     print(
-        "      - Were your session's model and dispatch choices well-matched"
-        " to the work size?                                                 "
-        "  [yes / no / N/A]",
+        "      - Were your session's model and dispatch choices well-matched "
+        "to the work size? [yes / no / N/A]",
         file=sys.stderr,
     )
     print(
-        "      - Looking back, did any cheap-tier or surface-mapping work run"
-        " inline that would have been better dispatched? [yes / no / N/A —"
-        ' if no, name the closest call you considered]',
+        "      - Looking back, did any cheap-tier or surface-mapping work run "
+        "inline that would have been better dispatched? "
+        "[yes / no / N/A — if no, name the closest call you considered]",
         file=sys.stderr,
     )
     print("", file=sys.stderr)
@@ -469,7 +468,8 @@ def _print_audit_required_error(issue_number: int) -> None:
         file=sys.stderr,
     )
     print(
-        "    (e.g., 'epic-rollup', 'scope-question', 'no-work-session', 'docs-trivia').",
+        "    (e.g., 'epic-rollup', 'scope-question', 'no-work-session', "
+        "'docs-trivia', 'already-emitted').",
         file=sys.stderr,
     )
 
@@ -487,6 +487,17 @@ def _cmd_close(args: argparse.Namespace) -> int:
         if not report.clean:
             print_redaction_diff(report, file=sys.stderr)
             return 2
+
+    # Reject empty-string --no-audit before the rail check — keeps the marker
+    # comment from rendering as an unhelpful `_Audit-exempt close: _` line.
+    if args.no_audit is not None and not args.no_audit.strip():
+        print(
+            "error: --no-audit requires a non-empty reason "
+            "(e.g., 'epic-rollup', 'scope-question', 'no-work-session', "
+            "'docs-trivia', 'already-emitted').",
+            file=sys.stderr,
+        )
+        return 2
 
     # Audit-emission rail (#227). When the issue carries `## Model & execution
     # guidance` AND the project-level kill switch is off, the close must
