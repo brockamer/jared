@@ -141,6 +141,7 @@ def test_open_items_single_issue_shape_matches_board_items(
             "content": {"number": 42, "title": "Thing to do", "state": "OPEN"},
             "status": "Up Next",
             "priority": "Medium",
+            "labels": (),
         }
     ]
 
@@ -180,6 +181,89 @@ def test_open_items_excludes_issues_not_on_project_board(
     patch_gh(monkeypatch, stdout=batched_response)
 
     assert board.open_items() == []
+
+
+def test_open_items_includes_labels_per_item(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Per-session WIP arithmetic (#235) needs each item's label set
+    available at the summary layer. open_items() projects labels as a
+    tuple of name strings on each dict; empty when the issue has none.
+    """
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = write_minimal_board(tmp_path)
+    board = Board.from_path(board_md)
+
+    batched_response = json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "issues": {
+                        "pageInfo": {"hasNextPage": False},
+                        "nodes": [
+                            {
+                                "number": 1,
+                                "title": "Labeled",
+                                "state": "OPEN",
+                                "labels": {
+                                    "nodes": [
+                                        {"name": "session-1"},
+                                        {"name": "enhancement"},
+                                    ]
+                                },
+                                "projectItems": {
+                                    "nodes": [
+                                        {
+                                            "id": "PVTI_a",
+                                            "project": {"number": 7},
+                                            "fieldValues": {
+                                                "nodes": [
+                                                    {
+                                                        "name": "In Progress",
+                                                        "field": {"name": "Status"},
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                            },
+                            {
+                                "number": 2,
+                                "title": "Unlabeled",
+                                "state": "OPEN",
+                                "labels": {"nodes": []},
+                                "projectItems": {
+                                    "nodes": [
+                                        {
+                                            "id": "PVTI_b",
+                                            "project": {"number": 7},
+                                            "fieldValues": {
+                                                "nodes": [
+                                                    {
+                                                        "name": "In Progress",
+                                                        "field": {"name": "Status"},
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                            },
+                        ],
+                    }
+                }
+            }
+        }
+    )
+    patch_gh(monkeypatch, stdout=batched_response)
+
+    result = board.open_items()
+
+    by_num = {entry["content"]["number"]: entry for entry in result}
+    assert by_num[1]["labels"] == ("session-1", "enhancement")
+    assert by_num[2]["labels"] == ()
 
 
 def test_open_items_raises_when_pagination_required(

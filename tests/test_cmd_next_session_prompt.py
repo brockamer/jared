@@ -82,6 +82,34 @@ def test_next_session_prompt_renders_basic_sections(
     assert "[Medium]" in out
 
 
+def test_next_session_prompt_renders_session_label_inline_for_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Per-session WIP arithmetic symmetry (#235): an In Progress item
+    with a `session-N` label shows that tag inline in the handoff's
+    "In flight" section, so the next session reading the handoff sees
+    the same grouping signal `jared summary` shows."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 235, "title": "Per-session WIP", "state": "OPEN"},
+        ],
+        statuses={235: ("In Progress", "High")},
+        labels_by_number={235: ["session-1", "enhancement"]},
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "#235" in out and "Per-session WIP" in out
+    assert "(session-1)" in out
+
+
 def test_extract_next_action_handles_empty_body() -> None:
     """When the **Next action:** field has empty/whitespace body and is
     followed by another bold paragraph, the extractor returns None rather
