@@ -1137,3 +1137,84 @@ def test_file_rejects_unmatched_milestone_with_listing(
     assert not any("issue" in c and "create" in c for c in calls), (
         f"unmatched milestone must short-circuit; calls: {calls}"
     )
+
+
+def test_file_milestone_lookup_uses_get_query_string_not_form_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression for #254 — argv-shape assertion the #238 tests missed.
+
+    `gh api -f key=value` sends `key=value` as a **form field in the request
+    body**, which on the `/repos/{owner}/{repo}/milestones` endpoint flips
+    GET-list into POST-create. The buggy form (`-f state=open -f per_page=100`)
+    therefore 422s with `"title" wasn't supplied`. The fix is to put filters
+    on the URL query string (or pass `--method GET`).
+
+    This test asserts the *call shape*, not just the return value the previous
+    milestone tests relied on. The previous routing mock matched any argv
+    containing the substring `milestones` and returned a synthetic list,
+    so it green-lit the malformed form. Argv-level assertion is the
+    discipline that catches this class of regression.
+    """
+    board_md = _write_full_board(tmp_path)
+    target = "v1.0 — public install"
+    calls = _routed_fake_with_milestones(monkeypatch, [target])
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Body.",
+            "--priority",
+            "Medium",
+            "--milestone",
+            target,
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+
+    milestone_lookups = [c for c in calls if "milestones" in " ".join(c) and "api" in c]
+    assert len(milestone_lookups) == 1, (
+        f"expected exactly one milestone-lookup call; got {milestone_lookups}"
+    )
+    argv = milestone_lookups[0]
+
+    # Acceptable shape A: state filter on the URL query string.
+    url_arg = next((a for a in argv if "milestones" in a), "")
+    has_url_query = "state=open" in url_arg
+
+    # Acceptable shape B: explicit GET with -f filters (gh routes -f to query
+    # when --method GET is set).
+    has_method_get = (
+        "--method" in argv
+        and argv.index("--method") + 1 < len(argv)
+        and argv[argv.index("--method") + 1].upper() == "GET"
+    )
+
+    assert has_url_query or has_method_get, (
+        "milestone-lookup argv must either carry filters on the URL query string "
+        "(e.g. `repos/<owner>/<repo>/milestones?state=open`) OR pass `--method GET` "
+        "alongside `-f` filters. Without one of these, gh treats `-f state=open` as a "
+        "POST body field, hitting the create-milestone endpoint and 422-ing.\n"
+        f"  url fragment: {url_arg!r}\n"
+        f"  full argv: {argv}"
+    )
+
+    # Belt-and-braces: no bare `-f state=...` or `-f per_page=...` without
+    # `--method GET`. Catches the next author who copies the buggy pattern.
+    if not has_method_get:
+        f_field_values = [
+            argv[i + 1] for i, tok in enumerate(argv) if tok == "-f" and i + 1 < len(argv)
+        ]
+        for field in f_field_values:
+            assert not field.startswith(("state=", "per_page=")), (
+                f"`-f {field}` without `--method GET` sends a request body; "
+                f"on /milestones that hits the create-milestone POST. "
+                f"argv: {argv}"
+            )
