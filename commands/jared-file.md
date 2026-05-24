@@ -28,7 +28,6 @@ Flow:
    - `## Current state` — "Not started."
    - `## Decisions` — "(none yet)"
    - `## Acceptance criteria` — in `<details>` block, list criteria
-   - `## Model & execution guidance` — classify the work into tier-labeled categories: **Cheap-tier work**, **Standard-tier work**, **Smart-tier moments (USE `advisor()`)**. Prefix the tiers with the standard leading caveat (*"Tiers below classify the work — they do not prescribe dispatch. Use judgment at session-time; the wrap audit will ask you to evaluate that judgment honestly."*). Cheap- and Standard-tier headers carry no dispatch directive — work size is unknown at file-time and operators correctly resize at session-time; only the `advisor()` directive in Smart-tier is prescribed, because decision-point prescriptions hold regardless of work size (per the #162 audit: `advisor()` 95% worked-rate vs task-tier dispatches 23–43%). Outline a short Execution sketch; if a named subagent dispatch is genuinely load-bearing (e.g., `Explore` for a surface-map task that exceeds the parent session's read budget), mention it inline in the sketch step rather than as a separate block. See SKILL.md § "Model & execution guidance" for the rendered example. Skip this section if the project's `docs/project-board.md` has `- model-guidance: disabled` in `## Jared config`.
    - `## Depends on` / `## Blocks` — fill in if applicable, else "(none)"
    - `## Planning` — fill in if a plan/spec already exists, else "(none)"
 
