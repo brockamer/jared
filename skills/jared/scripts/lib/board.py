@@ -69,6 +69,10 @@ class Board:
     # defaults to ['src/**']. See sweep.check_doc_sync_gate (#163).
     operator_docs: list[str] = field(default_factory=list)
     code_surface: list[str] = field(default_factory=list)
+    # Project-level kill switch for the wrap-time guidance audit (#227).
+    # Set in `## Jared config` as `- model-guidance: disabled`. When True,
+    # `_cmd_close` skips the audit-emission rail entirely. False = rail active.
+    model_guidance_disabled: bool = False
     # Cached `gh project item-list` result, populated on first board_items()
     # call and reused for the lifetime of this instance. None means uncached.
     _items: list[dict[str, Any]] | None = field(default=None, repr=False)
@@ -184,7 +188,9 @@ class Board:
         assert repo is not None
 
         field_ids, field_options = cls._parse_field_blocks(text)
-        session_handoff_prompt = cls._parse_jared_config(text).get("session-handoff-prompt", "ask")
+        jared_config = cls._parse_jared_config(text)
+        session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
+        model_guidance_disabled = jared_config.get("model-guidance", "").strip() == "disabled"
         session_start_checks = cls._parse_session_start_checks(text)
         operator_docs, code_surface = cls._parse_operator_docs(text)
 
@@ -200,6 +206,7 @@ class Board:
             session_start_checks=session_start_checks,
             operator_docs=operator_docs,
             code_surface=code_surface,
+            model_guidance_disabled=model_guidance_disabled,
             _raw_doc=text,
         )
 
@@ -524,9 +531,7 @@ class Board:
             if flat is None:
                 continue
             labels_node = issue.get("labels") or {}
-            label_names = tuple(
-                n["name"] for n in (labels_node.get("nodes") or []) if "name" in n
-            )
+            label_names = tuple(n["name"] for n in (labels_node.get("nodes") or []) if "name" in n)
             items.append(
                 {
                     "content": {
@@ -598,6 +603,28 @@ class Board:
             f"No project item for issue #{issue_number} in project "
             f"{self.project_number}. Is the issue added to the board?"
         )
+
+    def fetch_issue_body(self, issue_number: int) -> str:
+        """Return the issue body text via `gh issue view --json body`.
+
+        REST-bucket call (not GraphQL), so safe under GraphQL budget pressure.
+        Returns "" when the body is null or missing — callers treat that as
+        "no guidance section present," which is the correct safe default for
+        the audit-emission rail in `_cmd_close` (#227).
+        """
+        data = self.run_gh(
+            [
+                "issue",
+                "view",
+                str(issue_number),
+                "--repo",
+                self.repo,
+                "--json",
+                "body",
+            ]
+        )
+        body = data.get("body") if isinstance(data, dict) else None
+        return body if isinstance(body, str) else ""
 
     def _add_to_board(self, issue_number: int) -> str:
         """Call `gh project item-add` for `issue_number` and return the new item-id.

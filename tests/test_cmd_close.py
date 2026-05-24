@@ -174,28 +174,36 @@ def _patch_gh_capture_close_with_body(
     *,
     project_number: int = 7,
     status: str = "In Progress",
+    issue_body: str = "",
 ) -> tuple[list[list[str]], list[str | None]]:
     """Patch subprocess.run for `jared close --body*` tests.
 
     Routes by argv shape:
-      - `issue comment` → snapshot --body-file content, return comment URL
+      - `issue view --json body` → `{"body": <issue_body>}` for the
+        audit-emission rail's `fetch_issue_body` lookup (#227). Default
+        body is "" so existing tests don't trip the rail.
+      - `issue comment` → snapshot --body / --body-file content, return URL
       - `issue close`   → empty stdout
       - `api graphql`   → projectItems response (find_item_id path)
       - `item-edit`     → "{}"
 
-    Returns (calls, bodies) where `bodies` is the snapshot of the
-    comment's --body-file content at call time (the CLI's `finally`
-    deletes the temp file before the test can read it later).
+    Returns (calls, bodies) where `bodies` is the snapshot of every
+    comment's body content (either --body inline or --body-file path
+    contents) in call order. The CLI's `finally` deletes the temp file
+    before the test can read it later, so snapshots happen at call time.
     """
     calls: list[list[str]] = []
     bodies: list[str | None] = []
 
     graphql_response = _graphql_item_response(project_number=project_number, status=status)
     comment_url = "https://github.com/brockamer/findajob/issues/42#issuecomment-9999"
+    issue_view_response = json.dumps({"body": issue_body})
 
     def fake_run(args: list[str], **_: object) -> FakeGhResult:
         calls.append(args)
         joined = " ".join(args)
+        if "issue" in args and "view" in args and "--json" in args:
+            return FakeGhResult(stdout=issue_view_response)
         if "issue" in args and "comment" in args:
             if "--body-file" in args:
                 idx = args.index("--body-file")
@@ -203,6 +211,9 @@ def _patch_gh_capture_close_with_body(
                     bodies.append(Path(args[idx + 1]).read_text())
                 except FileNotFoundError:
                     bodies.append(None)
+            elif "--body" in args:
+                idx = args.index("--body")
+                bodies.append(args[idx + 1])
             return FakeGhResult(stdout=comment_url)
         if "issue" in args and "close" in args:
             return FakeGhResult(stdout="")
@@ -458,3 +469,297 @@ def test_close_with_body_refuses_on_dirty_pre_flight_report(
     kinds = _call_kinds(calls)
     assert "comment" not in kinds, f"redactor must short-circuit before gh; calls: {kinds}"
     assert "close" not in kinds, f"redactor must block close too; calls: {kinds}"
+
+
+# ---------- audit-emission rail (#227) ----------
+
+_ISSUE_BODY_WITH_GUIDANCE = (
+    "Summary paragraph here.\n\n"
+    "## Acceptance criteria\n\n"
+    "- [ ] thing one\n\n"
+    "## Model & execution guidance\n\n"
+    "*Tiers below classify the work — they do not prescribe dispatch.*\n\n"
+    "**Cheap-tier work:**\n"
+    "- the cheap stuff\n"
+)
+
+_SESSION_NOTE_WITH_AUDIT = (
+    "## Session 2026-05-24 — closed\n\n"
+    "**Outcome:** shipped, tested, merged.\n\n"
+    "## Guidance audit (#42)\n\n"
+    "- Smart-tier decisions: routed through `advisor()`? yes — pre-fix design call\n"
+    "- Were your session's model and dispatch choices well-matched to the work size? yes\n"
+    "- Looking back, did any cheap-tier or surface-mapping work run inline that "
+    "would have been better dispatched? no — single-file edit, dispatch overhead "
+    "would have exceeded the work.\n"
+)
+
+_SESSION_NOTE_WITHOUT_AUDIT = (
+    "## Session 2026-05-24 — closed\n\n"
+    "**Outcome:** shipped, tested, merged.\n\n"
+    "Closing without ceremony — the change was a one-line config tweak.\n"
+)
+
+
+def _write_board_with_status_and_killswitch(tmp_path: Path) -> Path:
+    """Like _write_board_with_status, but with `model-guidance: disabled` set."""
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+        - model-guidance: disabled
+
+        ### Status
+        - Field ID: PVTSSF_status
+        - Backlog: OPTION_backlog
+        - In Progress: OPTION_in_progress
+        - Done: OPTION_done
+    """)
+    )
+    return board_md
+
+
+def test_close_refuses_when_guidance_present_and_no_body_no_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bare `jared close <N>` on a guidance-bearing issue MUST refuse (#227 rail).
+    No comment, no close, no item-edit. Stderr names both escape paths.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    calls, _bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42"])
+
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" not in kinds, f"rail must short-circuit before any comment; got {kinds}"
+    assert "close" not in kinds, f"rail must short-circuit before close; got {kinds}"
+    assert "item-edit" not in kinds, f"rail must short-circuit before item-edit; got {kinds}"
+    # Stderr message names both escape paths so the operator can choose.
+    assert "## Guidance audit" in captured.err
+    assert "--no-audit" in captured.err
+    assert "#227" in captured.err
+
+
+def test_close_refuses_when_body_lacks_audit_h2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Body has a Session note but no `## Guidance audit (#N)` H2 → refuse.
+    Common drift mode in the #176 data: operator posts the Session note via
+    `jared close --body-file` but forgets to append the audit (10 of 24
+    direct-with-session-note closures fell into this shape).
+    """
+    board_md = _write_board_with_status(tmp_path)
+    note = tmp_path / "session.md"
+    note.write_text(_SESSION_NOTE_WITHOUT_AUDIT)
+    calls, _bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--body-file", str(note)])
+
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" not in kinds, f"rail must refuse before posting; got {kinds}"
+    assert "close" not in kinds, f"rail must refuse before close; got {kinds}"
+
+
+def test_close_passes_when_body_has_audit_h2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Body containing both `## Session ...` and `## Guidance audit (#N)`
+    passes the rail — comment posts, close runs. The happy path.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    note = tmp_path / "session.md"
+    note.write_text(_SESSION_NOTE_WITH_AUDIT)
+    calls, bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--body-file", str(note)])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" in kinds and "close" in kinds
+    assert kinds.index("comment") < kinds.index("close")
+    # The posted body is the one we provided (with audit).
+    assert any(b == _SESSION_NOTE_WITH_AUDIT for b in bodies)
+
+
+def test_close_no_audit_escape_posts_marker_no_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--no-audit <reason>` without --body-file posts a single italic marker
+    comment, then closes. Used for legitimately exempt closures (epic-rollup,
+    scope-question, no-work-session). Marker is grep-able for future
+    `(audits + explicit --no-audits) / closures` measurement.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    calls, bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--no-audit", "scope-question"])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" in kinds and "close" in kinds
+    assert kinds.index("comment") < kinds.index("close")
+    # Exactly one comment posted, body is the marker.
+    assert kinds.count("comment") == 1
+    assert bodies == ["_Audit-exempt close: scope-question_"]
+    assert "OK: marked exempt on #42" in captured.out
+
+
+def test_close_no_audit_with_body_posts_session_then_marker_then_closes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--body-file` + `--no-audit` together: post Session note FIRST, then
+    marker, then close. Order matters — if close fails mid-flow, the Session
+    note is durable (per #184 invariant) and the marker is durable too.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    note = tmp_path / "session.md"
+    note.write_text(_SESSION_NOTE_WITHOUT_AUDIT)
+    calls, bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "close",
+            "42",
+            "--body-file",
+            str(note),
+            "--no-audit",
+            "epic-rollup",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    kinds = _call_kinds(calls)
+    # Two comments precede the close.
+    assert kinds.count("comment") == 2
+    assert "close" in kinds
+    first_comment = kinds.index("comment")
+    second_comment = kinds.index("comment", first_comment + 1)
+    close_idx = kinds.index("close")
+    assert first_comment < second_comment < close_idx, (
+        f"expected session-note → marker → close, got {kinds}"
+    )
+    # Body order: session note first, then marker.
+    assert bodies == [
+        _SESSION_NOTE_WITHOUT_AUDIT,
+        "_Audit-exempt close: epic-rollup_",
+    ]
+
+
+def test_close_rail_skipped_when_model_guidance_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`docs/project-board.md` § `## Jared config` contains `- model-guidance:
+    disabled` → rail is bypassed. Bare close on a guidance-bearing issue runs
+    to completion. The kill switch is what lets opt-out projects coexist.
+    """
+    board_md = _write_board_with_status_and_killswitch(tmp_path)
+    calls, _bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42"])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    kinds = _call_kinds(calls)
+    assert "close" in kinds, f"expected close to run with kill switch on; got {kinds}"
+
+
+def test_close_rail_skipped_when_issue_body_lacks_guidance_h2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue body without `## Model & execution guidance` → rail doesn't fire.
+    Pre-existing closes on guidance-free issues continue to work unchanged,
+    which is critical for the backward-compatibility contract.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    # Default fixture issue_body="" → no guidance H2 → rail passes.
+    calls, _bodies = _patch_gh_capture_close_with_body(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42"])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    kinds = _call_kinds(calls)
+    assert "close" in kinds, f"expected close to run on guidance-free issue; got {kinds}"
+
+
+def test_close_rejects_empty_no_audit_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--no-audit ""` is technically allowed by argparse but would post an
+    unhelpful `_Audit-exempt close: _` marker. The CLI rejects empty / whitespace-
+    only reasons with a clear error and an example-reason hint.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    calls, _bodies = _patch_gh_capture_close_with_body(
+        monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--no-audit", ""])
+
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    assert "non-empty reason" in captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" not in kinds and "close" not in kinds
+
+
+def test_audit_required_error_message_includes_template_and_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The refusal stderr must include the audit template and the --no-audit
+    hint so the operator can pick a path without consulting docs. This is a
+    UX-pinning test — the message text matters because it's shown at the
+    moment of frustration.
+    """
+    board_md = _write_board_with_status(tmp_path)
+    _patch_gh_capture_close_with_body(monkeypatch, issue_body=_ISSUE_BODY_WITH_GUIDANCE)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    err = captured.err
+    # Template signature.
+    assert "## Guidance audit (#42)" in err
+    assert "advisor()" in err
+    assert "closest call you considered" in err  # bundles #226's Q3 reword
+    # Escape with example reasons.
+    assert "--no-audit" in err
+    assert "scope-question" in err

@@ -32,7 +32,7 @@ Flow:
 
    - Smart-tier decisions: routed through `advisor()`?                                                  [yes / no / N/A]
    - Were your session's model and dispatch choices well-matched to the work size?                       [yes / no / N/A]
-   - Looking back, did any cheap-tier or surface-mapping work run inline that would have been better dispatched? [yes / no / N/A]
+   - Looking back, did any cheap-tier or surface-mapping work run inline that would have been better dispatched? [yes / no / N/A — if no, name the closest call you considered]
    ```
 
    **A `no` or surfaced regret on any line REQUIRES a one-line "why" appended beneath that bullet.** Not optional. Examples:
@@ -45,6 +45,8 @@ Flow:
    **Skip the audit append when:**
    - `docs/project-board.md`'s `## Jared config` contains `- model-guidance: disabled`, OR
    - The touched issue has no `## Model & execution guidance` H2 anywhere (no body section, no start-time backstop comment).
+
+   **Audit-emission rail (#227).** `jared close <N>` enforces this contract at the CLI: when the issue carries `## Model & execution guidance` and the kill switch is off, the close refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed. The escape posts a `_Audit-exempt close: <reason>_` marker comment so the closure is countable as exempt. Acceptable reasons name the shape of the legitimate skip — `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`. The rail closes the silent-skip path that left ~37% of post-v0.19.0 closures audit-less, and forces every close on a guidance-bearing issue into one of three buckets: audit-emitted, `--no-audit`-exempt, or refused.
 
    **The audit evaluates judgment, not compliance.** The original 2026-05-13 findajob#150 surfacing concern (Claude proceeded at parent-session model without dispatching for cheap-tier work) is preserved by question 3, which names the failure-mode work types explicitly to force forensic examination rather than relying on the operator to surface a feeling. The over-prescription pattern from the 2026-05-20 #162 audit is surfaced by question 2 ("well-matched to the work size"). The decision-point discipline that works at 95% (`advisor()`) is preserved by question 1. The audit's value is the trigger — asking the question at wrap-time removes the dependency on the operator noticing the gap. See SKILL.md § "Model & execution guidance" for the file-time framing the audit reflects against.
 
