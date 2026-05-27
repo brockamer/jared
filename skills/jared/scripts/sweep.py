@@ -636,6 +636,55 @@ def check_doc_sync_gate(
     return findings
 
 
+# Defaults for the release/CHANGELOG gate (#220). Hardcoded rather than
+# project-configurable because the existing operator-docs config is dormant
+# on jared's own board, and requiring config here would ship the same dead-
+# feature shape — guardrail that doesn't fire on the project most likely to
+# need it. Projects with a different release convention can override later
+# via a sibling config block; today this is single-purpose by design.
+RELEASE_BRANCH_PATTERN = "release/v*"
+CHANGELOG_FILE = "CHANGELOG.md"
+
+
+def check_release_changelog_gate(
+    prs: list[dict[str, Any]],
+    branch_pattern: str = RELEASE_BRANCH_PATTERN,
+    changelog_file: str = CHANGELOG_FILE,
+) -> list[str]:
+    """Flag merged release PRs that didn't touch CHANGELOG.md.
+
+    A release PR is identified by its `headRefName` matching `branch_pattern`
+    (default `release/v*` — jared's verified convention, verified against
+    `release/v0.18.1`, `release/v0.22.0`, `release/v0.24.0`, …).
+
+    Only merged PRs are flagged — closed-without-merge release branches don't
+    ship a tag, so a missing CHANGELOG entry there is not a release-discipline
+    drift. `mergedAt` truthiness gates the check.
+
+    Each PR is a dict matching the shape returned by
+    lib.board.fetch_recent_closed_prs_with_files: `number`, `closedAt`,
+    `mergedAt`, `headRefName`, and `files`.
+    """
+    findings: list[str] = []
+    for pr in prs:
+        if not pr.get("mergedAt"):
+            continue
+        head = pr.get("headRefName") or ""
+        if not fnmatchcase(head, branch_pattern):
+            continue
+        files = pr.get("files") or []
+        if changelog_file in files:
+            continue
+        number = pr.get("number")
+        # Extract the version from `release/v<x.y.z>` for the advisory.
+        version = head.split("/", 1)[1] if "/" in head else head
+        findings.append(
+            f"release PR #{number} shipped {version} without a "
+            f"{changelog_file} entry — add one in a follow-up"
+        )
+    return findings
+
+
 def _matches_any(path: str, patterns: list[str]) -> bool:
     """fnmatchcase against patterns, with `**` treated as recursive wildcard.
 
@@ -851,6 +900,10 @@ def main() -> int:
             print(f if f.startswith(" ") else f"  {f}")
     print()
 
+    # Both the doc-sync gate and the release/CHANGELOG gate scan the same
+    # window of recently-closed PRs. Fetch once, share between sections.
+    prs_cache: list[dict[str, Any]] | None = None
+
     print("== Doc-sync gate (operator docs not updated alongside code) ==")
     if not repo:
         print("  (skipped — repo not determined)")
@@ -871,12 +924,30 @@ def main() -> int:
             print("  (skipped — no ### Current-state operator docs block on this board)")
         else:
             try:
-                prs = board_fetch_recent_closed_prs_with_files(repo, days=args.doc_sync_days)
-                findings = check_doc_sync_gate(prs, operator_docs, code_surface)
+                prs_cache = board_fetch_recent_closed_prs_with_files(
+                    repo, days=args.doc_sync_days
+                )
+                findings = check_doc_sync_gate(prs_cache, operator_docs, code_surface)
                 for line in findings or ["None"]:
                     print(f"  {line}")
             except (RuntimeError, GhInvocationError) as e:
                 print(f"  (skipped — {e})")
+    print()
+
+    print("== Release/CHANGELOG gate (release PRs that skipped CHANGELOG.md) ==")
+    if not repo:
+        print("  (skipped — repo not determined)")
+    else:
+        try:
+            if prs_cache is None:
+                prs_cache = board_fetch_recent_closed_prs_with_files(
+                    repo, days=args.doc_sync_days
+                )
+            findings = check_release_changelog_gate(prs_cache)
+            for line in findings or ["None"]:
+                print(f"  {line}")
+        except (RuntimeError, GhInvocationError) as e:
+            print(f"  (skipped — {e})")
     print()
 
     print("== Closed items not on Done ==")

@@ -1566,8 +1566,18 @@ def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
     from skills.jared.scripts.lib import board as board_mod
 
     list_payload = [
-        {"number": 100, "closedAt": "2026-05-20T10:00:00Z"},
-        {"number": 99, "closedAt": "2026-05-18T10:00:00Z"},
+        {
+            "number": 100,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "mergedAt": "2026-05-20T10:00:00Z",
+            "headRefName": "feature/100-foo",
+        },
+        {
+            "number": 99,
+            "closedAt": "2026-05-18T10:00:00Z",
+            "mergedAt": None,
+            "headRefName": "feature/99-bar",
+        },
     ]
     files_by_pr = {
         100: [{"path": "src/foo.py"}, {"path": "CLAUDE.md"}],
@@ -1587,6 +1597,14 @@ def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
             assert len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-", (
                 f"expected YYYY-MM-DD cutoff, got {date_part!r}"
             )
+            # Caller must request mergedAt + headRefName so the release/CHANGELOG
+            # gate (#220) gets the data it needs.
+            assert "--json" in args, "list call must include --json"
+            json_idx = args.index("--json")
+            json_value = args[json_idx + 1]
+            assert "mergedAt" in json_value and "headRefName" in json_value, (
+                f"--json fields must include mergedAt + headRefName, got {json_value!r}"
+            )
             return list_payload
         if args[0:2] == ["pr", "view"]:
             n = int(args[2])
@@ -1597,8 +1615,20 @@ def test_fetch_recent_closed_prs_with_files_returns_expected_shape(
 
     result = board_mod.fetch_recent_closed_prs_with_files("brockamer/jared", days=7)
     assert result == [
-        {"number": 100, "closedAt": "2026-05-20T10:00:00Z", "files": ["src/foo.py", "CLAUDE.md"]},
-        {"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]},
+        {
+            "number": 100,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "mergedAt": "2026-05-20T10:00:00Z",
+            "headRefName": "feature/100-foo",
+            "files": ["src/foo.py", "CLAUDE.md"],
+        },
+        {
+            "number": 99,
+            "closedAt": "2026-05-18T10:00:00Z",
+            "mergedAt": None,
+            "headRefName": "feature/99-bar",
+            "files": ["src/bar.py"],
+        },
     ]
 
 
@@ -1611,8 +1641,18 @@ def test_fetch_recent_closed_prs_swallows_per_pr_view_failure(
     from skills.jared.scripts.lib.board import GhInvocationError
 
     list_payload = [
-        {"number": 100, "closedAt": "2026-05-20T10:00:00Z"},
-        {"number": 99, "closedAt": "2026-05-18T10:00:00Z"},
+        {
+            "number": 100,
+            "closedAt": "2026-05-20T10:00:00Z",
+            "mergedAt": "2026-05-20T10:00:00Z",
+            "headRefName": "feature/100-foo",
+        },
+        {
+            "number": 99,
+            "closedAt": "2026-05-18T10:00:00Z",
+            "mergedAt": "2026-05-18T10:00:00Z",
+            "headRefName": "feature/99-bar",
+        },
     ]
 
     def fake_run_gh(args: list[str], *, cache: str | None = None) -> object:
@@ -1628,4 +1668,12 @@ def test_fetch_recent_closed_prs_swallows_per_pr_view_failure(
     monkeypatch.setattr(board_mod, "run_gh", fake_run_gh)
 
     result = board_mod.fetch_recent_closed_prs_with_files("brockamer/jared", days=7)
-    assert result == [{"number": 99, "closedAt": "2026-05-18T10:00:00Z", "files": ["src/bar.py"]}]
+    assert result == [
+        {
+            "number": 99,
+            "closedAt": "2026-05-18T10:00:00Z",
+            "mergedAt": "2026-05-18T10:00:00Z",
+            "headRefName": "feature/99-bar",
+            "files": ["src/bar.py"],
+        }
+    ]
