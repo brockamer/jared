@@ -92,13 +92,19 @@ Flow:
    - Apply non-close reconciliation: `jared move <N> "Backlog"` (or `"Up Next"`) for abandoned ones, `jared file ...` for newly-filed scope
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
-   - Clear this session's presence lock:
+   - Clear this session's presence lock. The lock is keyed by the issue this session was started against (`<N>` = the `/jared-start` argument), not by PID — PID-keyed locks were stale-on-arrival because the writing CLI subprocess exits immediately (#259):
      ```bash
      GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
      REPO_ROOT=$(dirname "$GIT_COMMON_DIR")
-     ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root "$REPO_ROOT"
+     ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root "$REPO_ROOT" --issue <N>
      ```
-     Removes `<repo>/.jared/session-<pid>.lock` so the next `/jared-start` doesn't see this session as a live sibling. Sibling sessions' locks are left untouched (the clear is PID-keyed).
+     Removes `<repo>/.jared/session-<N>.lock` so the next `/jared-start` doesn't see this session as a live sibling. Sibling sessions' locks (other issues) are left untouched.
+   - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the corresponding `feature/<N>-worktree` branch has merged into main, remove the worktree and delete the branch from the main checkout:
+     ```bash
+     git -C "$REPO_ROOT" worktree remove "<worktree-path>"
+     git -C "$REPO_ROOT" branch -d feature/<N>-worktree
+     ```
+     The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around). The rule comes from operator feedback after the 2026-05-24 wrap of #227's session-1 left an orphan `~/Code/jared-227/` on disk — see the `[[feedback-wrap-remove-merged-worktree]]` user-memory note for the original framing.
 
 6. **Confirm and close out.** Render the closing line in voice:
 

@@ -1,12 +1,20 @@
-"""Session-presence locking for parallel jared sessions (#231, #236).
+"""Session-presence locking for parallel jared sessions (#231, #236, #259).
 
-Every active `/jared-start` writes a JSON lock file at `<repo>/.jared/session-<pid>.lock`
-recording the session's PID, start time, and (if multi-session) the `--session N` value
-plus worktree path. This makes the B-leg refusal real: a later `/jared-start` reads
-existing locks, checks PID-liveness, and refuses-with-guidance when a sibling is
-detected and the operator hasn't opted into multi-session.
+Every active `/jared-start` writes a JSON lock file at `<repo>/.jared/session-<issue>.lock`
+recording the issue, start time, optional `--session N` value, worktree path, and the
+writing process's PID (diagnostic only). The lock is keyed by issue, not PID: the
+CLI subprocess that writes the lock exits immediately, so a PID-keyed file would be
+dead-on-arrival and the B-leg refusal would never fire (the original #231/#236
+implementation had this defect — #259 fixes it).
 
-See docs/superpowers/specs/2026-05-23-multi-session-impl-design.md for design.
+Locks live until explicitly cleared by `/jared-wrap` (or `jared session-lock-clear
+--issue N`). A crashed session leaves its lock on disk; the next `/jared-start` will
+detect it and refuse with guidance, including the recorded PID so the operator can
+verify and force-clear if appropriate.
+
+See docs/superpowers/specs/2026-05-23-multi-session-impl-design.md for original design;
+this module's identity model was reworked in #259 after empirical evidence that
+PID-keyed locks were stale-on-arrival.
 """
 
 from __future__ import annotations
@@ -15,7 +23,6 @@ import contextlib
 import enum
 import json
 import os
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -35,15 +42,15 @@ def _lock_dir(repo_root: Path) -> Path:
     return repo_root / ".jared"
 
 
-def _lock_path(repo_root: Path, pid: int) -> Path:
-    return _lock_dir(repo_root) / f"session-{pid}.lock"
+def _lock_path(repo_root: Path, issue: int) -> Path:
+    return _lock_dir(repo_root) / f"session-{issue}.lock"
 
 
 def write_lock(repo_root: Path, lock: Lock) -> Path:
     """Atomically write a lock file for this session. Returns the path."""
     lockdir = _lock_dir(repo_root)
     lockdir.mkdir(parents=True, exist_ok=True)
-    path = _lock_path(repo_root, lock.pid)
+    path = _lock_path(repo_root, lock.issue)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(asdict(lock)))
     os.replace(tmp, path)
@@ -89,20 +96,28 @@ def is_alive(pid: int) -> bool:
     return True
 
 
-def clear_lock(repo_root: Path, pid: int) -> None:
-    """Remove the lock file for this PID. No-op if absent."""
-    path = _lock_path(repo_root, pid)
+def clear_lock(repo_root: Path, issue: int) -> None:
+    """Remove the lock file for this issue. No-op if absent."""
+    path = _lock_path(repo_root, issue)
     with contextlib.suppress(FileNotFoundError):
         path.unlink()
 
 
 def list_active_locks(repo_root: Path) -> list[Lock]:
-    """Enumerate all live session locks for this repo. Clears stale entries.
+    """Enumerate all session locks on disk for this repo.
 
-    Walks `<repo>/.jared/session-*.lock`, reads each, drops any with a dead
-    PID (deleting the stale file and emitting a one-line stderr warning).
-    Malformed lock files are silently skipped — they may be partial writes
-    from a crashed write that didn't reach os.replace.
+    Walks `<repo>/.jared/session-*.lock` and reads each. Malformed lock files
+    are silently skipped — they may be partial writes from a crashed write
+    that didn't reach os.replace. Old-style locks left over from the pre-#259
+    PID-keyed naming (filename number ≠ recorded `issue` field) are removed
+    opportunistically — this is the only automatic migration path for in-place
+    upgrades from pre-#259 installs.
+
+    No PID-liveness sweep is performed: the CLI subprocess's PID (only recorded
+    diagnostically) is always dead by the time anything reads the file. A
+    crashed session leaves its lock on disk; the operator clears it explicitly
+    with `jared session-lock-clear --issue N` when the next `/jared-start`
+    surfaces the orphan.
     """
     lockdir = _lock_dir(repo_root)
     if not lockdir.exists():
@@ -112,15 +127,18 @@ def list_active_locks(repo_root: Path) -> list[Lock]:
         lock = read_lock(path)
         if lock is None:
             continue
-        if is_alive(lock.pid):
-            active.append(lock)
-        else:
+        # Migration: pre-#259 lock filenames were session-<pid>.lock; their
+        # filename number won't match the lock's `issue` field. Issue-keyed
+        # writes (#259 onward) always satisfy filename_number == lock.issue.
+        try:
+            filename_number = int(path.stem.removeprefix("session-"))
+        except ValueError:
+            filename_number = -1
+        if filename_number != lock.issue:
             with contextlib.suppress(OSError):
                 path.unlink()
-            print(
-                f"warning: cleared stale lock for PID {lock.pid} (no longer running): {path}",
-                file=sys.stderr,
-            )
+            continue
+        active.append(lock)
     return active
 
 
