@@ -352,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     slw = sub.add_parser(
         "session-lock-write",
-        help="Write a lock file for this PID into <repo-root>/.jared/.",
+        help="Write a lock file for this issue into <repo-root>/.jared/.",
     )
     slw.add_argument("--repo-root", required=True, help="Path to the main checkout.")
     slw.add_argument("--issue", type=int, required=True, help="Issue number being worked.")
@@ -371,9 +371,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     slc = sub.add_parser(
         "session-lock-clear",
-        help="Remove the lock file for this PID (called by /jared-wrap).",
+        help="Remove the lock file for this issue (called by /jared-wrap).",
     )
     slc.add_argument("--repo-root", required=True, help="Path to the main checkout.")
+    slc.add_argument(
+        "--issue",
+        type=int,
+        required=True,
+        help="Issue number whose lock to clear.",
+    )
     slc.set_defaults(func=_cmd_session_lock_clear)
 
     wa = sub.add_parser(
@@ -1535,8 +1541,8 @@ def _cmd_session_lock_write(args: argparse.Namespace) -> int:
 
 
 def _cmd_session_lock_clear(args: argparse.Namespace) -> int:
-    """Clear this PID's lock file."""
-    session_lock.clear_lock(repo_root=Path(args.repo_root), pid=os.getpid())
+    """Clear this issue's lock file."""
+    session_lock.clear_lock(repo_root=Path(args.repo_root), issue=args.issue)
     return 0
 
 
