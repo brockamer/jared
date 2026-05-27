@@ -7,6 +7,21 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.25.0 — 2026-05-27
+
+**Doctrine**
+- Wrap-time guidance audit machinery retired in full. The `## Guidance audit (#N)` Q&A block, the `jared close` audit-emission rail, the `--no-audit <reason>` escape, the `model-guidance: enabled/disabled` project kill switch, the `## Decision-point discipline — advisor() at smart-tier moments` SKILL.md section, and the references to the rail across `commands/jared-wrap.md`, `references/jared-cli.md`, and `references/operations.md` are all gone. Claude Code's built-in mechanisms — the always-loaded `advisor()` tool description, platform-curated `Agent` / subagent dispatch, Skill-tool process discipline (brainstorming, TDD, debugging), Plan mode — already provide model-and-dispatch discipline. The per-issue Q&A retrospective Jared added on top was redundant and outside Jared's "kanban steward, no opinions about model choices" lane. (#265, closes #265; supersedes the #228 30-day re-audit gate which becomes moot — measurement instrument is gone, section stays cut)
+
+**Refactor**
+- `Board.model_guidance_disabled`, `Board.fetch_issue_body`, `_GUIDANCE_AUDIT_H2_RE`, `_print_audit_required_error` removed from `lib/board.py` and `scripts/jared`. The rail block in `_cmd_close` is gone; the close path is now: pre-flight redact → comment-before-close (if `--body*`) → close → defense-in-depth `Status=Done` set. 9 rail-related tests removed from `tests/test_cmd_close.py`; the 9 close-path tests that remain still pin the #137 / #184 invariants. (#265)
+
+**Patch**
+- `jared close` CLI surface narrowed: `--no-audit <reason>` is **removed**. `--body` and `--body-file` remain unchanged. Scripts that passed `--no-audit` need to drop the flag. (#265, breaking)
+
+**Templates**
+- `assets/session-note.md.template` — the `## Guidance audit (#N)` H2 + conditional-skip comment is gone. New Session notes are just the Progress / Decisions / Next action / Gotchas / State block.
+- `assets/project-board.md.template` and `docs/project-board.md` — the `model-guidance:` config bullet is gone from the example. The bullet no longer reads anywhere; projects with it set will be silently ignored.
+
 ## v0.24.0 — 2026-05-24
 
 **Doctrine**

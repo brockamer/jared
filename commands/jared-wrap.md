@@ -25,29 +25,6 @@ Flow:
 
    **Pre-flight redaction.** Session notes and `## Current state` updates posted via `jared comment` are scanned by the same pre-flight as `jared file`. Drafts referencing private content from `CLAUDE.local.md` will be refused on post — fix the draft, don't fight the redactor. See `references/pii-pre-flight.md`.
 
-   **Guidance audit append.** Append a `## Guidance audit (#N)` H2 to the Session-note draft as a sibling section to `## Session YYYY-MM-DD` — not a bold-labeled field inside it. One comment per wrap, two H2s inside. Three judgment-evaluation questions, honest self-report:
-
-   ```
-   ## Guidance audit (#N)
-
-   - Smart-tier decisions: routed through `advisor()`?                                                  [yes / no / N/A]
-   - Were your session's model and dispatch choices well-matched to the work size?                       [yes / no / N/A]
-   - Looking back, did any cheap-tier or surface-mapping work run inline that would have been better dispatched? [yes / no / N/A — if no, name the closest call you considered]
-   ```
-
-   **A `no` or surfaced regret on any line REQUIRES a one-line "why" appended beneath that bullet.** Not optional. Examples:
-   - *"no — over-dispatched a Haiku for what turned out to be a 1-line python pipe; should have stayed inline"*
-   - *"no — should have called `advisor()` before committing to the API shape; caught it late in review"*
-   - *"yes — Explore for the surface map was load-bearing; advisor() before commit caught two issues"*
-
-   `N/A` is appropriate when no work of the relevant type happened in this session (e.g., no decision points to route through `advisor()`); `N/A` does not require a why.
-
-   **Skip the audit append when** `docs/project-board.md`'s `## Jared config` contains `- model-guidance: disabled`. (The config key name is historical — it now disables the audit rail.) For closures that don't warrant an audit (epic rollups, scope-question issues, no-work sessions, doc trivia), use `jared close --no-audit <reason>` instead — that posts a small exempt-marker comment so the closure is countable as exempt.
-
-   **Audit-emission rail (#227, decoupled in #228).** `jared close <N>` enforces this contract at the CLI: unless the kill switch is on, the close refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed. The escape posts a `_Audit-exempt close: <reason>_` marker comment so the closure is countable as exempt. Acceptable reasons name the shape of the legitimate skip — `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`. The rail closes the silent-skip path that left ~37% of post-v0.19.0 closures audit-less, and forces every close into one of three buckets: audit-emitted, `--no-audit`-exempt, or refused. Decoupled from `## Model & execution guidance` section presence in #228 (which cut the section); the rail now fires on every close.
-
-   **The audit evaluates judgment, not compliance.** The original 2026-05-13 findajob#150 surfacing concern (Claude proceeded at parent-session model without dispatching for cheap-tier work) is preserved by question 3, which names the failure-mode work types explicitly to force forensic examination rather than relying on the operator to surface a feeling. The over-prescription pattern from the 2026-05-20 #162 audit is surfaced by question 2 ("well-matched to the work size"). The decision-point discipline that works at 95% (`advisor()`) is preserved by question 1. The audit's value is the trigger — asking the question at wrap-time removes the dependency on the operator noticing the gap.
-
 3. **Reconcile drift.** Before posting, check for:
    - In Progress items that were actually completed → propose closing
    - In Progress items that were abandoned → propose moving back to Up Next or Backlog with the Session note explaining why

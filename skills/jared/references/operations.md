@@ -146,18 +146,6 @@ gh api graphql --cache 1h -f query='
 
 **Pre-flight redaction.** Every `jared file` and `jared comment` runs a pre-flight scan against gitignored claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`). On a hit, the call is refused with a structured diff and exit 2; nothing is posted. Full reference: `references/pii-pre-flight.md`.
 
-## Wrap-audit emission rail — kill switch
-
-The wrap-time `## Guidance audit (#N)` block is required on every `jared close` unless the project disables the audit rail. Add this bullet to `## Jared config` in `docs/project-board.md` to disable:
-
-```markdown
-## Jared config
-
-- model-guidance: disabled
-```
-
-When set, `jared close` skips the audit-emission rail entirely. Default is enabled. Only the literal value `disabled` flips it off — typos and other values fail safe toward the rail being active. (The config key name is historical — it originally controlled the file-time `## Model & execution guidance` body section, cut in #228; it now controls only the wrap-audit rail.)
-
 ## `/jared-audit`
 
 Skeptical per-item accuracy audit. Fetches a working set (oldest-first issues, optionally milestones) with each item's open-dependents and a velocity block (recent closure rate + median age-at-close + median PR duration). The conversation runs a seven-question checklist per item, optionally invokes `advisor()` to pressure-test non-trivial batches before the operator sees them, and applies approved mutations via the existing atoms (`jared close`, `jared comment`, `jared set`) plus `gh api` for body / title / milestone changes. See `commands/jared-audit.md` for the full doctrine. The CLI side is just `jared audit fetch [--count N | --age-days N | --issues N,M,…] [--type issues|milestones|both]` — verdicts and mutation orchestration live in the conversational layer.

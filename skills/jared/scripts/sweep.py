@@ -924,9 +924,7 @@ def main() -> int:
             print("  (skipped — no ### Current-state operator docs block on this board)")
         else:
             try:
-                prs_cache = board_fetch_recent_closed_prs_with_files(
-                    repo, days=args.doc_sync_days
-                )
+                prs_cache = board_fetch_recent_closed_prs_with_files(repo, days=args.doc_sync_days)
                 findings = check_doc_sync_gate(prs_cache, operator_docs, code_surface)
                 for line in findings or ["None"]:
                     print(f"  {line}")
@@ -940,9 +938,7 @@ def main() -> int:
     else:
         try:
             if prs_cache is None:
-                prs_cache = board_fetch_recent_closed_prs_with_files(
-                    repo, days=args.doc_sync_days
-                )
+                prs_cache = board_fetch_recent_closed_prs_with_files(repo, days=args.doc_sync_days)
             findings = check_release_changelog_gate(prs_cache)
             for line in findings or ["None"]:
                 print(f"  {line}")
