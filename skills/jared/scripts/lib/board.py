@@ -1466,12 +1466,17 @@ def fetch_recent_comments_batch(
 
 def fetch_recent_closed_prs_with_files(repo: str, days: int = 7) -> list[dict[str, Any]]:
     """Return closed PRs from the last `days` days, each with its changed
-    file list. Used by sweep.check_doc_sync_gate (#163).
+    file list. Used by sweep.check_doc_sync_gate (#163) and
+    sweep.check_release_changelog_gate (#220).
 
     Two-stage: `gh pr list` enumerates by closedAt window, then
     `gh pr view N --json files` per PR. The list endpoint doesn't expose
     `files` reliably across gh versions; per-PR view is the robust path
     and matches check_plan_spec_drift's idiom.
+
+    Each result dict carries `number`, `closedAt`, `mergedAt`, `headRefName`,
+    and `files`. `mergedAt` is null for closed-without-merge PRs — callers
+    that need merged-only behavior should filter on its truthiness.
 
     N+1 in PR count — each PR triggers a per-PR `gh pr view`. Acceptable at
     typical project weekly cadence; busier projects may want a graphql rewrite.
@@ -1489,7 +1494,7 @@ def fetch_recent_closed_prs_with_files(repo: str, days: int = 7) -> list[dict[st
         "--limit",
         "100",
         "--json",
-        "number,closedAt",
+        "number,closedAt,mergedAt,headRefName",
     ]
     prs = run_gh(list_args)
     if not isinstance(prs, list):
@@ -1499,6 +1504,8 @@ def fetch_recent_closed_prs_with_files(repo: str, days: int = 7) -> list[dict[st
     for pr in prs:
         number = pr.get("number")
         closed_at = pr.get("closedAt")
+        merged_at = pr.get("mergedAt")
+        head_ref_name = pr.get("headRefName")
         if not isinstance(number, int):
             continue
         view_args = ["pr", "view", str(number), "--repo", repo, "--json", "files"]
@@ -1508,7 +1515,15 @@ def fetch_recent_closed_prs_with_files(repo: str, days: int = 7) -> list[dict[st
             continue
         files_raw = (data or {}).get("files", []) if isinstance(data, dict) else []
         files = [f["path"] for f in files_raw if isinstance(f, dict) and "path" in f]
-        result.append({"number": number, "closedAt": closed_at, "files": files})
+        result.append(
+            {
+                "number": number,
+                "closedAt": closed_at,
+                "mergedAt": merged_at,
+                "headRefName": head_ref_name,
+                "files": files,
+            }
+        )
 
     return result
 
