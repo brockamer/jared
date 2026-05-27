@@ -222,8 +222,7 @@ def test_session_lock_write_creates_file(tmp_path: Path) -> None:
         ]
     )
     assert result == 0
-    pid = os.getpid()
-    lock_path = tmp_path / ".jared" / f"session-{pid}.lock"
+    lock_path = tmp_path / ".jared" / "session-231.lock"
     assert lock_path.exists()
 
 
@@ -241,9 +240,9 @@ def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
         ),
     )
     mod = import_cli()
-    result = mod.main(["session-lock-clear", "--repo-root", str(tmp_path)])
+    result = mod.main(["session-lock-clear", "--repo-root", str(tmp_path), "--issue", "231"])
     assert result == 0
-    lock_path = tmp_path / ".jared" / f"session-{os.getpid()}.lock"
+    lock_path = tmp_path / ".jared" / "session-231.lock"
     assert not lock_path.exists()
 
 
