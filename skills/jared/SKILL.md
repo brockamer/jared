@@ -102,7 +102,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." (--body "...
 # --priority accepts High/Medium/Low (canonical) or high/medium/low/med (normalized by CLI)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName>
-${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> [(--body "..." | --body-file <path or ->) | --no-audit <reason>]
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> [(--body "..." | --body-file <path or ->)]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --body-file <path or ->)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>     # JSON lookup helper
@@ -184,8 +184,6 @@ See `references/context-capture.md` for the trigger patterns and the helper scri
 ### When completing work — close and verify
 
 Close via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>` — the CLI closes the issue and polls for the board's auto-move to Done, falling back to an explicit `Status=Done` set if the auto-move hasn't fired. A PR merge closes the issue too; same verification applies, so re-run `jared close` (idempotent) or `jared summary` to confirm the item landed in Done.
-
-**Audit-emission rail (#227, decoupled in #228).** Unless the project kill switch is on, `jared close` refuses unless either the close body (`--body` / `--body-file`) contains `## Guidance audit (#N)`, OR `--no-audit <reason>` is passed (e.g., `epic-rollup`, `scope-question`, `no-work-session`, `docs-trivia`, `already-emitted`). The typical wrap path is `jared close <N> --body-file -` piping a Session note + audit; the typical exempt path is `jared close <N> --no-audit no-work-session` for closures that don't warrant an audit. See `commands/jared-wrap.md` § "Audit-emission rail" for the full doctrine.
 
 After close, Jared asks two questions:
 
@@ -284,14 +282,6 @@ A reader glancing at the board must understand the state of the world. Enforce:
 - **`<details>` blocks** hold the deep scope — acceptance criteria, implementation notes, reproduction steps. Hidden by default so the body isn't a wall.
 
 See `references/human-readable-board.md` for title/body templates and `assets/issue-body.md.template` for the default body scaffold.
-
-## Decision-point discipline — `advisor()` at smart-tier moments
-
-Route smart-tier decisions through `advisor()`. The wrap audit Q1 will ask whether you did.
-
-That's the whole doctrine. The earlier `## Model & execution guidance` section in issue bodies — which classified work into Cheap/Standard/Smart tiers and listed an Execution sketch — was cut in #228 after an audit found that only the `advisor()` prescription was producing measurable session-shift behavior, and that prescription is also reinforced by the system-prompt tool description, this SKILL.md doctrine, and the wrap-audit Q1 close-time prompt. The per-issue body section was the most expensive of those four surfaces and the most-likely-redundant; cutting it saved ~340 tokens per `/jared-start` render with a 30-day re-audit gate as the safety net (see #228's verdict comment for the full data).
-
-Operators self-resize at session-time. Tier classifications are not what shapes session dispatch — session-time judgment is. The wrap-time `## Guidance audit (#N)` block closes the loop by asking the operator to evaluate their judgment honestly.
 
 ## Bootstrapping a new project
 

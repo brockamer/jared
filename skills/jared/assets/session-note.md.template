@@ -9,20 +9,3 @@
 **Gotchas:** Anything future-me needs to know that isn't in the code. Empty if none.
 
 **State:** Branch, uncommitted changes, test status, anything operationally fiddly.
-
-<!-- INCLUDE THE FOLLOWING H2 ONLY when this issue carries ## Model & execution
-     guidance (body section OR start-time backstop comment) AND the project's
-     docs/project-board.md ## Jared config does not contain
-     "- model-guidance: disabled". Otherwise delete this comment and the H2
-     below. Sibling H2 to ## Session above — one comment, two sections inside.
-
-     Three judgment-evaluation questions. A "no" or surfaced regret REQUIRES
-     a one-line "why" beneath that bullet — not optional. "N/A" is correct
-     when no work of the relevant type happened in this session (e.g., no
-     decision points to route through advisor()); N/A does not require a why. -->
-
-## Guidance audit (#N)
-
-- Smart-tier decisions: routed through `advisor()`?                                                  [yes / no / N/A]
-- Were your session's model and dispatch choices well-matched to the work size?                       [yes / no / N/A]
-- Looking back, did any cheap-tier or surface-mapping work run inline that would have been better dispatched? [yes / no / N/A]
