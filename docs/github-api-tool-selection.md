@@ -248,13 +248,11 @@ The `gh issue view --json` numbers in particular were re-measured after an early
 
 The MCP `issue_read` caching observation (calls 2 and 3 dropped from 2 to 1 REST core) suggests the MCP server maintains some response cache for recent identical reads. Useful in conversational contexts where the same issue is referenced multiple times in a session.
 
-## What ships next
+## What shipped
 
-This doc is the deliverable. Implementation moves (with separate issues):
+This doc was the deliverable. Four follow-up moves were filed and have all shipped (2026-05-22):
 
-1. **Doctrine update** — add a short "GitHub API mechanism selection" section to `references/operations.md` (or a new `references/api-mechanism-selection.md`) summarizing the routing recommendation for both the CLI and conversational layers.
-2. **Batch-script migration** — issue body reads in `capture-context.py` and `archive-plan.py` move from `gh issue view --json body` to `gh api repos/.../issues/N`. Marginal graphql relief; cumulative on long runs.
-3. **Conversational doctrine** — SKILL.md or a new reference describes when to prefer MCP `issue_read`/`add_issue_comment` over `gh issue view`/`gh issue comment` in interactive sessions. Likely a 2-line addendum to existing guidance, not a new section.
-4. **MCP scope diagnostic** — extend `_format_token_scope_diagnostic` to mention MCP-token scope as a separate failure mode if and when MCP-routed mutations are exercised at volume.
-
-None of these are gated on each other. File as the operator's priorities dictate.
+1. **Doctrine update** — `references/operations.md` GitHub API mechanism selection section added (#207, PR #211).
+2. **Batch-script migration** — `capture-context.py` + `archive-plan.py` issue-body reads moved to REST (#208, PR #212).
+3. **Conversational doctrine** — SKILL.md MCP-vs-gh routing addendum (#209, PR #211).
+4. **MCP scope diagnostic** — `_format_token_scope_diagnostic` extended for MCP-token scope failures (#210, PR #213).
