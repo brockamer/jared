@@ -554,6 +554,147 @@ def test_check_doc_sync_gate_tolerates_missing_files_key() -> None:
     assert findings == []
 
 
+def test_check_release_changelog_gate_flags_merged_release_pr_missing_changelog() -> None:
+    """A merged PR on a `release/v*` branch whose diff didn't touch CHANGELOG.md
+    emits an advisory line naming the PR + the shipped version."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 200,
+            "closedAt": "2026-05-22T22:26:37Z",
+            "mergedAt": "2026-05-22T22:26:37Z",
+            "headRefName": "release/v0.22.0",
+            "files": [".claude-plugin/plugin.json", "pyproject.toml"],
+        },
+    ]
+    findings = sweep.check_release_changelog_gate(prs)
+    assert len(findings) == 1
+    assert "#200" in findings[0]
+    assert "v0.22.0" in findings[0]
+    assert "CHANGELOG.md" in findings[0]
+
+
+def test_check_release_changelog_gate_no_finding_when_changelog_touched() -> None:
+    """A merged release PR that did touch CHANGELOG.md is correctly disciplined —
+    no advisory."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 201,
+            "closedAt": "2026-05-22T22:26:37Z",
+            "mergedAt": "2026-05-22T22:26:37Z",
+            "headRefName": "release/v0.22.0",
+            "files": [".claude-plugin/plugin.json", "pyproject.toml", "CHANGELOG.md"],
+        },
+    ]
+    findings = sweep.check_release_changelog_gate(prs)
+    assert findings == []
+
+
+def test_check_release_changelog_gate_ignores_non_release_branches() -> None:
+    """A merged feature-branch PR is not a release — never flagged regardless of
+    whether it touched CHANGELOG.md."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 202,
+            "closedAt": "2026-05-22T10:00:00Z",
+            "mergedAt": "2026-05-22T10:00:00Z",
+            "headRefName": "feature/220-changelog-advisory",
+            "files": ["skills/jared/scripts/sweep.py"],
+        },
+    ]
+    findings = sweep.check_release_changelog_gate(prs)
+    assert findings == []
+
+
+def test_check_release_changelog_gate_ignores_closed_without_merge() -> None:
+    """A release-shaped PR that was closed without merging never shipped a tag,
+    so a missing CHANGELOG entry there is not a discipline drift — skip."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 203,
+            "closedAt": "2026-05-22T22:00:00Z",
+            "mergedAt": None,  # closed-without-merge
+            "headRefName": "release/v0.99.0-abandoned",
+            "files": [".claude-plugin/plugin.json"],
+        },
+    ]
+    findings = sweep.check_release_changelog_gate(prs)
+    assert findings == []
+
+
+def test_check_release_changelog_gate_handles_empty_pr_list() -> None:
+    """No closed PRs in the window — no findings, no exceptions."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    assert sweep.check_release_changelog_gate([]) == []
+
+
+def test_check_release_changelog_gate_tolerates_missing_keys() -> None:
+    """Defensive: PR dicts missing `mergedAt`, `headRefName`, or `files` keys are
+    silently skipped (advisory path, never fails the sweep)."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {"number": 204, "closedAt": "2026-05-22T10:00:00Z"},  # bare minimum
+        {
+            "number": 205,
+            "closedAt": "2026-05-22T10:00:00Z",
+            "mergedAt": "2026-05-22T10:00:00Z",
+            # no headRefName
+        },
+        {
+            "number": 206,
+            "closedAt": "2026-05-22T10:00:00Z",
+            "mergedAt": "2026-05-22T10:00:00Z",
+            "headRefName": "release/v0.1.0",
+            # no `files` key — treated as empty list, advisory fires (changelog absent)
+        },
+    ]
+    findings = sweep.check_release_changelog_gate(prs)
+    assert len(findings) == 1
+    assert "#206" in findings[0]
+
+
+def test_check_release_changelog_gate_accepts_custom_branch_pattern() -> None:
+    """Branch pattern is overridable for projects that don't use `release/v*`
+    (e.g., `releases/*`, `hotfix/v*`). Caller passes the alternative."""
+    from tests.conftest import import_sweep
+
+    sweep = import_sweep()
+
+    prs = [
+        {
+            "number": 207,
+            "closedAt": "2026-05-22T10:00:00Z",
+            "mergedAt": "2026-05-22T10:00:00Z",
+            "headRefName": "releases/v2.0.0",
+            "files": ["src/foo.py"],
+        },
+    ]
+    findings = sweep.check_release_changelog_gate(prs, branch_pattern="releases/*")
+    assert len(findings) == 1
+    assert "#207" in findings[0]
+
+
 def test_sweep_fetch_items_raises_when_limit_reached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
