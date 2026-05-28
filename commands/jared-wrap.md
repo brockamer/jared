@@ -69,6 +69,59 @@ Flow:
    - Apply non-close reconciliation: `jared move <N> "Backlog"` (or `"Up Next"`) for abandoned ones, `jared file ...` for newly-filed scope
    - Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/archive-plan.py --scan --repo <owner>/<repo>` for shippable plans
    - Update `## Current state` on issues where it meaningfully changed this session via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/capture-context.py`
+
+5b. **Run the back-end flow.** After Session notes are posted and reconciliation is applied, run the commit → push → PR create → mergeable check → confirm merge → cleanup sequence. The flow is idempotent — re-running `/jared-wrap` re-evaluates state and picks up at the current step.
+
+   Loop:
+
+   ```bash
+   STEP=$(${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared wrap-state)
+   ```
+
+   Each iteration of the loop runs the CLI to determine the next step, then executes that step. Loop exits on `cleanup` (which runs the lock-clear + worktree-remove block below), or when the operator declines a confirm prompt, or when a non-actionable step (`wait_checks`, `surface_failure`, `surface_conflict`) is returned.
+
+   **Step actions:**
+
+   - **`commit`** (working tree dirty): Show `git status` to the operator. Ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: run `git add -A && git commit -m "$msg"`. On `skip`: exit wrap (the lock is still cleared at the end). Loop continues after a successful commit.
+
+   - **`push`** (local commits ahead of remote): Run `git push -u origin $(git rev-parse --abbrev-ref HEAD)`. On failure, surface the git error and exit. Loop continues on success.
+
+   - **`create_pr`** (no PR for the branch): Auto-generate title from the issue title (the issue moved to In Progress at start). Auto-generate body from the issue's first paragraph + the commit subjects on the branch. Run:
+
+     ```bash
+     gh pr create --title "$TITLE" --body "$BODY"
+     ```
+
+     On failure, surface the gh error and exit. Loop continues on success.
+
+   - **`wait_checks`** (PR exists, checks pending): Print *"PR #N: checks pending. Re-run `/jared-wrap` when they're green and I'll handle the merge."* Exit the loop (do not poll). The remaining wrap steps (lock-clear) still run.
+
+   - **`surface_failure`** (PR exists, checks failed): Print the failed check names from `gh pr checks $PR --json`. Exit the loop. Lock-clear runs.
+
+   - **`surface_conflict`** (checks green but not mergeable): Print *"PR #N: conflict with main. Rebase in this worktree (`git fetch && git rebase origin/main`), resolve, push, and re-run `/jared-wrap`."* Exit the loop. Lock-clear runs.
+
+   - **`confirm_merge`** (checks green, mergeable): Render the confirm-merge block:
+
+     ```
+     PR #<N>: <title>
+       branch:     <branch>
+       mergeable:  yes
+       checks:     <count> passed
+       sibling:    <enumerate other session locks if present, with their branches>
+
+     Merge? (y / edit / no)
+     ```
+
+     On `y`: run `gh pr merge <N> --merge --delete-branch`. On success, loop continues (next state will be `cleanup`). On failure (e.g., GitHub rejected as not-mergeable since the last check), surface the gh error and exit the loop.
+
+     On `edit`: prompt for new title/body inline; run `gh pr edit <N> --title "$NEW_TITLE" --body "$NEW_BODY"`; re-render the confirm block.
+
+     On `no`: exit the loop. Lock-clear runs.
+
+   - **`cleanup`** (PR merged, branch still local): Run the lock-clear + worktree-remove block below.
+
+   **Concurrent-merge safety.** Two sessions reaching `confirm_merge` at nearly the same time both run the same `wrap-state` query just before the merge. GitHub's PR-merge API is atomic — the first call serializes ahead of the second. If the first's merge invalidates the second's mergeable state, the second's `gh pr merge` call returns an error from GitHub, which surfaces to the operator. No Jared-side lock is used.
+
    - Clear this session's presence lock. The lock is keyed by the issue this session was started against (`<N>` = the `/jared-start` argument), not by PID — PID-keyed locks were stale-on-arrival because the writing CLI subprocess exits immediately (#259):
      ```bash
      GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
