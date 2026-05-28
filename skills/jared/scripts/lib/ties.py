@@ -300,8 +300,14 @@ _TITLE_STOP_WORDS: frozenset[str] = frozenset(
 _TITLE_TOKEN_OVERLAP_MIN = 2
 
 
-def _tokenize_title(title: str) -> frozenset[str]:
-    """Lowercase, drop punctuation, split, drop stop-words, drop length-1 tokens."""
+def tokenize_title(title: str) -> frozenset[str]:
+    """Tokenize a title into lowercase content words for adjacency scoring.
+
+    Drops punctuation, splits on whitespace, removes stop-words and
+    single-character tokens.
+
+    Public: also consumed by `lib/partition.py` (future signal, not v1).
+    """
     cleaned = re.sub(r"[^a-z0-9\s]+", " ", title.lower())
     return frozenset(
         tok for tok in cleaned.split() if len(tok) > 1 and tok not in _TITLE_STOP_WORDS
@@ -315,14 +321,14 @@ def analyze_title_tokens(
 
     Case-insensitive; punctuation stripped; stop-words removed.
     """
-    target_toks = _tokenize_title(target.title)
+    target_toks = tokenize_title(target.title)
     if len(target_toks) < _TITLE_TOKEN_OVERLAP_MIN:
         return []
     hits: list[SignalHit] = []
     for related in open_issues:
         if related.number == target.number:
             continue
-        related_toks = _tokenize_title(related.title)
+        related_toks = tokenize_title(related.title)
         shared = target_toks & related_toks
         if len(shared) >= _TITLE_TOKEN_OVERLAP_MIN:
             shared_list = sorted(shared)
@@ -342,7 +348,7 @@ def analyze_title_tokens(
 # excluded by requiring either a slash or an extension.
 # Lowercase extensions only by design — issue bodies conventionally use
 # lowercase paths (`lib/board.py`, not `lib/Board.PY`).
-_FILE_PATH_RE = re.compile(
+FILE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])"
     r"([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+\.[a-z]+|"
     r"[A-Za-z0-9_.\-]+\.(?:py|md|ts|tsx|js|jsx|go|rs|java|sh|toml|yaml|yml|json))"
@@ -351,17 +357,20 @@ _FILE_PATH_RE = re.compile(
 )
 
 # Filenames that are too generic to count as tie-relevant.
-_GENERIC_FILES: frozenset[str] = frozenset(
+GENERIC_FILES: frozenset[str] = frozenset(
     {"README.md", "CHANGELOG.md", "LICENSE", "TODO.md", "NOTES.md"}
 )
 
 
-def _file_paths_in_body(body: str) -> frozenset[str]:
-    """Extract path-like tokens from body. Generic filenames excluded."""
+def file_paths_in_body(body: str) -> frozenset[str]:
+    """Extract path-like tokens from a body. Generic filenames excluded.
+
+    Public: also consumed by `lib/partition.py` to compute surface overlap.
+    """
     if not body:
         return frozenset()
-    paths = {m.group(1) for m in _FILE_PATH_RE.finditer(body)}
-    return frozenset(p for p in paths if p not in _GENERIC_FILES)
+    paths = {m.group(1) for m in FILE_PATH_RE.finditer(body)}
+    return frozenset(p for p in paths if p not in GENERIC_FILES)
 
 
 def analyze_file_paths(
@@ -373,14 +382,14 @@ def analyze_file_paths(
     filenames (README, CHANGELOG, etc.) are excluded. Requires bodies on
     both sides — caller skips this analyzer in low-budget partial mode.
     """
-    target_paths = _file_paths_in_body(target.body)
+    target_paths = file_paths_in_body(target.body)
     if not target_paths:
         return []
     hits: list[SignalHit] = []
     for related in open_issues:
         if related.number == target.number:
             continue
-        related_paths = _file_paths_in_body(related.body)
+        related_paths = file_paths_in_body(related.body)
         shared = target_paths & related_paths
         if shared:
             shared_list = sorted(shared)
