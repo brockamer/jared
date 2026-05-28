@@ -112,9 +112,11 @@ def propose_partition(
     existing_session_labels: dict[int, int],
 ) -> Proposal:
     """Greedy partition: walk candidates in priority order, assign each to the
-    session with the lowest cumulative surface-overlap so far. Tie-break by
-    load-balance (smaller session wins). Existing labels are honored unless the
-    operator opts into a full re-balance (a future flag — not in v1).
+    session with the largest cumulative surface-overlap so far (cohesion-first:
+    co-locate work that shares files, so conflict-prone items land in one
+    session rather than across sessions). Tie-break by load-balance (smaller
+    session wins). Existing labels are honored unless the operator opts into a
+    full re-balance (a future flag — not in v1).
 
     A candidate with no surface signal is a float: no proposal.
     """
@@ -126,7 +128,7 @@ For each candidate in priority order:
 
 1. If it has an existing `session-N` label and N ≤ K, propose `keep` (honor the operator's prior decision).
 2. If it has no surface signal (no file paths in body), propose `float` (no label).
-3. Otherwise, compute its overlap (set-intersection of surface) against each session's current cumulative surface. Pick the session with the smallest intersection. Tie-break by smaller per-session load.
+3. Otherwise, compute its overlap (set-intersection of surface) against each session's current cumulative surface. Pick the session with the **largest** intersection (cohesion-first — co-locate items that share files). Tie-break by smaller per-session load.
 
 Output as a `Proposal` — `keep`/`move`/`add`/`floats` lists.
 
