@@ -35,9 +35,7 @@ def test_propose_partition_human_format_renders_proposal(
     )
 
     mod = import_cli()
-    rc = mod.main(
-        ["--board", str(board_md), "propose-partition", "--sessions", "2"]
-    )
+    rc = mod.main(["--board", str(board_md), "propose-partition", "--sessions", "2"])
     out = capsys.readouterr().out
 
     assert rc == 0
