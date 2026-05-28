@@ -391,6 +391,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     wa.set_defaults(func=_cmd_worktree_add)
 
+    pp = sub.add_parser(
+        "propose-partition",
+        help="Propose session-N label assignments across Up Next + currently-labeled items.",
+    )
+    pp.add_argument(
+        "--sessions",
+        type=int,
+        required=True,
+        metavar="K",
+        help="Number of parallel sessions to partition across (typically 2).",
+    )
+    pp.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human).",
+    )
+    pp.set_defaults(func=_cmd_propose_partition)
+
     return parser
 
 
@@ -1462,6 +1481,78 @@ def _cmd_worktree_add(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
     print(str(created))
+    return 0
+
+
+def _cmd_propose_partition(args: argparse.Namespace) -> int:
+    """Propose session-N label assignments for parallel Claude sessions."""
+    from dataclasses import asdict
+
+    from lib.partition import propose_partition  # type: ignore[import-not-found]
+
+    K = args.sessions
+    if K < 2:
+        print("ERROR: --sessions must be at least 2.", file=sys.stderr)
+        return 2
+
+    board = _load_board(args.board)
+
+    # Fetch candidate set with labels + bodies.
+    # NOTE: candidates are returned in GraphQL traversal order, not priority order.
+    # propose_partition's docstring notes "caller is expected to sort by priority"
+    # — Phase 3.6 can add priority-aware sorting when driving the stage flow.
+    open_items = board.fetch_open_issues_for_ties()
+
+    existing_labels: dict[int, int] = {}
+    for item in open_items:
+        for label in item.labels:
+            if label.startswith("session-"):
+                try:
+                    n = int(label.removeprefix("session-"))
+                except ValueError:
+                    continue
+                if 1 <= n <= K:
+                    existing_labels[item.number] = n
+                    break
+
+    proposal = propose_partition(open_items, K, existing_labels)
+
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "keep": [asdict(a) for a in proposal.keep],
+                    "move": [asdict(a) for a in proposal.move],
+                    "add": [asdict(a) for a in proposal.add],
+                    "floats": [asdict(a) for a in proposal.floats],
+                }
+            )
+        )
+        return 0
+
+    # Human format
+    print(
+        f"Looking at {len(open_items)} candidates across "
+        f"sessions {', '.join(str(n) for n in range(1, K + 1))}."
+    )
+    print()
+    for n in range(1, K + 1):
+        session_assignments = [
+            a for a in proposal.keep + proposal.add if a.session == n
+        ]
+        print(f"session-{n} (proposing {len(session_assignments)} items):")
+        for a in session_assignments:
+            verb = "keep" if a in proposal.keep else "add"
+            print(f"  {verb} #{a.issue} — {a.reason}")
+        print()
+
+    if proposal.floats:
+        print("floats (no surface signal):")
+        for a in proposal.floats:
+            print(f"  #{a.issue} — {a.reason}")
+        print()
+
+    print("Approve? (y / edit / skip)")
     return 0
 
 

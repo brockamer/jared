@@ -264,8 +264,11 @@ def patch_gh_multi(
                     "number": number,
                     "title": issue.get("title", ""),
                     "state": issue.get("state", "OPEN"),
+                    "body": issue.get("body", ""),
                     "labels": {"nodes": label_nodes},
                     "projectItems": project_items,
+                    "milestone": None,
+                    "blockedBy": {"nodes": []},
                 }
             )
         return _json.dumps(
