@@ -46,33 +46,23 @@ def test_decide_clean_no_pr_returns_create_pr() -> None:
 
 
 def test_decide_pr_checks_pending_returns_wait_checks() -> None:
-    assert (
-        decide_next_step(_git(), _pr(exists=True, checks="pending"))
-        == "wait_checks"
-    )
+    assert decide_next_step(_git(), _pr(exists=True, checks="pending")) == "wait_checks"
 
 
 def test_decide_pr_checks_failed_returns_surface_failure() -> None:
-    assert (
-        decide_next_step(_git(), _pr(exists=True, checks="failed"))
-        == "surface_failure"
-    )
+    assert decide_next_step(_git(), _pr(exists=True, checks="failed")) == "surface_failure"
 
 
 def test_decide_pr_checks_green_not_mergeable_returns_surface_conflict() -> None:
     assert (
-        decide_next_step(
-            _git(), _pr(exists=True, checks="passed", mergeable=False)
-        )
+        decide_next_step(_git(), _pr(exists=True, checks="passed", mergeable=False))
         == "surface_conflict"
     )
 
 
 def test_decide_pr_checks_green_mergeable_returns_confirm_merge() -> None:
     assert (
-        decide_next_step(
-            _git(), _pr(exists=True, checks="passed", mergeable=True)
-        )
+        decide_next_step(_git(), _pr(exists=True, checks="passed", mergeable=True))
         == "confirm_merge"
     )
 
