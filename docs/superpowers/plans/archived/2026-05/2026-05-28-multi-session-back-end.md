@@ -1,4 +1,11 @@
+---
+**Shipped in #233 on 2026-05-28. Final decisions captured in issue body.**
+---
+
 # Multi-session back-end Implementation Plan
+
+**Issue:** #233
+**Status:** Shipped via PR #271 (closes #270) and PR #273 (closes #253, #272). Parent epic #233 closed 2026-05-28.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
