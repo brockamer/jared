@@ -13,8 +13,10 @@ Flow:
 1. **Assemble the board posture on-demand.** Run:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks ${SESSION_FLAG:+--session $SESSION_FLAG}
    ```
+
+   When the operator passes `--session N`, the Top of Up Next section is filtered to `session-N`-labeled items. The menu shown for "Which issue would you like to pull?" is the session-N partition; items labeled for other sessions are hidden. If no items are labeled session-N, the section prints `(none labeled session-N)` and the operator must label items via `/jared-stage --sessions N` before pulling.
 
    Capture stdout. The CLI walks the live board and emits structured sections — In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Recently closed (7d), and a `## Quick health check` block iff the board has `## Session start checks` configured. Use this output verbatim as the **posture block** in step 8 (no further parsing or condensing required).
 
