@@ -52,9 +52,46 @@ To run /jared-stage automatically:
 
 The schedule skill fires `/jared-stage --report-only` at the configured times. The `--report-only` flag suppresses the "Approve?" prompt; the output lands wherever `/schedule` delivers it (notification, log thread). To apply scheduled-fire output, re-run `/jared-stage` interactively in a session.
 
+## Session-N partitioning (`--sessions N`)
+
+When the operator runs `/jared-stage --sessions N` (e.g., `--sessions 2`), propose session-N label assignments across the current candidate set.
+
+Flow:
+
+1. **Run the partition CLI:**
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared propose-partition --sessions N
+   ```
+
+2. **Capture stdout.** The CLI emits a per-session block showing `keep` (existing labels honored) and `add` (no existing label, partition proposes one), plus a `floats` block for candidates with no surface signal.
+
+3. **Display verbatim, voice-wrapped:**
+
+   > Looking at the partition for sessions 1 and 2 — here's what I'd propose based on file paths in the issue bodies:
+   >
+   > [verbatim CLI output]
+   >
+   > Approve? (`y` to apply all additions / `edit #N session=K` to override / `skip` to leave everything as-is)
+
+4. **On `y`:** apply each `add` assignment with:
+
+   ```bash
+   gh issue edit <N> --add-label session-K --repo <owner>/<repo>
+   ```
+
+5. **On `edit #N session=K`:** apply the operator's override for that issue, then continue applying the remaining `add` entries.
+
+6. **On `skip`:** do nothing; the partition is unchanged.
+
+**Honoring existing labels.** The partition algorithm never overrides an existing `session-N` label. To re-balance, the operator removes the label manually and re-runs `/jared-stage --sessions N`.
+
+**Single signal.** v1 uses only file paths cited in issue bodies. Two candidates whose bodies share a path are presumed to touch overlapping code. Issues with no paths in their body float (no label proposed) — they appear in the `floats` block for manual assignment.
+
 ## Flags
 
 - `--report-only`: emit proposals only; skip the approval prompt. Intended for scheduled fires.
+- `--sessions N`: propose session-N label assignments across current candidates. See **Session-N partitioning** above.
 - `--up-next-cap <N>`: override the default Up Next cap of 3. Useful for projects with different WIP norms.
 
 See `docs/superpowers/specs/2026-05-14-jared-stage-design.md` for the full design.
