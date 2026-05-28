@@ -264,6 +264,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Bypass the on-disk snapshot cache for this read (#52).",
     )
+    nsp.add_argument(
+        "--session",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Filter Top of Up Next to issues labeled session-N (e.g., --session 1).",
+    )
     nsp.set_defaults(func=_cmd_next_session_prompt)
 
     ties_p = sub.add_parser(
