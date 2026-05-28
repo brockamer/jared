@@ -54,4 +54,15 @@ class Proposal:
     floats: list[Assignment]
 
 
-__all__ = ["Assignment", "Proposal", "file_paths_in_body"]
+def extract_surface(body: str) -> frozenset[str]:
+    """Compute the surface fingerprint of an issue body — the set of file
+    paths it cites. Single signal for v1.
+
+    Direct alias of `lib.ties.file_paths_in_body`. Lives behind a partition-
+    specific name so future signal expansion (title scope, label clusters)
+    doesn't churn the partition-side import.
+    """
+    return file_paths_in_body(body)
+
+
+__all__ = ["Assignment", "Proposal", "extract_surface"]
