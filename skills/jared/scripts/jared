@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -67,6 +68,7 @@ ALL_SUBCOMMANDS = [
     "session-lock-write",
     "session-lock-clear",
     "worktree-add",
+    "wrap-state",
 ]
 
 
@@ -390,6 +392,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Session index (accepted for forward-compat; currently unused).",
     )
     wa.set_defaults(func=_cmd_worktree_add)
+
+    ws = sub.add_parser(
+        "wrap-state",
+        help="Collect git + PR state and print the next wrap step name.",
+    )
+    ws.set_defaults(func=_cmd_wrap_state)
+
+    pp = sub.add_parser(
+        "propose-partition",
+        help="Propose session-N label assignments across Up Next + currently-labeled items.",
+    )
+    pp.add_argument(
+        "--sessions",
+        type=int,
+        required=True,
+        metavar="K",
+        help="Number of parallel sessions to partition across (typically 2).",
+    )
+    pp.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human).",
+    )
+    pp.set_defaults(func=_cmd_propose_partition)
 
     return parser
 
@@ -1462,6 +1489,173 @@ def _cmd_worktree_add(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
     print(str(created))
+    return 0
+
+
+def _cmd_wrap_state(args: argparse.Namespace) -> int:
+    """Collect git + PR state, hand to decide_next_step, print the step name."""
+    import json as _json
+
+    from lib.wrap_state import GitState, PrState, decide_next_step  # type: ignore[import-not-found]
+
+    # Git state
+    status_result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    dirty = bool(status_result.stdout.strip())
+
+    branch_result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    branch = branch_result.stdout.strip()
+
+    ahead_result = subprocess.run(
+        ["git", "rev-list", "--count", "@{u}..HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # @{u}..HEAD fails when no upstream; treat as ahead=False.
+    try:
+        ahead = int(ahead_result.stdout.strip() or "0") > 0
+    except ValueError:
+        ahead = False
+
+    git_state = GitState(dirty=dirty, branch=branch, ahead_of_remote=ahead)
+
+    # PR state
+    pr_result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "view",
+            "--json",
+            "number,mergeable,mergeStateStatus,state,statusCheckRollup",
+            branch,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if pr_result.returncode != 0:
+        pr_state = PrState(
+            exists=False,
+            pr_number=None,
+            checks_status="none",
+            mergeable=None,
+            merged=False,
+        )
+    else:
+        pr_payload = _json.loads(pr_result.stdout)
+        # mergeable values: "MERGEABLE", "CONFLICTING", "UNKNOWN"
+        mergeable_value = pr_payload.get("mergeable")
+        mergeable: bool | None = None
+        if mergeable_value == "MERGEABLE":
+            mergeable = True
+        elif mergeable_value == "CONFLICTING":
+            mergeable = False
+        # else: UNKNOWN → None
+
+        # Aggregate checks
+        rollup = pr_payload.get("statusCheckRollup") or []
+        statuses = {c.get("conclusion") or c.get("status") for c in rollup}
+        if "FAILURE" in statuses or "CANCELLED" in statuses or "TIMED_OUT" in statuses:
+            checks_status: str = "failed"
+        elif "IN_PROGRESS" in statuses or "PENDING" in statuses or "QUEUED" in statuses:
+            checks_status = "pending"
+        elif rollup:
+            checks_status = "passed"
+        else:
+            checks_status = "none"
+
+        pr_state = PrState(
+            exists=True,
+            pr_number=pr_payload.get("number"),
+            checks_status=checks_status,  # type: ignore[arg-type]
+            mergeable=mergeable,
+            merged=(pr_payload.get("state") == "MERGED"),
+        )
+
+    print(decide_next_step(git_state, pr_state))
+    return 0
+
+
+def _cmd_propose_partition(args: argparse.Namespace) -> int:
+    """Propose session-N label assignments for parallel Claude sessions."""
+    from dataclasses import asdict
+
+    from lib.partition import propose_partition  # type: ignore[import-not-found]
+
+    K = args.sessions
+    if K < 2:
+        print("ERROR: --sessions must be at least 2.", file=sys.stderr)
+        return 2
+
+    board = _load_board(args.board)
+
+    # Fetch candidate set with labels + bodies.
+    # NOTE: candidates are returned in GraphQL traversal order, not priority order.
+    # propose_partition's docstring notes "caller is expected to sort by priority"
+    # — Phase 3.6 can add priority-aware sorting when driving the stage flow.
+    open_items = board.fetch_open_issues_for_ties()
+
+    existing_labels: dict[int, int] = {}
+    for item in open_items:
+        for label in item.labels:
+            if label.startswith("session-"):
+                try:
+                    n = int(label.removeprefix("session-"))
+                except ValueError:
+                    continue
+                if 1 <= n <= K:
+                    existing_labels[item.number] = n
+                    break
+
+    proposal = propose_partition(open_items, K, existing_labels)
+
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "keep": [asdict(a) for a in proposal.keep],
+                    "move": [asdict(a) for a in proposal.move],
+                    "add": [asdict(a) for a in proposal.add],
+                    "floats": [asdict(a) for a in proposal.floats],
+                }
+            )
+        )
+        return 0
+
+    # Human format
+    print(
+        f"Looking at {len(open_items)} candidates across "
+        f"sessions {', '.join(str(n) for n in range(1, K + 1))}."
+    )
+    print()
+    for n in range(1, K + 1):
+        session_assignments = [
+            a for a in proposal.keep + proposal.add if a.session == n
+        ]
+        print(f"session-{n} (proposing {len(session_assignments)} items):")
+        for a in session_assignments:
+            verb = "keep" if a in proposal.keep else "add"
+            print(f"  {verb} #{a.issue} — {a.reason}")
+        print()
+
+    if proposal.floats:
+        print("floats (no surface signal):")
+        for a in proposal.floats:
+            print(f"  #{a.issue} — {a.reason}")
+        print()
+
+    print("Approve? (y / edit / skip)")
     return 0
 
 
