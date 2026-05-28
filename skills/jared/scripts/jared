@@ -1229,6 +1229,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             content = item.get("content") or {}
             prio = item.get("priority") or "-"
             print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+    elif session_filter is not None:
+        print(f"(none labeled session-{session_filter})")
     else:
         print("(empty queue)")
     print()
