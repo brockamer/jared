@@ -7,6 +7,16 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.26.0 — 2026-05-28
+
+**Features**
+- Multi-session back-end — the staging, start, and wrap surfaces now coordinate across parallel Claude sessions instead of just naming them. `lib/partition.py` (new) computes a cohesion-first greedy partition over Up Next/Backlog candidates: each candidate lands in the session whose cumulative file-surface it overlaps with most, so conflict-prone items co-locate rather than spread across sessions. `jared propose-partition --sessions N` exposes the proposal as human or JSON output; `/jared-stage --sessions N` drives the partition + operator-approved label application. `jared next-session-prompt --session N` filters Top of Up Next by `session-N` label, and `/jared-start` passes the flag through so sibling sessions see only their own work. `jared wrap-state` collects git + PR state and prints the next step (`commit` / `push` / `create_pr` / `wait_checks` / `confirm_merge` / `cleanup` / etc.); `/jared-wrap` drives the commit → push → PR → merge → cleanup loop off it. (#271 spec, #273 impl, #274 archive — Phases 1.1 → 5.1)
+- `lib/ties.py` extractors promoted to public — `file_paths_in_body`, `GENERIC_FILES`, `tokenize_title`, `FILE_PATH_RE` are now the supported import surface for partition and any future tie-aware tooling. (#273, Phase 2.1, regression-tested in Phase 2.2)
+
+**Bug fixes**
+- `/jared-wrap` step 5b now guards against running the back-end loop on `main` — if the current branch is `main`, the loop is skipped entirely and the lock-clear + worktree-removal bullets run unconditionally. Previously, a `/jared-wrap` invoked from the primary repo while still on `main` would hit `wrap-state` → `create_pr` and attempt `gh pr create` for `main`, which fails confusingly or produces a malformed PR. (#275)
+- Archived multi-session spec at `docs/superpowers/specs/archived/2026-05/2026-05-28-multi-session-back-end-design.md` § "Phase 1 — Stage proposal" prose now matches the cohesion-first implementation: "largest cumulative surface-overlap" instead of "smallest." Future readers of the archived design see the algorithm direction that matches the shipped code. (#275)
+
 ## v0.25.0 — 2026-05-27
 
 **Doctrine**
