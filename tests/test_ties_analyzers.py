@@ -285,3 +285,19 @@ class TestAnalyzeFilePaths:
         others = [_make_issue(1, body="Touches `lib/board.py`.")]
         hits = analyze_file_paths(target, others)
         assert hits == []
+
+
+def test_public_extractors_importable() -> None:
+    """Regression: lib/partition.py depends on these symbols being public.
+    If anyone re-privates them, this test fails loudly."""
+    from skills.jared.scripts.lib.ties import (
+        FILE_PATH_RE,
+        GENERIC_FILES,
+        file_paths_in_body,
+        tokenize_title,
+    )
+
+    assert callable(file_paths_in_body)
+    assert callable(tokenize_title)
+    assert isinstance(GENERIC_FILES, frozenset)
+    assert FILE_PATH_RE.pattern  # has a pattern attribute
