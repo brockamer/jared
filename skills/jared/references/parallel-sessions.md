@@ -17,10 +17,14 @@ the next session-start.
 sit alongside without interfering — the per-session arithmetic only
 considers labels matching the strict shape.
 
-**Who applies and when.** The *operator* applies `session-N` labels at
-parallel-session start (option 1a from the v1.1 multi-session shape spec).
-Not Jared, not `/jared-stage`, not `/jared-start`. Auto-application was
-considered and deferred — see `docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-shape.md` § "Workstream 1".
+**Who applies and when.** The *operator* approves every `session-N` label
+change. `/jared-stage --sessions N` proposes assignments based on file-paths
+overlap and applies them only on operator approval. `/jared-start` and
+`/jared-file` never touch labels. The proposal-with-approval shape replaces
+the original manual-only model (option 1a from the v1.1 multi-session shape
+spec); the constraint that survives is operator approval — see
+`docs/superpowers/specs/2026-05-28-multi-session-back-end-design.md` for
+the new flow.
 
 ## Pre-parallel-session ritual
 
