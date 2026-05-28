@@ -295,3 +295,69 @@ def test_session_checks_omitted_without_flag(
     assert rc == 0
     assert "Quick health check" not in out
     assert "echo should-not-appear" not in out
+
+
+def test_next_session_prompt_session_flag_filters_up_next(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--session N filters Top of Up Next to issues carrying the session-N label."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 100, "title": "Session-1 item A", "state": "OPEN"},
+            {"number": 200, "title": "Session-2 item", "state": "OPEN"},
+            {"number": 101, "title": "Session-1 item B", "state": "OPEN"},
+            {"number": 300, "title": "Unlabeled item", "state": "OPEN"},
+        ],
+        statuses={
+            100: ("Up Next", "High"),
+            200: ("Up Next", "High"),
+            101: ("Up Next", "Medium"),
+            300: ("Up Next", "Medium"),
+        },
+        labels_by_number={
+            100: ["session-1"],
+            200: ["session-2"],
+            101: ["session-1"],
+            300: [],
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt", "--session", "1"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "#100" in out
+    assert "#101" in out
+    assert "#200" not in out
+    assert "#300" not in out
+
+
+def test_next_session_prompt_session_flag_with_no_matches_renders_empty_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--session N with zero matching items prints an explicit empty marker
+    instead of falling through to unlabeled items."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 300, "title": "Unlabeled item", "state": "OPEN"},
+        ],
+        statuses={300: ("Up Next", "High")},
+        labels_by_number={300: []},
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt", "--session", "1"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "(none labeled session-1)" in out
+    assert "#300" not in out  # no silent fall-through
