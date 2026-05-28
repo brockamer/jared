@@ -1,8 +1,13 @@
+---
+**Shipped in #233 on 2026-05-28. Final decisions captured in issue body.**
+---
+
 # Multi-session back-end: stage proposal, start filter, wrap merge
 
+**Issue:** #233
 **Date:** 2026-05-28
-**Status:** Design — pending implementation plan
-**Related issues:** #253 (extends scope), new issue for start-side filter, new issue for wrap back-end. #233's "v0.22 readiness — multi-session safety checklist" can close once both PRs land.
+**Status:** Shipped via PR #271 (closes #270) and PR #273 (closes #253, #272). Parent epic #233 closed 2026-05-28.
+**Related issues:** #270, #253, #272 (all closed). #233 v0.22 multi-session readiness umbrella (closed).
 **Related references:** `skills/jared/references/parallel-sessions.md`, `docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-impl-design.md`.
 
 ## Problem
