@@ -72,6 +72,17 @@ Flow:
 
 5b. **Run the back-end flow.** After Session notes are posted and reconciliation is applied, run the commit → push → PR create → mergeable check → confirm merge → cleanup sequence. The flow is idempotent — re-running `/jared-wrap` re-evaluates state and picks up at the current step.
 
+   **Precondition — branch guard.** The back-end flow assumes the session worked on a feature branch. If the current branch is `main`, skip the loop entirely and jump directly to the lock-clear + worktree-removal bullets below — running the loop on `main` would attempt `gh pr create` for the main branch, which either fails with a confusing GitHub error or produces a malformed PR. Check:
+
+   ```bash
+   if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
+     echo "On main — skipping back-end PR flow."
+     # proceed to lock-clear / worktree cleanup below
+   fi
+   ```
+
+   When the guard fires, the lock-clear still runs (the session may have written one) and the worktree-removal bullet is a no-op (worktrees are never created against `main`).
+
    Loop:
 
    ```bash
