@@ -135,11 +135,11 @@ the discipline (stage, groom, plans) becomes incremental.
 |---|---|---|
 | Once a week (Mon morning) | `/jared-reshape` | Structural review — shape, phasing, milestones, dependencies, long-horizon arc. Catches drift the daily groom can't see. |
 | Every day | `/jared-groom` | Routine sweep — metadata, WIP cap, aging items, pullable check, plan/spec drift, label hygiene. Advisory; you approve each proposed change. |
-| Every day or so | `/jared-stage` | Propose promotions from Backlog → Up Next and revisit anything in Blocked. Advisory; you approve each move. |
+| Every day or so | `/jared-stage` | Propose promotions from Backlog → Up Next and revisit anything in Blocked. With `--sessions N`, also proposes cohesion-first `session-N` label assignments so parallel sessions work on file surfaces that overlap with their own, not each other's. Advisory; you approve each move. |
 | When the backlog gets long | `/jared-audit` | Skeptical walk through the oldest items — verdict per issue (close / reshape / leave-alone), operator approves any mutation. |
 | Per work session — start | `/jared` then `/jared-start <N>` | `/jared` orients in 2 seconds. `/jared-start` moves the issue to In Progress and loads everything you need to resume. |
 | Per work session — end | `/jared-wrap` | Captures Progress / Decisions / Next action on every touched issue. Files any discovered scope. Proposes plan archivals. |
-| As scope arrives | `/jared-file` | One atomic operation: create issue, add to board, set Priority + Status, verify. No "filed but invisible" state. |
+| As scope arrives | `/jared-file` | One atomic operation: create issue, add to board, set Priority + Status + milestone, verify. Milestone is required — pass `--milestone NAME` or `--no-milestone` explicitly. No "filed but invisible" state. |
 
 ### What the cycle looks like
 
@@ -286,11 +286,25 @@ Archive? [Y/n] y
 
 ---
 
+## A note on voice
+
+Jared's conversational surfaces — `/jared` status reports, `/jared-start`
+announces, drift-reconcile prompts, error-mode chatter — speak as Jared
+Dunn from *Silicon Valley*: deferential, formally polite, quietly fierce
+about operational integrity. Board writes (issue bodies, Session notes,
+PR descriptions, commit messages) stay plain technical prose, so the
+permanent record remains greppable and scannable. If the voice isn't to
+your taste, add `- voice: disabled` under `## Jared config` in
+`docs/project-board.md` and the slash commands fall back to plain prose
+with the same structural content.
+
+---
+
 ## Multi-session work
 
 When two Claude sessions work the same repo at once, they share one
 `.git/HEAD` — a `git checkout -b` from either silently steals the
-other's branch state. Jared layers three defenses:
+other's branch state. Jared layers four defenses:
 
 - **Presence locks.** Every `/jared-start` writes
   `<repo>/.jared/session-<pid>.lock`. A second session sees the lock
@@ -303,6 +317,11 @@ other's branch state. Jared layers three defenses:
   labels to In Progress items so each session can see who's touching
   what. `jared summary` collapses same-labeled items into a single
   workstream count against the WIP cap.
+- **Cohesion-first partition.** `/jared-stage --sessions N` (and the
+  `jared propose-partition --sessions N` CLI surface) proposes
+  `session-N` label assignments by maximizing file-surface overlap
+  within each session — so conflict-prone items co-locate instead of
+  spreading. Operator approves the assignment before it lands.
 
 `/jared-wrap` clears its own session's lock at session end. Solo
 sessions still write a lock (with no session number) so a later
@@ -325,6 +344,12 @@ subcommands gate worktree creation behind lock-resolution.
 When the GitHub MCP plugin is loaded, the skill prefers its typed
 tools for single-call operations. The CLI handles everything
 multi-step. Raw `gh` is the last resort.
+
+Every issue body and comment passes through a PII pre-flight before
+any `gh` call — it scans for content sourced from gitignored
+claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`)
+and refuses to post on a hit, so private context Jared *reads* never
+leaks into the public board it *writes*.
 
 For development setup, testing, and the layout of the plugin's
 internals, see [`CLAUDE.md`](CLAUDE.md).
