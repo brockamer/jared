@@ -11,8 +11,6 @@ references/board-sweep.md:
      Status is checked because GitHub's auto-add-to-project workflow adds
      items without populating Status; items landing as Status=None sort
      below everything and vanish until someone sets it manually.
-  1b. Closed items not on Done — auto-move sometimes fails to fire;
-      closed issues with Status != Done accumulate and pollute queries.
   2. WIP cap — In Progress within limit, flag stalled items
   3. Up Next queue — size and pullable-top check
   4. Aging — High-priority Backlog items >14 days old
@@ -57,7 +55,6 @@ from lib import cache as board_cache  # type: ignore[import-not-found]  # noqa: 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     Board,
     GhInvocationError,
-    check_closed_not_done,
 )
 from lib.board import (
     check_graphql_budget as board_check_graphql_budget,
@@ -323,19 +320,6 @@ def check_metadata(items: list[dict[str, Any]]) -> list[str]:
     return missing
 
 
-def format_closed_not_done_line(entry: dict[str, Any]) -> str:
-    """Render a stuck-item entry with its remediation command.
-
-    Format lives at the sweep/groom render site, not in the detector.
-    Other sweep checks that want a Propose-style suffix follow this same
-    shape — their format helper, their render site.
-    """
-    n = entry["number"]
-    return (
-        f"#{n} [{entry['current_status']}]: {entry['title']} — Propose: jared set {n} Status Done"
-    )
-
-
 def check_wip(items: list[dict[str, Any]], limit: int) -> list[str]:
     in_progress = [i for i in items if i.get("status") == "In Progress"]
     findings = []
@@ -476,8 +460,8 @@ def check_off_board_issues(
 
     Caller passes `issues_by_number` already filtered to repo-open
     issues (see `fetch_open_issues_bulk` which uses `--state open`).
-    A board item with Status=Done still counts as "on the board" —
-    that's a different drift handled by `check_closed_not_done`.
+    A board item with Status=Done still counts as "on the board" — it's
+    on the project, just in a different column.
     """
     on_board = {
         (i.get("content") or {}).get("number")
@@ -944,15 +928,6 @@ def main() -> int:
                 print(f"  {line}")
         except (RuntimeError, GhInvocationError) as e:
             print(f"  (skipped — {e})")
-    print()
-
-    print("== Closed items not on Done ==")
-    stuck = check_closed_not_done(items)
-    if stuck:
-        for entry in stuck:
-            print(f"  {format_closed_not_done_line(entry)}")
-    else:
-        print("  None")
     print()
 
     print("== Off-board issues (open in repo, missing from project) ==")

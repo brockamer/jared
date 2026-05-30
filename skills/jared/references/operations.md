@@ -52,7 +52,7 @@ The escape-hatch examples below are written with these rules applied.
 
 ### Closed-items cache (sweep optimization, #186)
 
-`sweep.py` runs `check_off_board_issues` and `check_closed_not_done`, both of which need closed items in the snapshot — `check_closed_not_done` specifically needs closed-with-Status-not-Done items, so a pure Done-only cache would make them invisible.
+`sweep.py` runs `check_off_board_issues`, a pure number-intersection between open repo issues and board items. It needs the closed board items in the snapshot too, so a closed-but-on-board issue isn't false-flagged as off-board — hence the cache holds the closed subset alongside the open pull.
 
 To avoid re-pulling the full mature-board history every sweep cycle, sweep maintains a persistent **closed-items cache** at `${JARED_CACHE_DIR}/<project>-closed.json` (24-hour default TTL). On warm-cache reads, sweep pulls open items via `Board.open_items()` (cost scales with open count, not total board size) and merges with the cached closed items. Dedup rule: open-items pull wins on number collision (handles external reopen).
 

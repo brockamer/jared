@@ -1279,39 +1279,6 @@ def parse_shipped_section(plan_text: str) -> list[int]:
     return refs if refs is not None else []
 
 
-def check_closed_not_done(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Closed issues should auto-move to Done. If they don't, return them.
-
-    Detection-only. Each entry is `{number, title, current_status}` —
-    callers decide the rendering (sweep adds a `Propose: jared set <N>
-    Status Done` remediation suffix; the CLI's `summary` command renders
-    them under a separate `Stuck closed (N):` heading and excludes them
-    from the `In Progress` count). Keeping format out of the detector
-    means each call site can pick its own affordance.
-
-    The drift usually comes from projects whose built-in "Item closed →
-    Done" workflow is disabled — paths like `gh issue close` and PR-merge
-    auto-close rely on it entirely (only `jared close` has its own
-    explicit-Status fallback).
-    """
-    stuck = []
-    for i in items:
-        content = i.get("content") or {}
-        if content.get("state") != "CLOSED":
-            continue
-        status = i.get("status") or ""
-        if status == "Done":
-            continue
-        stuck.append(
-            {
-                "number": content.get("number"),
-                "title": (content.get("title") or i.get("title") or "")[:60],
-                "current_status": status or "no Status",
-            }
-        )
-    return stuck
-
-
 def _flatten_project_item_for_project(
     project_items_node: Any, project_number: int
 ) -> dict[str, Any] | None:
