@@ -1,5 +1,6 @@
 import json as _json
 import subprocess as _subprocess
+import tempfile
 from io import StringIO
 from pathlib import Path
 from textwrap import dedent
@@ -301,10 +302,15 @@ def test_file_inline_body_staging_round_trip_mismatch_errors(
     real_read_text = Path.read_text
 
     def maybe_truncating_read_text(self: Path, *a: object, **kw: object) -> str:
-        # Only intercept the temp body file (created in /tmp directly,
-        # not under any subdirectory). The board file lives under
-        # tmp_path/docs/, so we won't break Board parsing.
-        if self.parent == Path("/tmp") and self.suffix == ".md":
+        # Only intercept the staged body file. NamedTemporaryFile creates it
+        # directly in tempfile.gettempdir() (which honors $TMPDIR), so match
+        # the parent against the live tempdir rather than a hardcoded /tmp —
+        # otherwise this fires only when the system tempdir is exactly /tmp
+        # and silently no-ops under TMPDIR=/tmp/sub (e.g. the CC sandbox).
+        # The board file lives under tmp_path/docs/, nested below the tempdir
+        # rather than directly in it, so it stays unintercepted and Board
+        # parsing keeps working.
+        if self.parent == Path(tempfile.gettempdir()) and self.suffix == ".md":
             return ""
         return real_read_text(self, *a, **kw)  # type: ignore[arg-type]
 
