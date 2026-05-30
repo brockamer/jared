@@ -15,62 +15,20 @@ import pytest
 from tests.conftest import import_sweep, patch_gh
 
 
-def _item(number: int, state: str, status: str, title: str = "") -> dict[str, Any]:
-    """Shape matches what `gh project item-list --format json` returns."""
+def _item(number: int, status: str, title: str = "") -> dict[str, Any]:
+    """Cold-path item shape: what `gh project item-list --format json` returns.
+
+    Note the deliberate absence of a `content.state` key — `item-list`
+    does not populate the GitHub issue state (#189/#223). Sweep's checks
+    that run on this snapshot key on the top-level `status` (the Project
+    board column), never on `content.state`. A fixture that invented a
+    `state` key here is exactly the lie #223 set out to remove: it let a
+    state-keyed filter pass in tests while no-op'ing in production.
+    """
     return {
-        "content": {"number": number, "state": state, "title": title or f"Issue {number}"},
+        "content": {"number": number, "title": title or f"Issue {number}"},
         "status": status,
     }
-
-
-def test_check_closed_not_done_returns_empty_when_all_closed_on_done() -> None:
-    mod = import_sweep()
-    items = [
-        _item(1, "CLOSED", "Done"),
-        _item(2, "CLOSED", "Done"),
-        _item(3, "OPEN", "In Progress"),
-    ]
-    assert mod.check_closed_not_done(items) == []
-
-
-def test_check_closed_not_done_flags_stuck_items() -> None:
-    mod = import_sweep()
-    items = [
-        _item(42, "CLOSED", "Done", title="Done properly"),
-        _item(92, "CLOSED", "Backlog", title="Stuck in Backlog"),
-        _item(93, "CLOSED", "In Progress", title="Stuck in In Progress"),
-        _item(100, "OPEN", "Backlog", title="Open — not stuck"),
-    ]
-    stuck = mod.check_closed_not_done(items)
-    numbers = [entry["number"] for entry in stuck]
-    assert numbers == [92, 93]
-    assert stuck[0]["current_status"] == "Backlog"
-    assert stuck[1]["current_status"] == "In Progress"
-
-
-def test_check_closed_not_done_handles_no_status() -> None:
-    """An item that's CLOSED but missing the status key entirely (older API
-    responses, or pre-workflow boards) still gets flagged — its
-    current_status renders as 'no Status' so the downstream format is
-    still readable."""
-    mod = import_sweep()
-    items = [{"content": {"number": 99, "state": "CLOSED", "title": "No status at all"}}]
-    [entry] = mod.check_closed_not_done(items)
-    assert entry["number"] == 99
-    assert entry["current_status"] == "no Status"
-
-
-def test_check_closed_not_done_ignores_missing_content() -> None:
-    """Items without a `content` payload (e.g. draft items) must not crash."""
-    mod = import_sweep()
-    items = [
-        {"status": "Backlog"},  # no content at all
-        _item(5, "CLOSED", "Backlog"),
-    ]
-    stuck = mod.check_closed_not_done(items)
-    # Only the well-formed closed item is flagged.
-    assert len(stuck) == 1
-    assert stuck[0]["number"] == 5
 
 
 def test_check_metadata_flags_missing_status_key() -> None:
@@ -334,9 +292,9 @@ def test_check_off_board_issues_returns_empty_when_all_on_board() -> None:
     """Healthy case: every open repo issue has a project item."""
     mod = import_sweep()
     items = [
-        _item(1, "OPEN", "In Progress"),
-        _item(2, "OPEN", "Up Next"),
-        _item(3, "OPEN", "Backlog"),
+        _item(1, "In Progress"),
+        _item(2, "Up Next"),
+        _item(3, "Backlog"),
     ]
     issues_by_number = {
         1: _open_issue(1),
@@ -352,8 +310,8 @@ def test_check_off_board_issues_flags_repo_issue_missing_from_project() -> None:
     see it without a sweep. Surface it with a `jared add-to-board` recovery."""
     mod = import_sweep()
     items = [
-        _item(1, "OPEN", "In Progress"),
-        _item(2, "OPEN", "Up Next"),
+        _item(1, "In Progress"),
+        _item(2, "Up Next"),
     ]
     issues_by_number = {
         1: _open_issue(1),
@@ -372,7 +330,7 @@ def test_check_off_board_issues_flags_repo_issue_missing_from_project() -> None:
 
 def test_check_off_board_issues_handles_multiple_ghosts() -> None:
     mod = import_sweep()
-    items = [_item(1, "OPEN", "Backlog")]
+    items = [_item(1, "Backlog")]
     issues_by_number = {
         1: _open_issue(1),
         50: _open_issue(50, title="ghost A"),
@@ -390,44 +348,27 @@ def test_check_off_board_issues_ignores_closed_repo_issues() -> None:
     caller to pass open issues only — it doesn't re-filter.
     """
     mod = import_sweep()
-    items = [_item(1, "OPEN", "Backlog")]
+    items = [_item(1, "Backlog")]
     # Caller already filtered; only pass open ones in.
     issues_by_number = {1: _open_issue(1)}
     assert mod.check_off_board_issues(items, issues_by_number) == []
 
 
-def test_check_off_board_issues_ignores_closed_board_items() -> None:
-    """A board item whose content state is CLOSED still 'covers' a
-    repo-open issue with the same number — but that's a different drift
-    pattern (the repo says open, the board has it closed). Handled by
-    `check_closed_not_done`, not here. This check only flags repo-open
-    issues that have NO project item at all.
+def test_check_off_board_issues_ignores_done_board_items() -> None:
+    """A board item sitting in the Done column still 'covers' a repo-open
+    issue with the same number — the off-board check is a pure number
+    intersection and doesn't care which column the item is in. This check
+    only flags repo-open issues that have NO project item at all.
     """
     mod = import_sweep()
     items = [
-        _item(1, "OPEN", "Backlog"),
-        _item(99, "CLOSED", "Done"),  # board has it
+        _item(1, "Backlog"),
+        _item(99, "Done"),  # board has it, parked in Done
     ]
     issues_by_number = {1: _open_issue(1), 99: _open_issue(99)}
-    # 99 is on the board (even if mismatched state) — not flagged here.
+    # 99 is on the board — not flagged here.
     findings = mod.check_off_board_issues(items, issues_by_number)
     assert findings == []
-
-
-def test_format_closed_not_done_line_includes_propose_command() -> None:
-    """The render-site formatter names the remediation command so the groom
-    flow has a concrete next action to propose with per-item approval.
-
-    Format lives here, not in check_closed_not_done — so next sweep-check
-    that needs a Propose-style suffix can follow the same
-    detector-returns-data / renderer-formats-line split.
-    """
-    mod = import_sweep()
-    entry = {"number": 92, "current_status": "Backlog", "title": "Stuck"}
-    line = mod.format_closed_not_done_line(entry)
-    assert "jared set 92 Status Done" in line
-    assert "[Backlog]" in line
-    assert "Stuck" in line
 
 
 def test_check_doc_sync_gate_flags_code_only_pr() -> None:
@@ -727,14 +668,18 @@ def test_merge_open_with_closed_dedup_open_wins() -> None:
     """
     sweep = import_sweep()
 
+    # Open items come from Board.open_items() (warm/GraphQL path), which DOES
+    # populate content.state — and only ever with "OPEN" (the query filters to
+    # open issues). Closed-cache items are warmed from the cold-path
+    # `gh project item-list` subset, which omits content.state entirely.
     open_items = [
         {"content": {"number": 10, "state": "OPEN"}, "status": "In Progress"},
         {"content": {"number": 11, "state": "OPEN"}, "status": "Backlog"},
     ]
     closed_items = [
-        # #10 was reopened externally — stale closed entry should be dropped
-        {"content": {"number": 10, "state": "CLOSED"}, "status": "Done"},
-        {"content": {"number": 99, "state": "CLOSED"}, "status": "Done"},
+        # #10 was reopened externally — stale closed entry should be dropped.
+        {"content": {"number": 10}, "status": "Done"},
+        {"content": {"number": 99}, "status": "Done"},
     ]
 
     merged = sweep.merge_open_with_closed(open_items, closed_items)
@@ -778,8 +723,9 @@ def test_fetch_items_with_closed_cache_warm_hit_returns_merged(
     cache.set_closed_items(
         project_number=7,
         items=[
-            {"content": {"number": 50, "state": "CLOSED"}, "status": "Done"},
-            {"content": {"number": 51, "state": "CLOSED"}, "status": "Done"},
+            # Closed-cache shape: cold-path-derived, no content.state key.
+            {"content": {"number": 50}, "status": "Done"},
+            {"content": {"number": 51}, "status": "Done"},
         ],
         cache_dir=cache_dir,
     )
@@ -893,10 +839,12 @@ def test_fetch_items_with_closed_cache_cold_miss_warms_cache(
     )
     board = Board.from_path(board_md)
 
+    # Cold-path `gh project item-list` output: no content.state on any item
+    # (open or closed) — only the top-level Project `status` column.
     full_items = [
-        {"content": {"number": 70, "state": "OPEN"}, "status": "In Progress"},
-        {"content": {"number": 80, "state": "CLOSED"}, "status": "Done"},
-        {"content": {"number": 81, "state": "CLOSED"}, "status": "Done"},
+        {"content": {"number": 70}, "status": "In Progress"},
+        {"content": {"number": 80}, "status": "Done"},
+        {"content": {"number": 81}, "status": "Done"},
     ]
     patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
 
@@ -935,7 +883,8 @@ def test_fetch_items_with_closed_cache_falls_back_when_open_items_paginates(
     cache_dir = Path(os.environ["JARED_CACHE_DIR"])
     cache.set_closed_items(
         project_number=7,
-        items=[{"content": {"number": 50, "state": "CLOSED"}, "status": "Done"}],
+        # Closed-cache shape: cold-path-derived, no content.state key.
+        items=[{"content": {"number": 50}, "status": "Done"}],
         cache_dir=cache_dir,
     )
 
@@ -958,9 +907,10 @@ def test_fetch_items_with_closed_cache_falls_back_when_open_items_paginates(
     monkeypatch.setattr(Board, "open_items", fake_open_items)
 
     # Cold path returns the full board pull, then re-warms the cache.
+    # `gh project item-list` shape: no content.state key.
     full_items = [
-        {"content": {"number": 10, "state": "OPEN"}, "status": "In Progress"},
-        {"content": {"number": 50, "state": "CLOSED"}, "status": "Done"},
+        {"content": {"number": 10}, "status": "In Progress"},
+        {"content": {"number": 50}, "status": "Done"},
     ]
     patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
 
@@ -987,9 +937,10 @@ def test_fetch_items_with_closed_cache_respects_jared_no_cache(
 
     cache_dir = Path(os.environ["JARED_CACHE_DIR"])
     # Pre-seed the closed-cache; JARED_NO_CACHE should ignore it.
+    # Closed-cache shape: cold-path-derived, no content.state key.
     cache.set_closed_items(
         project_number=7,
-        items=[{"content": {"number": 999, "state": "CLOSED"}, "status": "Done"}],
+        items=[{"content": {"number": 999}, "status": "Done"}],
         cache_dir=cache_dir,
     )
 
@@ -1008,7 +959,8 @@ def test_fetch_items_with_closed_cache_respects_jared_no_cache(
 
     monkeypatch.setenv("JARED_NO_CACHE", "1")
 
-    full_items = [{"content": {"number": 1, "state": "OPEN"}, "status": "Backlog"}]
+    # Cold-path `gh project item-list` shape: no content.state key.
+    full_items = [{"content": {"number": 1}, "status": "Backlog"}]
     patch_gh(monkeypatch, stdout=json.dumps({"items": full_items}))
 
     items = sweep.fetch_items_with_closed_cache(board, "brockamer", "7")
