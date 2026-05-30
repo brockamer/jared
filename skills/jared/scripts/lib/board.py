@@ -974,6 +974,33 @@ def fetch_issue_state_rest(repo: str, number: int) -> tuple[str, str | None]:
     return _parse_issue_state_payload(data)
 
 
+def fetch_issue_body_rest(repo: str, number: int) -> str:
+    """Return an issue's Markdown body via REST, with ETag/conditional GET (#216).
+
+    The body-read twin of `fetch_issue_state_rest`: rides the same
+    `_fetch_issue_rest_with_etag` layer (#147) so a repeat read of an
+    unchanged body short-circuits to a 304 without spending REST `core`
+    points — most valuable for `archive-plan.py --scan`, which fans out
+    across many stable plan bodies. `JARED_NO_CACHE=1` bypasses the ETag
+    layer and falls back to the unconditional `gh api` flow.
+
+    Any failure mode (network error, 304 with an empty cache, missing body
+    field) resolves to "", matching the `data.get("body") or ""` contract
+    the batch call sites already relied on.
+    """
+    if os.environ.get("JARED_NO_CACHE") == "1":
+        try:
+            data = run_gh(["api", f"repos/{repo}/issues/{number}"])
+        except GhInvocationError:
+            return ""
+        return data.get("body") or ""
+
+    data = _fetch_issue_rest_with_etag(repo, number)
+    if data is None:
+        return ""
+    return data.get("body") or ""
+
+
 def _child_env() -> dict[str, str]:
     """Env for `gh` subprocess calls, with GH_TOKEN/GITHUB_TOKEN removed.
 

@@ -32,6 +32,9 @@ from typing import cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    fetch_issue_body_rest as board_fetch_issue_body_rest,
+)
+from lib.board import (
     fetch_issue_state_rest as board_fetch_issue_state_rest,
 )
 from lib.board import (
@@ -39,9 +42,6 @@ from lib.board import (
 )
 from lib.board import (
     parse_shipped_section as board_parse_shipped_section,
-)
-from lib.board import (
-    run_gh as board_run_gh,
 )
 from lib.board import (
     run_gh_raw as board_run_gh_raw,
@@ -66,11 +66,10 @@ def issue_state(repo: str, number: int) -> tuple[str, str | None]:
 
 
 def fetch_issue_body(repo: str, number: int) -> str:
-    # REST `core` bucket instead of graphql (#208); same pattern as
-    # lib.board.fetch_issue_state_rest. No new wrapper per acceptance criteria —
-    # inline at the call site keeps the seam visible.
-    data = board_run_gh(["api", f"repos/{repo}/issues/{number}"])
-    return data.get("body") or ""
+    # REST `core` bucket with ETag/conditional GET (#216): delegates to
+    # lib.board.fetch_issue_body_rest so the --scan fan-out across stable plan
+    # bodies can short-circuit repeat reads to a 304.
+    return cast("str", board_fetch_issue_body_rest(repo, number))
 
 
 def write_issue_body(repo: str, number: int, body: str) -> None:
