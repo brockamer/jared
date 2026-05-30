@@ -23,7 +23,7 @@ Every open item needs **Status** and **Priority**, plus any categorical fields t
 
 Status in particular is easy to miss: GitHub's auto-add-to-project workflow adds issues to the board without populating Status, so items can land with Priority set (because `jared-file` sets it explicitly) but Status=None. `scripts/sweep.py` flags both gaps.
 
-`scripts/sweep.py` also flags **closed items whose Status ≠ Done** — GitHub's auto-move on close sometimes fails, and stale board state accumulates. Move them to Done manually during the sweep.
+**Closed items whose Status ≠ Done** are surfaced by `jared summary` (and so every `/jared-start`) under a `Stuck closed (N):` heading — GitHub's auto-move on close sometimes fails, leaving an issue closed on GitHub but parked in Backlog / In Progress. The detector lists recently-closed issues and flags any whose Project Status isn't Done; move them to Done with the proposed `jared set <N> Status Done`. (This is the bounded recent-closed probe; sweep no longer carries its own duplicate scan — see #223.)
 
 ### 2. WIP
 
