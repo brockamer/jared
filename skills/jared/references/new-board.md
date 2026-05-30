@@ -63,7 +63,7 @@ Three close paths, one of them safe either way:
 | `gh issue close <N>` | **Yes** — no fallback |
 | PR merge with `Closes #N` | **Yes** — no fallback |
 
-If you run on a project with the workflow off, paths 2 and 3 silently leave items in their pre-close Status column (typically Backlog or In Progress) while GitHub reports them as closed. `sweep.py` / `/jared-groom` detect this (`check_closed_not_done`) and now propose `jared set <N> Status Done` per stuck item — the routine sweep drains the drift instead of just reporting it.
+If you run on a project with the workflow off, paths 2 and 3 silently leave items in their pre-close Status column (typically Backlog or In Progress) while GitHub reports them as closed. `jared summary` (and so every `/jared-start`) surfaces this drift under a `Stuck closed (N):` heading — it lists recently-closed issues and flags any whose project Status isn't Done, proposing `jared set <N> Status Done` per item.
 
 ### 3. Optional: scaffold Superpowers-style planning
 

@@ -59,13 +59,12 @@ def test_different_projects_use_separate_cache_files(tmp_path: Path) -> None:
 
 # ---------- Closed-items cache (#186) ----------
 #
-# Sweep needs Done + stuck-closed items in the snapshot to run
-# `check_off_board_issues` (state-agnostic intersection) and
-# `check_closed_not_done` (closed AND status != Done). A pure Done-only cache
-# makes stuck items invisible, so this cache holds ALL closed items with their
-# current Status field. Long TTL because the closed-item *set* is mostly
-# monotone; first-party Status mutations invalidate to catch the mutable cases
-# (close-into-Done, reopen, manual Status reset).
+# Sweep needs closed board items in the snapshot so `check_off_board_issues`
+# (a state-agnostic number intersection) doesn't false-positive an open repo
+# issue that's already on the board under a Done column. The cache holds the
+# closed subset with its current Status field. Long TTL because the closed-item
+# *set* is mostly monotone; first-party Status mutations invalidate to catch the
+# mutable cases (close-into-Done, reopen, manual Status reset).
 
 
 def test_get_closed_items_returns_none_when_no_cache_file(tmp_path: Path) -> None:
