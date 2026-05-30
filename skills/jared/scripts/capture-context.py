@@ -32,12 +32,13 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
-    run_gh as board_run_gh,
+    fetch_issue_body_rest as board_fetch_issue_body_rest,
 )
 from lib.board import (
     run_gh_raw as board_run_gh_raw,
@@ -54,11 +55,10 @@ SECTION_ORDER = [
 
 
 def fetch_body(repo: str, number: int) -> str:
-    # REST `core` bucket instead of graphql (#208); same pattern as
-    # lib.board.fetch_issue_state_rest. No new wrapper per acceptance criteria —
-    # inline at the call site keeps the seam visible.
-    data = board_run_gh(["api", f"repos/{repo}/issues/{number}"])
-    return data.get("body") or ""
+    # REST `core` bucket with ETag/conditional GET (#216): delegates to
+    # lib.board.fetch_issue_body_rest, the body-read twin of
+    # fetch_issue_state_rest, so repeat reads can short-circuit to a 304.
+    return cast("str", board_fetch_issue_body_rest(repo, number))
 
 
 def write_body(repo: str, number: int, body: str) -> None:
