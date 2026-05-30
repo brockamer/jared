@@ -235,9 +235,6 @@ Open items on board: 6
   docs/superpowers/plans/2026-05-03-89-shipped-section.md:
     all referenced issues closed ([89]) — propose archiving
 
-== Closed items not on Done ==
-  None
-
 Sweep complete. Advisory only — review and propose before applying.
 ```
 

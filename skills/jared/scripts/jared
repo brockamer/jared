@@ -1047,19 +1047,22 @@ def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
 def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, Any]]:
     """Stuck-closed drift detection for the open-only summary path (#185).
 
-    `check_closed_not_done` (lib.board) needs CLOSED items already in the
-    snapshot; that worked when summary pulled the full Done-inclusive
-    `board_items()`. The new `open_items()` path skips closed items, so
-    detection pivots to: list issues closed in the last `days`, probe
-    each one's project Status, flag anything that isn't on Done.
+    Detecting "closed on GitHub but Status != Done" needs the issue's
+    GitHub state, which the open-only `open_items()` path omits (and which
+    `gh project item-list` never populates — see #189/#223). So detection
+    works from the closed side instead: list issues closed in the last
+    `days`, probe each one's project Status, flag anything not on Done.
 
     Bounded lookback keeps cost proportional to recent-closure volume
-    (typically 5-20 per active board) rather than total Done count.
-    Drift older than the window is sweep's job — sweep still pulls the
-    full board and runs `check_closed_not_done` against it.
+    (typically 5-20 per active board) rather than total Done count. This
+    is now the only stuck-closed detector — the old item-snapshot scan
+    (`check_closed_not_done`) keyed on `content.state == "CLOSED"`, which
+    `gh project item-list` has never populated (the field was a mistaken
+    premise; #189). It was therefore a no-op in every architecture it
+    shipped in, and was retired in #223.
 
-    Returns the same `[{"number", "title", "current_status"}]` shape
-    `check_closed_not_done` returns, so the renderer is unchanged.
+    Returns a `[{"number", "title", "current_status"}]` shape, so the
+    renderer is unchanged.
 
     On `GhInvocationError` from the underlying `_fetch_recently_closed`
     (recent-closure count exceeds the cap on an exceptionally busy board),
