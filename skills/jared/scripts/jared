@@ -1056,8 +1056,10 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
     Bounded lookback keeps cost proportional to recent-closure volume
     (typically 5-20 per active board) rather than total Done count. This
     is now the only stuck-closed detector — the old item-snapshot scan
-    (`check_closed_not_done`) was a no-op once both fetch paths stopped
-    carrying `content.state`, and was retired in #223.
+    (`check_closed_not_done`) keyed on `content.state == "CLOSED"`, which
+    `gh project item-list` has never populated (the field was a mistaken
+    premise; #189). It was therefore a no-op in every architecture it
+    shipped in, and was retired in #223.
 
     Returns a `[{"number", "title", "current_status"}]` shape, so the
     renderer is unchanged.
