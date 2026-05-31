@@ -200,8 +200,6 @@ def create_single_select_field(project_id: str, name: str, options: list[str]) -
     if not options:
         raise RuntimeError(f"Can't create {name!r} field with zero options")
 
-    options_arg = json.dumps([{"name": o, "color": "GRAY", "description": ""} for o in options])
-
     query = """
     mutation($projectId: ID!, $name: String!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
       createProjectV2Field(input: {
@@ -220,24 +218,23 @@ def create_single_select_field(project_id: str, name: str, options: list[str]) -
       }
     }
     """
-    # Use board_run_gh directly (not board_run_graphql) because the options
-    # variable is a JSON-typed list — it must go through `-F` so gh parses it
-    # as a structured value. board_run_graphql's simple kwargs flag-picker
-    # sends non-primitive strings through `-f`, which would pass it as a raw
-    # string literal and fail the GraphQL type check.
+    # The options variable is a typed GraphQL list
+    # (`[ProjectV2SingleSelectFieldOptionInput!]!`). Passing it via `-F
+    # options=<json>` does NOT work: gh sends the JSON array as a string
+    # literal, which fails the variable's type check (#267). Instead, hand gh
+    # the whole {query, variables} envelope on stdin via `--input -`, so the
+    # list stays a list.
+    payload = {
+        "query": query,
+        "variables": {
+            "projectId": project_id,
+            "name": name,
+            "options": [{"name": o, "color": "GRAY", "description": ""} for o in options],
+        },
+    }
     result = board_run_gh(
-        [
-            "api",
-            "graphql",
-            "-f",
-            f"query={query}",
-            "-F",
-            f"projectId={project_id}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"options={options_arg}",
-        ]
+        ["api", "graphql", "--input", "-"],
+        input_text=json.dumps(payload),
     )
     field = result.get("data", {}).get("createProjectV2Field", {}).get("projectV2Field", {})
     if not field:
