@@ -161,10 +161,11 @@ Flow:
      ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root "$REPO_ROOT" --issue <N>
      ```
      Removes `<repo>/.jared/session-<N>.lock` so the next `/jared-start` doesn't see this session as a live sibling. Sibling sessions' locks (other issues) are left untouched.
-   - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the corresponding `feature/<N>-worktree` branch has merged into main, remove the worktree and delete the branch from the main checkout:
+   - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the session's `feature/<N>-<slug>` branch has merged into main, remove the worktree and delete the branch from the main checkout. Read the branch name from the worktree first — it's slugified from the issue title (#278), not a fixed string, so don't reconstruct it by hand:
      ```bash
+     BRANCH=$(git -C "<worktree-path>" rev-parse --abbrev-ref HEAD)
      git -C "$REPO_ROOT" worktree remove "<worktree-path>"
-     git -C "$REPO_ROOT" branch -d feature/<N>-worktree
+     git -C "$REPO_ROOT" branch -d "$BRANCH"
      ```
      The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around). The rule comes from operator feedback after the 2026-05-24 wrap of #227's session-1 left an orphan `~/Code/jared-227/` on disk — see the `[[feedback-wrap-remove-merged-worktree]]` user-memory note for the original framing.
 

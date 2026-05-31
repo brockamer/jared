@@ -45,11 +45,14 @@ Flow:
      --body-file <path or ->          # OR --body "<inline text>" \
      --priority <High|Medium|Low> \
      --status "<status column>" \
+     --no-milestone \                 # OR --milestone "<title>" — exactly one is mandatory (#238)
      --label <label> \
      --field "<Field Name>=<Option Name>"
    ```
 
-   `--status` defaults to `Backlog`. `--label` and `--field` are repeatable.
+   `--status` defaults to `Backlog`. Exactly one of `--milestone "<title>"`
+   or `--no-milestone` is mandatory — `jared file` exits 2 without one (#238).
+   `--label` and `--field` are repeatable.
    The CLI creates the issue, adds it to the project board, sets Priority
    + Status + every `--field`, and verifies the post-state before printing
    `OK: filed #N → <status>, Priority=<prio>`. Any failing step exits

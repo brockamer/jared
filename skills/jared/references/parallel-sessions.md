@@ -85,7 +85,10 @@ branch, and a commit from either side risks stealing the other's WIP.
 ```bash
 git fetch origin
 git worktree add ~/Code/<repo>-<issue> -b feature/<issue>-<slug> origin/main
-cd ~/Code/<repo>-<issue>
+# Don't rely on `cd` — the harness resets cwd to the repo root between Bash
+# calls (and env vars don't persist either). Prefix every op with the
+# absolute worktree path instead:
+git -C ~/Code/<repo>-<issue> status
 ```
 
 Each session gets its own working directory with its own HEAD while sharing
