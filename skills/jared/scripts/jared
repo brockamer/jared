@@ -1597,7 +1597,7 @@ def _cmd_wrap_state(args: argparse.Namespace) -> int:
             "pr",
             "view",
             "--json",
-            "number,mergeable,mergeStateStatus,state,statusCheckRollup",
+            "number,mergeable,mergeStateStatus,state,statusCheckRollup,reviewDecision",
             branch,
         ],
         capture_output=True,
@@ -1636,12 +1636,17 @@ def _cmd_wrap_state(args: argparse.Namespace) -> int:
         else:
             checks_status = "none"
 
+        # mergeStateStatus (CLEAN/BLOCKED/BEHIND/DIRTY/…) and reviewDecision
+        # (REVIEW_REQUIRED/APPROVED/CHANGES_REQUESTED/null) gate the merge even
+        # when mergeable=MERGEABLE — see decide_next_step (#285).
         pr_state = PrState(
             exists=True,
             pr_number=pr_payload.get("number"),
             checks_status=checks_status,  # type: ignore[arg-type]
             mergeable=mergeable,
             merged=(pr_payload.get("state") == "MERGED"),
+            merge_state_status=pr_payload.get("mergeStateStatus"),
+            review_decision=pr_payload.get("reviewDecision"),
         )
 
     print(decide_next_step(git_state, pr_state))
