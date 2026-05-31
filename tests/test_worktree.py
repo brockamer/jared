@@ -110,3 +110,43 @@ def test_create_worktree_at_orphan_path_raises(main_repo: Path, tmp_path: Path) 
     msg = str(exc_info.value)
     assert "not a registered worktree" in msg.lower() or "exists" in msg.lower()
     assert str(target) in msg
+
+
+def test_session_branch_cut_from_origin_main_after_fetch(tmp_path: Path) -> None:
+    """Regression for #283: a session branch must be cut from a freshly-fetched
+    origin/main, not stale local main. Squash-merge leaves local main carrying
+    zombie commits; cutting from local main rides them into every new session
+    branch. The fix fetches first, then bases the branch on origin/main.
+    """
+    # An upstream repo plays the role of `origin`.
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    git_cmd(upstream, "init", "-b", "main")
+    git_cmd(upstream, "config", "user.email", "u@example.com")
+    git_cmd(upstream, "config", "user.name", "u")
+    (upstream / "README.md").write_text("initial\n")
+    git_cmd(upstream, "add", "README.md")
+    git_cmd(upstream, "commit", "-m", "initial")
+
+    # Local clone — its origin/main tracking ref starts at 'initial'.
+    local = tmp_path / "local"
+    git_cmd(tmp_path, "clone", str(upstream), str(local))
+    git_cmd(local, "config", "user.email", "l@example.com")
+    git_cmd(local, "config", "user.name", "l")
+
+    # Upstream advances. Local main AND the un-fetched origin/main are now stale.
+    (upstream / "feature.txt").write_text("upstream advance\n")
+    git_cmd(upstream, "add", "feature.txt")
+    git_cmd(upstream, "commit", "-m", "advance origin/main")
+    upstream_tip = git_cmd(upstream, "rev-parse", "main")
+
+    target = tmp_path / "local-283"
+    worktree.create_worktree(
+        repo=local, target=target, branch="feature/283-test", base="origin/main", fetch=True
+    )
+
+    # The branch was cut from the freshly-fetched origin/main tip, not stale local main.
+    branch_tip = git_cmd(local, "rev-parse", "feature/283-test")
+    assert branch_tip == upstream_tip
+    # The upstream-only commit rode in — proves the fetch ran before the worktree add.
+    assert (target / "feature.txt").exists()
