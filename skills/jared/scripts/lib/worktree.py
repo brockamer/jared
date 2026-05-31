@@ -66,8 +66,16 @@ def list_worktrees(repo: Path) -> list[WorktreeEntry]:
     return entries
 
 
-def create_worktree(repo: Path, target: Path, branch: str, base: str = "main") -> Path:
+def create_worktree(
+    repo: Path, target: Path, branch: str, base: str = "origin/main", fetch: bool = False
+) -> Path:
     """Create a new worktree at `target` checked out on a fresh `branch`.
+
+    `base` defaults to `origin/main` so session branches are cut from the remote
+    tip, not local main — squash-merge leaves local main carrying zombie commits
+    that would otherwise ride into every new session branch (#283). When `fetch`
+    is true, the base's remote is refreshed before the worktree add so the ref is
+    current; callers basing off a remote ref should pass `fetch=True`.
 
     Handles collisions per spec D5:
     - Path is already a registered worktree → return target (resuming).
@@ -85,6 +93,19 @@ def create_worktree(repo: Path, target: Path, branch: str, base: str = "main") -
             f"  remediation: remove the directory (`rm -rf {target}`) and re-run, "
             f"or run `git -C {repo} worktree remove {target}` if it was once registered."
         )
+
+    if fetch:
+        # Refresh the base ref before cutting the branch. Without this, even
+        # base=origin/main is only as current as the last fetch (#283).
+        remote = base.split("/", 1)[0] if "/" in base else None
+        fetch_cmd = ["git", "-C", str(repo), "fetch", *([remote] if remote else [])]
+        fetch_result = subprocess.run(fetch_cmd, capture_output=True, text=True)
+        if fetch_result.returncode != 0:
+            raise WorktreeError(
+                f"git fetch failed before worktree add:\n"
+                f"  command: {' '.join(fetch_cmd)}\n"
+                f"  stderr: {fetch_result.stderr.strip()}"
+            )
 
     cmd = ["git", "-C", str(repo), "worktree", "add", str(target), "-b", branch, base]
     result = subprocess.run(cmd, capture_output=True, text=True)

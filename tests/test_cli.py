@@ -6,7 +6,7 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import graphql_item_response, import_cli, patch_gh, patch_gh_by_arg
+from tests.conftest import git_cmd, graphql_item_response, import_cli, patch_gh, patch_gh_by_arg
 
 CLI = Path(__file__).parents[1] / "skills" / "jared" / "scripts" / "jared"
 
@@ -249,6 +249,13 @@ def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
 def test_worktree_add_creates_at_sibling_path(
     main_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # worktree-add now fetches origin and bases the new branch on origin/main
+    # (#283), so the repo needs a reachable origin carrying main.
+    origin = main_repo.parent / "origin.git"
+    git_cmd(main_repo, "init", "--bare", str(origin))
+    git_cmd(main_repo, "remote", "add", "origin", str(origin))
+    git_cmd(main_repo, "push", "origin", "main")
+
     mod = import_cli()
     result = mod.main(
         [
