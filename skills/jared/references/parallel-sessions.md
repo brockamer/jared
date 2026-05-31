@@ -101,13 +101,57 @@ inside the new worktree before running tests.
 
 ## The wrap back-end
 
-`/jared-wrap` runs the full commit → push → PR create → mergeable check → confirm merge → cleanup sequence after Session notes are posted. The operator confirms only the merge (the irreversible step against protected `main`).
+`/jared-wrap` runs the full commit → integrate `main` → push → PR create → mergeable check → confirm merge → cleanup sequence after Session notes are posted. The operator confirms only the merge (the irreversible step against protected `main`).
 
 Idempotency: each step inspects current state via `jared wrap-state`. Re-running `/jared-wrap` after a failure or interruption picks up at the current state — no in-flight lock, no manual recovery sequencing. The state IS the lock.
 
 Concurrent merge safety: two sessions reaching the merge step around the same time both re-check `mergeable` immediately before calling `gh pr merge`. GitHub's PR-merge API is atomic; the second call rejects with a not-mergeable error if the first's merge created a conflict. No Jared-side serialization is needed.
 
 The back-end flow does not auto-commit. If the working tree is dirty at wrap time, wrap pauses and asks for a commit message — your commit discipline (phase-numbered prefixes, "why not what" bodies) is preserved.
+
+## Integrate `main` before the PR
+
+Parallel sessions branch from the same `origin/main` and then diverge. By
+the time the second session wraps, `main` has usually moved — the first
+session's work landed. The wrap back-end therefore folds `main` into the
+branch (`git fetch && git merge --no-edit origin/main`) *before* pushing or
+opening the PR, not after GitHub reports the PR unmergeable.
+
+Two distinct conflict classes motivate this, and integrating early addresses
+both:
+
+- **Spurious (formatting/whitespace).** A whole-file `ruff format` run
+  reformats lines *outside* your diff — a comprehension collapsed to one
+  line, an import reordered. If the other branch reformatted the same line
+  in a different surrounding context, the two diverge and git flags a
+  conflict on code neither session logically touched. Integrating `main`
+  *before* you format means you format on top of `main`'s canonical form and
+  produce the identical output — the divergence never arises. This is the
+  common, two-minute-to-resolve class, and integrating early eliminates it
+  rather than just relocating it.
+- **Genuine (same logic).** Two sessions edited the same function, the same
+  argparse block, the shared import list, or the same `lib/board.py` helper.
+  Git genuinely can't reconcile them. Integrating early doesn't *prevent*
+  this, but it surfaces it in the session that still holds the context to
+  resolve it well — far better than a terse "unmergeable" discovered at
+  merge time, after the PR exists and the reasoning has gone cold.
+
+**Merge, not rebase.** The branch may already be pushed (wrap is
+idempotent and re-runnable), so a rebase would force a force-push and risk
+the other session's view of a shared branch. A merge commit is safe and
+consistent with the concurrent-merge-safety model above.
+
+### Reducing the genuine class is a structural problem, not a wrap problem
+
+Integrating early surfaces genuine conflicts earlier; it can't stop two
+sessions from colliding in a hot file. The dominant driver is the
+`skills/jared/scripts/jared` CLI monolith (and, secondarily, `lib/board.py`):
+nearly every feature edits it, so two unrelated issues routinely both touch
+it. The remedy is **opportunistic extraction**, not a refactor project: when
+a session substantially edits one region (a subcommand's `_cmd_*` handler and
+its argparse block), lift *that* region into a focused module as part of that
+issue's work. The monolith shrinks where it's hottest, with no dedicated
+big-bang split — which would itself be the kind of sprawl this project avoids.
 
 ## Triggers for the worktree default
 

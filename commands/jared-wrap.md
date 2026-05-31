@@ -83,6 +83,17 @@ Flow:
 
    When the guard fires, the lock-clear still runs (the session may have written one) and the worktree-removal bullet is a no-op (worktrees are never created against `main`).
 
+   **Integrate `main` before the PR.** Parallel sessions diverge from `main` while they work. Before pushing or opening the PR, fold the current `main` into the branch and resolve *here* — in the session that has full context — rather than discovering it at merge time:
+
+   ```bash
+   git fetch origin && git merge --no-edit origin/main
+   ```
+
+   - **Clean merge:** re-run the formatter and tests (`ruff format . && ruff check . && pytest`), then enter the loop. Formatting *on top of* `main` is the point — it collapses spurious whitespace/format conflicts (a line you never logically touched, reformatted differently on each branch) before they can reach the PR.
+   - **Conflict:** resolve in place, re-run format + tests, and `git commit` the merge. Genuine logic collisions (two sessions editing the same function) surface here, in-session, instead of as a terse "unmergeable" after the PR already exists.
+
+   Merge, not rebase — the branch may already be pushed, and a merge avoids the force-push a rebase would require. See `references/parallel-sessions.md` § "Integrate `main` before the PR" for the rationale and the two conflict classes this addresses.
+
    Loop:
 
    ```bash
@@ -109,7 +120,7 @@ Flow:
 
    - **`surface_failure`** (PR exists, checks failed): Print the failed check names from `gh pr checks $PR --json`. Exit the loop. Lock-clear runs.
 
-   - **`surface_conflict`** (checks green but not mergeable): Print *"PR #N: conflict with main. Rebase in this worktree (`git fetch && git rebase origin/main`), resolve, push, and re-run `/jared-wrap`."* Exit the loop. Lock-clear runs.
+   - **`surface_conflict`** (checks green but not mergeable): Print *"PR #N: conflict with main. Integrate in this worktree (`git fetch && git merge origin/main`), resolve, push, and re-run `/jared-wrap`."* Exit the loop. Lock-clear runs. (This is the fallback when the integrate-before-PR step above was skipped or `main` advanced after it ran — merge, not rebase, since the branch is already pushed.)
 
    - **`confirm_merge`** (checks green, mergeable): Render the confirm-merge block:
 
