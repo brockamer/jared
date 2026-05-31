@@ -12,16 +12,21 @@ per-flag type guessing.
 """
 
 import json
+from typing import Any
+
+import pytest
 
 from tests.conftest import import_bootstrap
 
 
-def test_create_single_select_field_sends_options_as_typed_list(monkeypatch) -> None:
+def test_create_single_select_field_sends_options_as_typed_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     mod = import_bootstrap()
 
     calls: list[tuple[list[str], str | None]] = []
 
-    def fake_run_gh(args, *, input_text=None, **kw):
+    def fake_run_gh(args: list[str], *, input_text: str | None = None, **kw: Any) -> dict[str, Any]:
         calls.append((args, input_text))
         return {
             "data": {
@@ -66,7 +71,9 @@ def test_create_single_select_field_sends_options_as_typed_list(monkeypatch) -> 
     assert field["id"] == "FIELD_STATUS"
 
 
-def test_create_single_select_field_rejects_empty_options(monkeypatch) -> None:
+def test_create_single_select_field_rejects_empty_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Guard predates #267 and must survive the rewrite."""
     mod = import_bootstrap()
     monkeypatch.setattr(mod, "board_run_gh", lambda *a, **k: {})
