@@ -63,7 +63,7 @@ Flow:
      --title "$TITLE"
    ```
 
-   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from `origin/main`, and emits the target path on stdout. CWD shifts to the worktree for the remainder of the session. Passing `--title` lets `worktree-add` slugify the branch name without a second `gh` round-trip; if omitted (e.g. manual invocation), the CLI fetches the title itself and falls back to `feature/<N>-worktree` when none can be derived.
+   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from `origin/main`, and emits the target path on stdout. **CWD does not shift to the worktree** — the harness resets the shell's working directory to the repo root on every Bash call, and `worktree-add` is a Python subprocess that cannot move the parent shell's cwd anyway. Capture the emitted path and prefix every subsequent git/gh op with `git -C <abs-worktree-path>` (or pass an absolute path); do not rely on a persistent `cd`, and do not reach for a `WORKTREE` env var either — env vars don't survive across Bash calls. Passing `--title` lets `worktree-add` slugify the branch name without a second `gh` round-trip; if omitted (e.g. manual invocation), the CLI fetches the title itself and falls back to `feature/<N>-worktree` when none can be derived.
 
    **In all PROCEED cases:** write the session lock:
 
