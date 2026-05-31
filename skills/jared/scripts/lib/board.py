@@ -382,10 +382,14 @@ class Board:
         words = [w.strip() for w in bullet_match.group("words").split(",")]
         return frozenset(w for w in words if w)
 
-    def run_gh(self, args: list[str], *, cache: str | None = None, input_text: str | None = None) -> Any:
+    def run_gh(
+        self, args: list[str], *, cache: str | None = None, input_text: str | None = None
+    ) -> Any:
         return run_gh(args, cache=cache, input_text=input_text)
 
-    def run_gh_raw(self, args: list[str], *, cache: str | None = None, input_text: str | None = None) -> str:
+    def run_gh_raw(
+        self, args: list[str], *, cache: str | None = None, input_text: str | None = None
+    ) -> str:
         return run_gh_raw(args, cache=cache, input_text=input_text)
 
     def board_items(self) -> list[dict[str, Any]]:

@@ -177,6 +177,15 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
     return ans.startswith("y")
 
 
+def parse_work_streams(raw: str) -> list[str]:
+    """Split a comma-separated work-stream string into a clean list.
+
+    Trims whitespace and drops empty entries, so `"A, B ,"` → `["A", "B"]`.
+    Shared by the interactive prompt and the `--work-streams` flag (#268).
+    """
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
 def prompt_work_streams() -> list[str]:
     print()
     print("The Work Stream field has no standard options — you define them per project.")
@@ -186,7 +195,7 @@ def prompt_work_streams() -> list[str]:
     print("  - House renovation: Demo, Rough-in, Finish")
     print()
     raw = input("Enter work streams as a comma-separated list: ").strip()
-    streams = [s.strip() for s in raw.split(",") if s.strip()]
+    streams = parse_work_streams(raw)
     if not streams:
         print("  (No work streams entered — you can add them later.)")
     return streams
@@ -639,7 +648,7 @@ def render_doc(
 # ---------- Main ----------
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--url", required=True, help="GitHub Project v2 URL")
     parser.add_argument(
@@ -664,6 +673,23 @@ def main() -> int:
         action="store_true",
         help="Skip prompts (for automation)",
     )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Auto-confirm prompts and create/replace fields without asking "
+        "(usable when stdin is not a terminal, e.g. from Claude Code)",
+    )
+    parser.add_argument(
+        "--work-streams",
+        help="Comma-separated work-stream names, supplied non-interactively "
+        "(e.g. --work-streams 'Backend,Frontend,Infra'). Skips the prompt.",
+    )
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     try:
@@ -733,13 +759,22 @@ def main() -> int:
     if not work_stream:
         missing.append(("Work Stream", None))  # Prompt for options
 
-    if missing and not args.no_create and not args.non_interactive:
+    supplied_streams = parse_work_streams(args.work_streams) if args.work_streams else None
+
+    if missing and not args.no_create and (args.yes or not args.non_interactive):
         print()
         print(f"Missing standard fields: {[m[0] for m in missing]}")
-        if prompt_yes_no("Create them now?", default=True):
+        # --yes short-circuits the prompt so input() is never reached when
+        # stdin is not a terminal (#268).
+        if args.yes or prompt_yes_no("Create them now?", default=True):
             for name, options in missing:
-                if options is None:
-                    options = prompt_work_streams()
+                if options is None:  # Work Stream — needs user-supplied options
+                    if supplied_streams is not None:
+                        options = supplied_streams
+                    elif args.yes:
+                        options = []  # none supplied non-interactively → skip below
+                    else:
+                        options = prompt_work_streams()
                 if not options:
                     print(f"  Skipping {name} — no options provided")
                     continue
