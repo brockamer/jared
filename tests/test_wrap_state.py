@@ -23,6 +23,8 @@ def _pr(
     checks: CheckStatus = "none",
     mergeable: bool | None = None,
     merged: bool = False,
+    merge_state_status: str | None = None,
+    review_decision: str | None = None,
 ) -> PrState:
     return PrState(
         exists=exists,
@@ -30,6 +32,8 @@ def _pr(
         checks_status=checks,
         mergeable=mergeable,
         merged=merged,
+        merge_state_status=merge_state_status,
+        review_decision=review_decision,
     )
 
 
@@ -79,4 +83,76 @@ def test_decide_dirty_tree_takes_precedence_over_pr_state() -> None:
             _pr(exists=True, checks="passed", mergeable=True),
         )
         == "commit"
+    )
+
+
+def test_decide_review_required_returns_blocked_on_review() -> None:
+    """reviewDecision=REVIEW_REQUIRED gates ahead of confirm_merge, even though
+    GitHub reports the PR mergeable=True (the MERGEABLE-but-unmergeable trap)."""
+    assert (
+        decide_next_step(
+            _git(),
+            _pr(exists=True, checks="passed", mergeable=True, review_decision="REVIEW_REQUIRED"),
+        )
+        == "blocked_on_review"
+    )
+
+
+def test_decide_review_required_with_none_checks_still_blocks() -> None:
+    """The live scenario: a no-CI PR (checks='none') blocked by required review
+    must NOT be silently confirmed as if checks passed."""
+    assert (
+        decide_next_step(
+            _git(),
+            _pr(exists=True, checks="none", mergeable=True, review_decision="REVIEW_REQUIRED"),
+        )
+        == "blocked_on_review"
+    )
+
+
+def test_decide_merge_state_blocked_returns_blocked_on_review() -> None:
+    """mergeStateStatus=BLOCKED (branch protection) is unmergeable even when
+    mergeable=True — surface it rather than returning confirm_merge."""
+    assert (
+        decide_next_step(
+            _git(),
+            _pr(exists=True, checks="passed", mergeable=True, merge_state_status="BLOCKED"),
+        )
+        == "blocked_on_review"
+    )
+
+
+def test_decide_merge_state_behind_returns_update_branch() -> None:
+    """mergeStateStatus=BEHIND means the branch trails base; it needs an
+    update-branch step, not a conflict or a merge."""
+    assert (
+        decide_next_step(
+            _git(),
+            _pr(exists=True, checks="passed", mergeable=True, merge_state_status="BEHIND"),
+        )
+        == "update_branch"
+    )
+
+
+def test_decide_none_checks_all_clear_returns_confirm_merge() -> None:
+    """No-CI repos (checks='none') still merge when nothing else blocks —
+    jared itself relies on this. 'none' is no longer conflated with a passed
+    label, but it does not block an otherwise-clean merge."""
+    assert (
+        decide_next_step(
+            _git(),
+            _pr(exists=True, checks="none", mergeable=True),
+        )
+        == "confirm_merge"
+    )
+
+
+def test_decide_review_approved_returns_confirm_merge() -> None:
+    """A satisfied review (APPROVED) does not block the merge."""
+    assert (
+        decide_next_step(
+            _git(),
+            _pr(exists=True, checks="passed", mergeable=True, review_decision="APPROVED"),
+        )
+        == "confirm_merge"
     )

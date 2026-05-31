@@ -100,7 +100,7 @@ Flow:
    STEP=$(${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared wrap-state)
    ```
 
-   Each iteration of the loop runs the CLI to determine the next step, then executes that step. Loop exits on `cleanup` (which runs the lock-clear + worktree-remove block below), or when the operator declines a confirm prompt, or when a non-actionable step (`wait_checks`, `surface_failure`, `surface_conflict`) is returned.
+   Each iteration of the loop runs the CLI to determine the next step, then executes that step. Loop exits on `cleanup` (which runs the lock-clear + worktree-remove block below), or when the operator declines a confirm prompt, or when a non-actionable step (`wait_checks`, `surface_failure`, `surface_conflict`, `update_branch`, `blocked_on_review`) is returned. `update_branch` exits-then-re-run (like `surface_conflict` — you act, push, and re-run `/jared-wrap`); `blocked_on_review` is terminal for the loop (it either ends in an operator-confirmed `--admin` merge or a "get a review" exit).
 
    **Step actions:**
 
@@ -120,7 +120,15 @@ Flow:
 
    - **`surface_failure`** (PR exists, checks failed): Print the failed check names from `gh pr checks $PR --json`. Exit the loop. Lock-clear runs.
 
+   - **`update_branch`** (`mergeStateStatus=BEHIND` — branch trails base): The branch is cleanly behind `main` (no conflict, just out of date — `main` advanced after the last push). Integrate and re-push: `git fetch origin && git merge --no-edit origin/main`, re-run format + tests, `git push`, then re-run `/jared-wrap`. Same merge-not-rebase rule as the integrate-before-PR step. Exit the loop. Lock-clear runs.
+
    - **`surface_conflict`** (checks green but not mergeable): Print *"PR #N: conflict with main. Integrate in this worktree (`git fetch && git merge origin/main`), resolve, push, and re-run `/jared-wrap`."* Exit the loop. Lock-clear runs. (This is the fallback when the integrate-before-PR step above was skipped or `main` advanced after it ran — merge, not rebase, since the branch is already pushed.)
+
+   - **`blocked_on_review`** (`reviewDecision=REVIEW_REQUIRED`, or `mergeStateStatus=BLOCKED`): The PR is reported `mergeable` but branch protection won't let it merge — typically a solo-author PR needing a review that will never arrive, or a protected-branch block. GitHub reports this as `MERGEABLE`, which is why the loop used to mis-route it to `confirm_merge`. Print *"PR #N: blocked by required review / branch protection."* Then check `docs/project-board.md` § `## Jared config` for an `admin-merge` sanction:
+     - **If `- admin-merge: <strategy>` is present** (e.g. `--merge`): offer the operator-confirmed escape — render a confirm block, and on `y` run `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection; it is offered *only* because the board doc explicitly sanctions it, and run *only* on an explicit operator `y`. The strategy comes from the board doc (not hardcoded), so the sanction also pins `--merge` vs `--squash`.
+     - **If absent:** print *"No admin-merge sanction in the board doc — get a review, or add `- admin-merge: --merge` to `## Jared config` to sanction the escape."* Do not offer `--admin`.
+
+     Exit the loop. Lock-clear runs.
 
    - **`confirm_merge`** (checks green, mergeable): Render the confirm-merge block:
 
@@ -128,11 +136,13 @@ Flow:
      PR #<N>: <title>
        branch:     <branch>
        mergeable:  yes
-       checks:     <count> passed
+       checks:     <count> passed | none (no CI checks ran)
        sibling:    <enumerate other session locks if present, with their branches>
 
      Merge? (y / edit / no)
      ```
+
+     Render the `checks:` line honestly from `checks_status`: `<count> passed` when checks ran and passed, or `none (no CI checks ran)` when the status-check rollup was empty — never label an empty rollup as "passed" (#285).
 
      On `y`: run `gh pr merge <N> --merge --delete-branch`. On success, loop continues (next state will be `cleanup`). On failure (e.g., GitHub rejected as not-mergeable since the last check), surface the gh error and exit the loop.
 
