@@ -36,7 +36,7 @@ Flow:
 
    ```bash
    GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
-   REPO_ROOT=$(dirname "$GIT_COMMON_DIR")  # handles both main checkout and worktrees
+   REPO_ROOT=$(realpath "$(dirname "$GIT_COMMON_DIR")")
    ```
 
    Walk the active locks and decide the action via the Python lib:

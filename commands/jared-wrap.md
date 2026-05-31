@@ -136,7 +136,7 @@ Flow:
    - Clear this session's presence lock. The lock is keyed by the issue this session was started against (`<N>` = the `/jared-start` argument), not by PID — PID-keyed locks were stale-on-arrival because the writing CLI subprocess exits immediately (#259):
      ```bash
      GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
-     REPO_ROOT=$(dirname "$GIT_COMMON_DIR")
+     REPO_ROOT=$(realpath "$(dirname "$GIT_COMMON_DIR")")
      ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root "$REPO_ROOT" --issue <N>
      ```
      Removes `<repo>/.jared/session-<N>.lock` so the next `/jared-start` doesn't see this session as a live sibling. Sibling sessions' locks (other issues) are left untouched.

@@ -56,6 +56,28 @@ def test_write_lock_with_solo_session(tmp_path: Path) -> None:
     assert loaded.worktree_path is None
 
 
+def test_write_lock_with_relative_repo_root_anchors_at_true_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for #284: in the main checkout REPO_ROOT collapses to a relative
+    '.', so the lock trio receives a relative root. The lock must still land `.jared/`
+    at the true (absolute) repo root — a cwd-relative lock breaks the cross-session
+    sibling detection the whole multi-session discipline rests on.
+    """
+    monkeypatch.chdir(tmp_path)
+    lock = session_lock.Lock(
+        pid=4242,
+        started="2026-05-30T15:00:00Z",
+        session=1,
+        worktree_path=None,
+        issue=284,
+    )
+    # The bug shape: caller passes a relative root (REPO_ROOT='.').
+    path = session_lock.write_lock(repo_root=Path("."), lock=lock)
+    assert path.is_absolute()
+    assert path == tmp_path.resolve() / ".jared" / "session-284.lock"
+
+
 def test_is_alive_returns_true_for_current_process() -> None:
     assert session_lock.is_alive(os.getpid()) is True
 

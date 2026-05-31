@@ -1442,7 +1442,7 @@ def _render_refusal_message(
 
 def _cmd_session_resolve(args: argparse.Namespace) -> int:
     """Walk active locks, resolve the action for the supplied flags, print result."""
-    repo_root = Path(args.repo_root)
+    repo_root = Path(args.repo_root).resolve()
     siblings = session_lock.list_active_locks(repo_root)
     flags = session_lock.Flags(session=args.session, no_worktree=args.no_worktree)
     action = session_lock.resolve_action(siblings=siblings, flags=flags)
@@ -1457,7 +1457,7 @@ def _cmd_session_lock_write(args: argparse.Namespace) -> int:
     """Write a lock file for this PID."""
     import datetime
 
-    repo_root = Path(args.repo_root)
+    repo_root = Path(args.repo_root).resolve()
     started = (
         datetime.datetime.now(datetime.timezone.utc)
         .isoformat(timespec="seconds")
@@ -1476,7 +1476,7 @@ def _cmd_session_lock_write(args: argparse.Namespace) -> int:
 
 def _cmd_session_lock_clear(args: argparse.Namespace) -> int:
     """Clear this issue's lock file."""
-    session_lock.clear_lock(repo_root=Path(args.repo_root), issue=args.issue)
+    session_lock.clear_lock(repo_root=Path(args.repo_root).resolve(), issue=args.issue)
     return 0
 
 
