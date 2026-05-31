@@ -33,6 +33,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
+    run_gh,
 )
 from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
 from lib import worktree as _worktree  # type: ignore[import-not-found]  # noqa: E402
@@ -384,12 +385,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     wa.add_argument("--repo-root", required=True, help="Path to the main checkout.")
-    wa.add_argument("--issue", type=int, required=True, help="Issue number — used to name the worktree.")
+    wa.add_argument(
+        "--issue", type=int, required=True, help="Issue number — used to name the worktree."
+    )
     wa.add_argument(
         "--session",
         type=int,
         default=None,
         help="Session index (accepted for forward-compat; currently unused).",
+    )
+    wa.add_argument(
+        "--title",
+        default=None,
+        help=(
+            "Issue title to slugify into the branch name, skipping the gh fetch. "
+            "jared-start threads this through from the title it already has."
+        ),
     )
     wa.set_defaults(func=_cmd_worktree_add)
 
@@ -550,9 +561,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
     if not args.no_milestone:
         # Query params on the URL — `gh api -f key=value` is a request body
         # field, and on /milestones a body flips GET-list into POST-create.
-        milestones = board.run_gh(
-            ["api", f"repos/{board.repo}/milestones?state=open&per_page=100"]
-        )
+        milestones = board.run_gh(["api", f"repos/{board.repo}/milestones?state=open&per_page=100"])
         # Defensive: REST returns a list; an empty/missing payload is treated
         # as "no open milestones" rather than crashing on attribute access.
         open_titles = [
@@ -964,9 +973,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
 
     workstreams = _count_workstreams(in_progress)
     if workstreams < len(in_progress):
-        in_progress_header = (
-            f"In Progress ({workstreams} workstreams · {len(in_progress)} items):"
-        )
+        in_progress_header = f"In Progress ({workstreams} workstreams · {len(in_progress)} items):"
     else:
         in_progress_header = f"In Progress ({len(in_progress)}):"
 
@@ -1447,9 +1454,7 @@ def _render_refusal_message(
         # logic in resolve_action), render that solo sibling rather than the
         # arbitrary first entry — the operator needs to see the actual trap shape.
         sib = next((s for s in siblings if s.session is None), siblings[0])
-        mode = (
-            f"session-{sib.session}" if sib.session is not None else "solo (on shared .git/HEAD)"
-        )
+        mode = f"session-{sib.session}" if sib.session is not None else "solo (on shared .git/HEAD)"
         print(
             f"ERROR: another active jared session detected.\n"
             f"  Sibling: PID {sib.pid}, started {sib.started}, issue #{sib.issue}\n"
@@ -1503,12 +1508,40 @@ def _cmd_session_lock_clear(args: argparse.Namespace) -> int:
     return 0
 
 
+def _slugify(title: str, max_len: int = 50) -> str:
+    """Lowercase, hyphenate, and trim a title into a git-branch-safe slug.
+
+    Collapses any run of non-alphanumerics to a single hyphen, strips leading
+    and trailing hyphens, and truncates at `max_len` without leaving a dangling
+    hyphen. Returns "" for an empty or punctuation-only title, which callers
+    treat as "no slug" and fall back to.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if len(slug) > max_len:
+        slug = slug[:max_len].rstrip("-")
+    return slug
+
+
+def _resolve_worktree_slug(args: argparse.Namespace) -> str:
+    """Pick the branch slug: an explicit --title (threaded by jared-start),
+    else the fetched issue title; fall back to "worktree" when neither yields
+    a usable slug."""
+    if args.title:
+        return _slugify(args.title) or "worktree"
+    try:
+        data = run_gh(["issue", "view", str(args.issue), "--json", "title"])
+        slug = _slugify((data or {}).get("title") or "")
+    except (GhInvocationError, OSError):
+        slug = ""
+    return slug or "worktree"
+
+
 def _cmd_worktree_add(args: argparse.Namespace) -> int:
     """Create a worktree at <parent-of-repo>/<repo-basename>-<issue>/ on a fresh branch."""
     repo_root = Path(args.repo_root).resolve()
     repo_basename = repo_root.name
     target = repo_root.parent / f"{repo_basename}-{args.issue}"
-    branch = f"feature/{args.issue}-worktree"
+    branch = f"feature/{args.issue}-{_resolve_worktree_slug(args)}"
     try:
         created = _worktree.create_worktree(
             repo=repo_root, target=target, branch=branch, base="origin/main", fetch=True
@@ -1668,9 +1701,7 @@ def _cmd_propose_partition(args: argparse.Namespace) -> int:
     )
     print()
     for n in range(1, K + 1):
-        session_assignments = [
-            a for a in proposal.keep + proposal.add if a.session == n
-        ]
+        session_assignments = [a for a in proposal.keep + proposal.add if a.session == n]
         print(f"session-{n} (proposing {len(session_assignments)} items):")
         for a in session_assignments:
             verb = "keep" if a in proposal.keep else "add"

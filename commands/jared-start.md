@@ -55,13 +55,15 @@ Flow:
    **On PROCEED_MULTI:** create the worktree before continuing:
 
    ```bash
+   TITLE=$(gh issue view <N> --json title -q .title)
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared worktree-add \
      --repo-root "$REPO_ROOT" \
      --issue <N> \
-     --session "$SESSION_FLAG"
+     --session "$SESSION_FLAG" \
+     --title "$TITLE"
    ```
 
-   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from `origin/main`, and emits the target path on stdout. CWD shifts to the worktree for the remainder of the session.
+   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from `origin/main`, and emits the target path on stdout. CWD shifts to the worktree for the remainder of the session. Passing `--title` lets `worktree-add` slugify the branch name without a second `gh` round-trip; if omitted (e.g. manual invocation), the CLI fetches the title itself and falls back to `feature/<N>-worktree` when none can be derived.
 
    **In all PROCEED cases:** write the session lock:
 
