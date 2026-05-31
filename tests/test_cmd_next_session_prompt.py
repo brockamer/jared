@@ -342,8 +342,9 @@ def test_next_session_prompt_session_flag_with_no_matches_renders_empty_marker(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """--session N with zero matching items prints an explicit empty marker
-    instead of falling through to unlabeled items."""
+    """--session N with zero matching items in EITHER Up Next or Backlog
+    prints the combined empty marker instead of falling through to
+    unlabeled items."""
     board_md = write_minimal_board(tmp_path)
     patch_gh_multi(
         monkeypatch,
@@ -359,5 +360,102 @@ def test_next_session_prompt_session_flag_with_no_matches_renders_empty_marker(
     out = capsys.readouterr().out
 
     assert rc == 0
-    assert "(none labeled session-1)" in out
+    assert "(none labeled session-1 in Up Next or Backlog)" in out
     assert "#300" not in out  # no silent fall-through
+
+
+def test_next_session_prompt_session_flag_surfaces_backlog_staged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--session N surfaces session-N-labeled Backlog items under a distinct
+    `## Session-N staged` subsection, kept separate from the Up Next
+    recommendation. Other sessions' Backlog items are excluded (#286)."""
+    board_md = write_minimal_board(tmp_path)
+    # Four session-1 Backlog items — exceeds Up Next's [:3] cap on purpose:
+    # the staged subsection must NOT truncate, since hiding staged work is
+    # the exact bug this issue fixes.
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 100, "title": "Session-1 up next", "state": "OPEN"},
+            {"number": 400, "title": "Session-1 staged A", "state": "OPEN"},
+            {"number": 401, "title": "Session-1 staged B", "state": "OPEN"},
+            {"number": 402, "title": "Session-1 staged C", "state": "OPEN"},
+            {"number": 403, "title": "Session-1 staged D", "state": "OPEN"},
+            {"number": 500, "title": "Session-2 staged in backlog", "state": "OPEN"},
+        ],
+        statuses={
+            100: ("Up Next", "High"),
+            400: ("Backlog", "Medium"),
+            401: ("Backlog", "Medium"),
+            402: ("Backlog", "Medium"),
+            403: ("Backlog", "Medium"),
+            500: ("Backlog", "Medium"),
+        },
+        labels_by_number={
+            100: ["session-1"],
+            400: ["session-1"],
+            401: ["session-1"],
+            402: ["session-1"],
+            403: ["session-1"],
+            500: ["session-2"],
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt", "--session", "1"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    # Up Next recommendation still carries the in-column item
+    assert "#100" in out
+    # Distinct staged subsection surfaces ALL Backlog items — no [:3] cap
+    assert "## Session-1 staged (not yet in Up Next)" in out
+    for n in (400, 401, 402, 403):
+        assert f"#{n}" in out
+    # Other sessions' Backlog work stays hidden
+    assert "#500" not in out
+    # Staged subsection sits between Up Next and Recently closed
+    up_next_at = out.find("## Top of Up Next")
+    staged_at = out.find("## Session-1 staged")
+    closed_at = out.find("## Recently closed")
+    assert up_next_at < staged_at < closed_at
+
+
+def test_next_session_prompt_session_flag_backlog_only_no_false_empty_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When Up Next has no session-N items but Backlog does, the combined
+    empty marker must NOT fire — the staged Backlog work is real (#286)."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 300, "title": "Unlabeled up next", "state": "OPEN"},
+            {"number": 400, "title": "Session-1 staged in backlog", "state": "OPEN"},
+        ],
+        statuses={
+            300: ("Up Next", "High"),
+            400: ("Backlog", "Medium"),
+        },
+        labels_by_number={
+            300: [],
+            400: ["session-1"],
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt", "--session", "1"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "## Session-1 staged (not yet in Up Next)" in out
+    assert "#400" in out
+    # The lying combined marker must not appear when Backlog has staged work
+    assert "(none labeled session-1 in Up Next or Backlog)" not in out
+    # Unlabeled Up Next item still excluded — no silent fall-through
+    assert "#300" not in out

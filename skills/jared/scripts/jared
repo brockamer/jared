@@ -1042,7 +1042,9 @@ def _now_local_iso() -> str:
 def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
     """Wrapper that delegates to Board.open_items().
 
-    next-session-prompt only filters by status In Progress / Up Next, so
+    next-session-prompt's recommendation reads In Progress / Up Next, and
+    its --session posture additionally scans Backlog for session-N-labeled
+    work staged but not yet promoted (#286). All three are open statuses, so
     the open-only path is what it actually wants. Done-inclusive
     `board_items()` would just bloat GraphQL cost on mature boards (#185).
     Closed items in the handoff come from `_fetch_recently_closed`, which
@@ -1225,9 +1227,21 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     in_progress = [i for i in items if i.get("status") == "In Progress"]
     up_next_all = [i for i in items if i.get("status") == "Up Next"]
     session_filter: int | None = getattr(args, "session", None)
+    # Backlog items carrying the session-N label: staged but not yet promoted
+    # to Up Next. propose-partition (#286) labels across all open issues, so
+    # session work can sit in Backlog; surfacing it here keeps the --session
+    # posture from lying with "(none labeled session-N)" while staged work exists.
+    staged_backlog: list[dict[str, Any]] = []
     if session_filter is not None:
         label = f"session-{session_filter}"
-        up_next_all = [item for item in up_next_all if label in (item.get("labels") or ())]
+        up_next_all = [
+            item for item in up_next_all if label in (item.get("labels") or ())
+        ]
+        staged_backlog = [
+            item
+            for item in items
+            if item.get("status") == "Backlog" and label in (item.get("labels") or ())
+        ]
     up_next = up_next_all[:3]
     closed = _fetch_recently_closed(board, days=7)
 
@@ -1264,11 +1278,22 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             content = item.get("content") or {}
             prio = item.get("priority") or "-"
             print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+    elif session_filter is not None and staged_backlog:
+        # Nothing in Up Next, but staged work exists in Backlog (shown below).
+        print(f"(none in Up Next — see staged session-{session_filter} below)")
     elif session_filter is not None:
-        print(f"(none labeled session-{session_filter})")
+        print(f"(none labeled session-{session_filter} in Up Next or Backlog)")
     else:
         print("(empty queue)")
     print()
+    if session_filter is not None and staged_backlog:
+        print(f"## Session-{session_filter} staged (not yet in Up Next)")
+        print()
+        for item in staged_backlog:
+            content = item.get("content") or {}
+            prio = item.get("priority") or "-"
+            print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+        print()
     print("## Recently closed (last 7 days)")
     print()
     if closed:
