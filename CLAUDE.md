@@ -145,7 +145,11 @@ exists so the moment a second session enters the picture, the discipline kicks
 in automatically.
 
 `/jared-wrap` clears the lock at session end. Stale locks (from crashed sessions)
-are caught and cleared by the next `/jared-start`'s PID-liveness check.
+are **not** auto-swept: the recorded PID is the lock-writing CLI subprocess, which
+exits immediately, so PID-liveness can't tell a crashed session from a live one
+(see `lib/session_lock.py` `list_active_locks`). Instead, the next `/jared-start`
+surfaces the orphan in its refusal, and the operator clears it explicitly with
+`jared session-lock-clear --issue N` after confirming the session is actually dead.
 
 For background and the recovery-sequence incident that motivated this mechanism,
 see issue #231 and `docs/superpowers/specs/2026-05-23-multi-session-impl-design.md`.

@@ -1487,7 +1487,9 @@ def _cmd_worktree_add(args: argparse.Namespace) -> int:
     target = repo_root.parent / f"{repo_basename}-{args.issue}"
     branch = f"feature/{args.issue}-worktree"
     try:
-        created = _worktree.create_worktree(repo=repo_root, target=target, branch=branch, base="main")
+        created = _worktree.create_worktree(
+            repo=repo_root, target=target, branch=branch, base="origin/main", fetch=True
+        )
     except _worktree.WorktreeError as e:
         print(str(e), file=sys.stderr)
         return 1
