@@ -7,6 +7,32 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.27.0 — 2026-05-31
+
+**Features**
+- `jared wrap-state` now models the branch-protection review gate — when a PR is open with checks green but the required review is outstanding, it emits a `blocked_on_review` step instead of pushing toward merge, so `/jared-wrap` waits on the gate rather than failing into it. (#285)
+- Worktree branch names derive their slug from the issue title rather than a generic placeholder, so `feature/<issue>-<slug>` reads meaningfully at a glance. (#278)
+- `jared bootstrap` normalizes a project's Status column to the canonical Jared set (`Backlog / Up Next / In Progress / Blocked / Done`) during init. (#269)
+- `jared bootstrap` gains `--yes` and `--work-streams` for non-interactive runs. (#268)
+
+**Bug fixes**
+- `jared next-session-prompt --session N` now surfaces staged Backlog work for that session's posture instead of hiding it. (#286)
+- Worktree session branches are cut from `origin/main` with an explicit pre-fetch, so a stale local `main` no longer bases the branch on the wrong commit. (#283)
+- `.jared/` is anchored at the absolute repo root when `REPO_ROOT` collapses to `'.'`, preventing session-lock files from scattering relative to CWD. (#284)
+- `jared bootstrap` passes single-select options as a typed GraphQL list, fixing option creation on fresh boards. (#267)
+- Test round-trip-mismatch interception is scoped to the live tempdir, so it no longer leaks across unrelated tests. (#280)
+
+**Performance**
+- ETag / conditional-GET caching extended to issue-body reads, cutting redundant API round-trips. (#216)
+
+**Refactor**
+- Retired the dead `check_closed_not_done` sweep check and replaced paraphrased "lying" test fixtures with honest ones. (#223)
+
+**Doctrine**
+- `/jared-wrap` guidance: integrate `main` before opening the PR, and the two conflict classes are split out so the resolution path is unambiguous. (#294)
+- Fixed drifted worktree prose across the skill — cwd behavior, the milestone example, and the wrap-time branch-name. (#287)
+- README revised for v0.27 — voice, multi-session staging, and the milestone-required discipline. (#277)
+
 ## v0.26.0 — 2026-05-28
 
 **Features**
