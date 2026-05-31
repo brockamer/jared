@@ -39,7 +39,11 @@ class Lock:
 
 
 def _lock_dir(repo_root: Path) -> Path:
-    return repo_root / ".jared"
+    # `.resolve()` anchors `.jared/` at the true (absolute) repo root even when
+    # the caller passes a relative root — e.g. REPO_ROOT collapsing to '.' in the
+    # main checkout (#284). A cwd-relative lock dir breaks cross-session sibling
+    # detection. Every lock path flows through here, so this is the single net.
+    return repo_root.resolve() / ".jared"
 
 
 def _lock_path(repo_root: Path, issue: int) -> Path:
