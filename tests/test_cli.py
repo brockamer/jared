@@ -6,7 +6,14 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import git_cmd, graphql_item_response, import_cli, patch_gh, patch_gh_by_arg
+from tests.conftest import (
+    FakeGhResult,
+    git_cmd,
+    graphql_item_response,
+    import_cli,
+    patch_gh,
+    patch_gh_by_arg,
+)
 
 CLI = Path(__file__).parents[1] / "skills" / "jared" / "scripts" / "jared"
 
@@ -246,15 +253,45 @@ def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
     assert not lock_path.exists()
 
 
-def test_worktree_add_creates_at_sibling_path(
-    main_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # worktree-add now fetches origin and bases the new branch on origin/main
+def _add_origin(main_repo: Path) -> None:
+    # worktree-add fetches origin and bases the new branch on origin/main
     # (#283), so the repo needs a reachable origin carrying main.
     origin = main_repo.parent / "origin.git"
     git_cmd(main_repo, "init", "--bare", str(origin))
     git_cmd(main_repo, "remote", "add", "origin", str(origin))
     git_cmd(main_repo, "push", "origin", "main")
+
+
+def _patch_gh_title(
+    monkeypatch: pytest.MonkeyPatch, *, title: str = "", fail: bool = False
+) -> None:
+    """Fake only `gh issue view` (the worktree-add title fetch); delegate every
+    other subprocess call to the real `subprocess.run`.
+
+    The standard `patch_gh*` helpers replace `subprocess.run` wholesale, which
+    would also break the real `git fetch`/`git worktree add` this command needs
+    on disk. worktree-add is the one command that must run real git but fake gh.
+    """
+    real_run = subprocess.run
+
+    def fake_run(args: list[str], **kw: object) -> object:
+        if "issue" in args and "view" in args:
+            if fail:
+                return FakeGhResult(stdout="", returncode=1, stderr="HTTP 404")
+            return FakeGhResult(stdout=f'{{"title": "{title}"}}')
+        return real_run(args, **kw)  # type: ignore[call-overload]
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+
+def test_worktree_add_creates_at_sibling_path(
+    main_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _add_origin(main_repo)
+    # Empty title from gh → branch falls back to -worktree.
+    _patch_gh_title(monkeypatch, title="")
 
     mod = import_cli()
     result = mod.main(
@@ -271,6 +308,75 @@ def test_worktree_add_creates_at_sibling_path(
     expected_target = main_repo.parent / f"{main_repo.name}-231"
     assert str(expected_target) in captured.out
     assert expected_target.exists()
+    assert git_cmd(expected_target, "rev-parse", "--abbrev-ref", "HEAD") == "feature/231-worktree"
+
+
+def test_worktree_add_derives_branch_slug_from_issue_title(
+    main_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _add_origin(main_repo)
+    _patch_gh_title(monkeypatch, title="Derive slug from issue title")
+
+    mod = import_cli()
+    result = mod.main(["worktree-add", "--repo-root", str(main_repo), "--issue", "278"])
+    assert result == 0
+    target = main_repo.parent / f"{main_repo.name}-278"
+    branch = git_cmd(target, "rev-parse", "--abbrev-ref", "HEAD")
+    assert branch == "feature/278-derive-slug-from-issue-title"
+
+
+def test_worktree_add_title_flag_is_slugified(
+    main_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _add_origin(main_repo)
+    _patch_gh_title(monkeypatch, title="Should Not Be Used")
+
+    mod = import_cli()
+    result = mod.main(
+        [
+            "worktree-add",
+            "--repo-root",
+            str(main_repo),
+            "--issue",
+            "278",
+            "--title",
+            "Fix the Thing!",
+        ]
+    )
+    assert result == 0
+    target = main_repo.parent / f"{main_repo.name}-278"
+    branch = git_cmd(target, "rev-parse", "--abbrev-ref", "HEAD")
+    assert branch == "feature/278-fix-the-thing"
+
+
+def test_worktree_add_falls_back_to_worktree_when_title_unavailable(
+    main_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _add_origin(main_repo)
+    # gh errors → fetch raises → branch falls back to -worktree, not a crash.
+    _patch_gh_title(monkeypatch, fail=True)
+
+    mod = import_cli()
+    result = mod.main(["worktree-add", "--repo-root", str(main_repo), "--issue", "278"])
+    assert result == 0
+    target = main_repo.parent / f"{main_repo.name}-278"
+    branch = git_cmd(target, "rev-parse", "--abbrev-ref", "HEAD")
+    assert branch == "feature/278-worktree"
+
+
+def test_slugify_normalizes_and_truncates() -> None:
+    mod = import_cli()
+    assert mod._slugify("Derive slug from issue title") == "derive-slug-from-issue-title"
+    assert mod._slugify("Fix the Thing!") == "fix-the-thing"
+    assert mod._slugify("  Leading/trailing -- punctuation.  ") == "leading-trailing-punctuation"
+    assert mod._slugify("") == ""
+    # Truncates at the length cap without a trailing hyphen.
+    long = mod._slugify("a" * 30 + " " + "b" * 30, max_len=40)
+    assert len(long) <= 40
+    assert not long.endswith("-")
 
 
 def test_session_resolve_refuse_bleg_renders_solo_sibling_mode(
