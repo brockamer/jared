@@ -251,6 +251,62 @@ def create_single_select_field(project_id: str, name: str, options: list[str]) -
     return cast(dict[Any, Any], field)
 
 
+def status_options_match_canonical(status_field: dict[str, Any]) -> bool:
+    """True iff the Status field carries exactly the canonical Jared columns, in order.
+
+    GitHub seeds a fresh project's Status with its own defaults
+    (Todo / In Progress / Done), so this returns False on a new board and the
+    bootstrap flow can offer to normalize it (#269). Order matters: the
+    single-select option order *is* the left-to-right column order.
+    """
+    names = [o.get("name") for o in status_field.get("options", [])]
+    return names == STANDARD_FIELDS["Status"]
+
+
+def replace_single_select_options(field_id: str, options: list[str]) -> dict[str, Any]:
+    """Replace an existing single-select field's options with the given set.
+
+    Uses `updateProjectV2Field` through the same `gh api graphql --input -`
+    stdin envelope as create_single_select_field, so the typed option list
+    survives instead of being passed as a string literal (#267). Used to swap
+    GitHub's default Status columns for the canonical Jared set (#269).
+    """
+    if not options:
+        raise RuntimeError(f"Can't replace options on {field_id!r} with zero options")
+
+    query = """
+    mutation($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+      updateProjectV2Field(input: {
+        fieldId: $fieldId,
+        singleSelectOptions: $options
+      }) {
+        projectV2Field {
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            options { id name }
+          }
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "fieldId": field_id,
+            "options": [{"name": o, "color": "GRAY", "description": ""} for o in options],
+        },
+    }
+    result = board_run_gh(
+        ["api", "graphql", "--input", "-"],
+        input_text=json.dumps(payload),
+    )
+    field = result.get("data", {}).get("updateProjectV2Field", {}).get("projectV2Field", {})
+    if not field:
+        raise RuntimeError(f"Replacing options on {field_id!r} returned no data: {result}")
+    return cast(dict[Any, Any], field)
+
+
 # ---------- Doc generation ----------
 
 
@@ -791,6 +847,34 @@ def main() -> int:
                     print(f"    Failed: {e}")
     elif missing:
         print(f"  Note: {[m[0] for m in missing]} missing — skipped creation.")
+
+    # Status columns (#269): GitHub seeds a new project's Status with its own
+    # defaults (Todo / In Progress / Done). If the Status field exists but
+    # doesn't carry the canonical Jared columns, offer to replace them. Safe on
+    # a fresh board (no items placed yet); on a live board this drops existing
+    # Status assignments, so we always confirm unless --yes is passed.
+    if status and not args.no_create and not status_options_match_canonical(status):
+        current = [o.get("name") for o in status.get("options", [])]
+        print()
+        print(f"  Status field has non-standard columns: {current}")
+        print(f"  Jared expects: {STANDARD_FIELDS['Status']}")
+        if args.yes:
+            do_replace = True
+        elif args.non_interactive:
+            do_replace = False
+        else:
+            do_replace = prompt_yes_no("Replace Status columns with the Jared set?", default=True)
+        if do_replace:
+            try:
+                updated = replace_single_select_options(status["id"], STANDARD_FIELDS["Status"])
+                names = [o["name"] for o in updated.get("options", [])]
+                print(f"    Replaced Status columns: {names}")
+                fields = fetch_fields(owner, number)
+                status = find_single_select_field(fields, "Status") or status
+            except (RuntimeError, GhInvocationError) as e:
+                print(f"    Failed: {e}")
+        else:
+            print("    Leaving Status columns unchanged.")
 
     # Generate convention doc
     content = render_doc(
