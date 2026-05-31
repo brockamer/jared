@@ -789,6 +789,31 @@ def test_run_gh_cache_flag_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert "--cache" in args and "5m" in args
 
 
+def test_run_gh_input_text_piped_to_stdin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """run_gh(args, input_text=...) forwards the string to subprocess.run's
+    stdin via input=, so callers can pipe a `gh api graphql --input -` payload
+    without a temp file (#267). Without input_text, input= stays unset (None)."""
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.from_path(_minimal_board(tmp_path))
+
+    captured: dict[str, object] = {}
+
+    class FakeResult:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured["input"] = kw.get("input")
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    b.run_gh(["api", "graphql", "--input", "-"], input_text='{"query":"x"}')
+    assert captured["input"] == '{"query":"x"}'
+
+
 def test_fetch_blocked_by_edges_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
     """One paginated GraphQL call → {number: [{number, state}]} for a small repo."""
     from skills.jared.scripts.lib import board

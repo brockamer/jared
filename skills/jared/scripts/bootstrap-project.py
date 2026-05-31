@@ -177,6 +177,15 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
     return ans.startswith("y")
 
 
+def parse_work_streams(raw: str) -> list[str]:
+    """Split a comma-separated work-stream string into a clean list.
+
+    Trims whitespace and drops empty entries, so `"A, B ,"` → `["A", "B"]`.
+    Shared by the interactive prompt and the `--work-streams` flag (#268).
+    """
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
 def prompt_work_streams() -> list[str]:
     print()
     print("The Work Stream field has no standard options — you define them per project.")
@@ -186,7 +195,7 @@ def prompt_work_streams() -> list[str]:
     print("  - House renovation: Demo, Rough-in, Finish")
     print()
     raw = input("Enter work streams as a comma-separated list: ").strip()
-    streams = [s.strip() for s in raw.split(",") if s.strip()]
+    streams = parse_work_streams(raw)
     if not streams:
         print("  (No work streams entered — you can add them later.)")
     return streams
@@ -199,8 +208,6 @@ def create_single_select_field(project_id: str, name: str, options: list[str]) -
     """
     if not options:
         raise RuntimeError(f"Can't create {name!r} field with zero options")
-
-    options_arg = json.dumps([{"name": o, "color": "GRAY", "description": ""} for o in options])
 
     query = """
     mutation($projectId: ID!, $name: String!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
@@ -220,28 +227,83 @@ def create_single_select_field(project_id: str, name: str, options: list[str]) -
       }
     }
     """
-    # Use board_run_gh directly (not board_run_graphql) because the options
-    # variable is a JSON-typed list — it must go through `-F` so gh parses it
-    # as a structured value. board_run_graphql's simple kwargs flag-picker
-    # sends non-primitive strings through `-f`, which would pass it as a raw
-    # string literal and fail the GraphQL type check.
+    # The options variable is a typed GraphQL list
+    # (`[ProjectV2SingleSelectFieldOptionInput!]!`). Passing it via `-F
+    # options=<json>` does NOT work: gh sends the JSON array as a string
+    # literal, which fails the variable's type check (#267). Instead, hand gh
+    # the whole {query, variables} envelope on stdin via `--input -`, so the
+    # list stays a list.
+    payload = {
+        "query": query,
+        "variables": {
+            "projectId": project_id,
+            "name": name,
+            "options": [{"name": o, "color": "GRAY", "description": ""} for o in options],
+        },
+    }
     result = board_run_gh(
-        [
-            "api",
-            "graphql",
-            "-f",
-            f"query={query}",
-            "-F",
-            f"projectId={project_id}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"options={options_arg}",
-        ]
+        ["api", "graphql", "--input", "-"],
+        input_text=json.dumps(payload),
     )
     field = result.get("data", {}).get("createProjectV2Field", {}).get("projectV2Field", {})
     if not field:
         raise RuntimeError(f"Field creation for {name!r} returned no data: {result}")
+    return cast(dict[Any, Any], field)
+
+
+def status_options_match_canonical(status_field: dict[str, Any]) -> bool:
+    """True iff the Status field carries exactly the canonical Jared columns, in order.
+
+    GitHub seeds a fresh project's Status with its own defaults
+    (Todo / In Progress / Done), so this returns False on a new board and the
+    bootstrap flow can offer to normalize it (#269). Order matters: the
+    single-select option order *is* the left-to-right column order.
+    """
+    names = [o.get("name") for o in status_field.get("options", [])]
+    return names == STANDARD_FIELDS["Status"]
+
+
+def replace_single_select_options(field_id: str, options: list[str]) -> dict[str, Any]:
+    """Replace an existing single-select field's options with the given set.
+
+    Uses `updateProjectV2Field` through the same `gh api graphql --input -`
+    stdin envelope as create_single_select_field, so the typed option list
+    survives instead of being passed as a string literal (#267). Used to swap
+    GitHub's default Status columns for the canonical Jared set (#269).
+    """
+    if not options:
+        raise RuntimeError(f"Can't replace options on {field_id!r} with zero options")
+
+    query = """
+    mutation($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+      updateProjectV2Field(input: {
+        fieldId: $fieldId,
+        singleSelectOptions: $options
+      }) {
+        projectV2Field {
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            options { id name }
+          }
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "fieldId": field_id,
+            "options": [{"name": o, "color": "GRAY", "description": ""} for o in options],
+        },
+    }
+    result = board_run_gh(
+        ["api", "graphql", "--input", "-"],
+        input_text=json.dumps(payload),
+    )
+    field = result.get("data", {}).get("updateProjectV2Field", {}).get("projectV2Field", {})
+    if not field:
+        raise RuntimeError(f"Replacing options on {field_id!r} returned no data: {result}")
     return cast(dict[Any, Any], field)
 
 
@@ -642,7 +704,7 @@ def render_doc(
 # ---------- Main ----------
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--url", required=True, help="GitHub Project v2 URL")
     parser.add_argument(
@@ -667,6 +729,23 @@ def main() -> int:
         action="store_true",
         help="Skip prompts (for automation)",
     )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Auto-confirm prompts and create/replace fields without asking "
+        "(usable when stdin is not a terminal, e.g. from Claude Code)",
+    )
+    parser.add_argument(
+        "--work-streams",
+        help="Comma-separated work-stream names, supplied non-interactively "
+        "(e.g. --work-streams 'Backend,Frontend,Infra'). Skips the prompt.",
+    )
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     try:
@@ -736,13 +815,22 @@ def main() -> int:
     if not work_stream:
         missing.append(("Work Stream", None))  # Prompt for options
 
-    if missing and not args.no_create and not args.non_interactive:
+    supplied_streams = parse_work_streams(args.work_streams) if args.work_streams else None
+
+    if missing and not args.no_create and (args.yes or not args.non_interactive):
         print()
         print(f"Missing standard fields: {[m[0] for m in missing]}")
-        if prompt_yes_no("Create them now?", default=True):
+        # --yes short-circuits the prompt so input() is never reached when
+        # stdin is not a terminal (#268).
+        if args.yes or prompt_yes_no("Create them now?", default=True):
             for name, options in missing:
-                if options is None:
-                    options = prompt_work_streams()
+                if options is None:  # Work Stream — needs user-supplied options
+                    if supplied_streams is not None:
+                        options = supplied_streams
+                    elif args.yes:
+                        options = []  # none supplied non-interactively → skip below
+                    else:
+                        options = prompt_work_streams()
                 if not options:
                     print(f"  Skipping {name} — no options provided")
                     continue
@@ -759,6 +847,34 @@ def main() -> int:
                     print(f"    Failed: {e}")
     elif missing:
         print(f"  Note: {[m[0] for m in missing]} missing — skipped creation.")
+
+    # Status columns (#269): GitHub seeds a new project's Status with its own
+    # defaults (Todo / In Progress / Done). If the Status field exists but
+    # doesn't carry the canonical Jared columns, offer to replace them. Safe on
+    # a fresh board (no items placed yet); on a live board this drops existing
+    # Status assignments, so we always confirm unless --yes is passed.
+    if status and not args.no_create and not status_options_match_canonical(status):
+        current = [o.get("name") for o in status.get("options", [])]
+        print()
+        print(f"  Status field has non-standard columns: {current}")
+        print(f"  Jared expects: {STANDARD_FIELDS['Status']}")
+        if args.yes:
+            do_replace = True
+        elif args.non_interactive:
+            do_replace = False
+        else:
+            do_replace = prompt_yes_no("Replace Status columns with the Jared set?", default=True)
+        if do_replace:
+            try:
+                updated = replace_single_select_options(status["id"], STANDARD_FIELDS["Status"])
+                names = [o["name"] for o in updated.get("options", [])]
+                print(f"    Replaced Status columns: {names}")
+                fields = fetch_fields(owner, number)
+                status = find_single_select_field(fields, "Status") or status
+            except (RuntimeError, GhInvocationError) as e:
+                print(f"    Failed: {e}")
+        else:
+            print("    Leaving Status columns unchanged.")
 
     # Generate convention doc
     content = render_doc(

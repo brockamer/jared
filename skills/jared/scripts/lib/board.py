@@ -382,11 +382,15 @@ class Board:
         words = [w.strip() for w in bullet_match.group("words").split(",")]
         return frozenset(w for w in words if w)
 
-    def run_gh(self, args: list[str], *, cache: str | None = None) -> Any:
-        return run_gh(args, cache=cache)
+    def run_gh(
+        self, args: list[str], *, cache: str | None = None, input_text: str | None = None
+    ) -> Any:
+        return run_gh(args, cache=cache, input_text=input_text)
 
-    def run_gh_raw(self, args: list[str], *, cache: str | None = None) -> str:
-        return run_gh_raw(args, cache=cache)
+    def run_gh_raw(
+        self, args: list[str], *, cache: str | None = None, input_text: str | None = None
+    ) -> str:
+        return run_gh_raw(args, cache=cache, input_text=input_text)
 
     def board_items(self) -> list[dict[str, Any]]:
         """Cached `gh project item-list` result, shared across processes.
@@ -823,9 +827,9 @@ class Board:
         return graphql_budget()
 
 
-def run_gh(args: list[str], *, cache: str | None = None) -> Any:
+def run_gh(args: list[str], *, cache: str | None = None, input_text: str | None = None) -> Any:
     """Run a `gh` subcommand and parse its stdout as JSON (empty → {})."""
-    stdout = run_gh_raw(args, cache=cache)
+    stdout = run_gh_raw(args, cache=cache, input_text=input_text)
     if not stdout:
         return {}
     try:
@@ -1113,7 +1117,7 @@ def _probe_oauth_scopes() -> str | None:
     return m.group(1).strip() if m else None
 
 
-def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
+def run_gh_raw(args: list[str], *, cache: str | None = None, input_text: str | None = None) -> str:
     """Run a `gh` subcommand and return its stdout (stripped) without JSON parsing.
 
     Some gh commands return plain text (e.g. `gh issue create` prints a URL).
@@ -1122,6 +1126,11 @@ def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
     `cache` is passed to gh as `--cache <duration>`. Only meaningful for
     `gh api ...` calls (including `gh api graphql`); other subcommands
     will reject the flag. Caller's responsibility to use it appropriately.
+
+    `input_text`, when given, is piped to the subprocess' stdin. The intended
+    use is `gh api graphql --input -`, where the caller hands gh a complete
+    `{query, variables}` JSON envelope so list/object variables stay typed
+    instead of being passed through `-F` as string literals (#267).
     """
     full_args = ["gh", *args]
     if cache is not None:
@@ -1132,6 +1141,7 @@ def run_gh_raw(args: list[str], *, cache: str | None = None) -> str:
         text=True,
         check=False,
         env=_child_env(),
+        input=input_text,
     )
     if result.returncode != 0:
         message = f"gh {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}"
