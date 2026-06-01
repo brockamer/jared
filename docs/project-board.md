@@ -77,6 +77,31 @@ file directly.
 
 _Not used on this project — jared is single-purpose._
 
+## Milestones
+
+Milestones provide a lightweight roadmap surface — the thematic phase a cluster of
+work belongs to. They are intentionally **not** tied to specific semver versions:
+a single phase of work routinely spans several release tags, so version-pinned
+milestones (`v0.28`) would be too constraining and fight the `--merge` release
+cadence.
+
+Conventions:
+
+- **Theme-based names, not version numbers.** e.g. `Optimization & hardening`,
+  not `v0.28`. The name describes the *kind* of work, not the release that ships it.
+- **One phase-milestone open at a time.** This is steady-state, single-purpose
+  tooling — a single active milestone is the lightweight default. Spin up a second
+  only when a genuinely distinct theme emerges, not speculatively.
+- **A one-sentence deliverable is required.** Put it in the milestone description.
+  If you can't write the sentence that proves the milestone is done, it's a bag of
+  issues, not a phase.
+- **Dates are optional.** A hard due date on a steady-state phase manufactures false
+  urgency. Add a soft target only if you want the Roadmap view to render a timeline.
+
+The Roadmap *view* itself is a project-level UI setting (Insights → New view →
+Roadmap). Milestones are the data layer that makes it render; the view is added once
+in the GitHub UI.
+
 ## Labels
 
 Labels describe **what kind of issue it is**, not where it lives on the board. Status
