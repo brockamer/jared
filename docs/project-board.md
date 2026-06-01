@@ -98,9 +98,15 @@ Conventions:
 - **Dates are optional.** A hard due date on a steady-state phase manufactures false
   urgency. Add a soft target only if you want the Roadmap view to render a timeline.
 
-The Roadmap *view* itself is a project-level UI setting (Insights → New view →
-Roadmap). Milestones are the data layer that makes it render; the view is added once
-in the GitHub UI.
+**Surfacing the phase.** Group a **Table** or **Board** view by Milestone (view tab
+dropdown → Group by → Milestone) to see the active phase's items under one header.
+This is the dateless-compatible roadmap surface and matches the conventions above.
+
+Do **not** reach for GitHub's **Roadmap** view layout here: it is a date-driven
+Gantt timeline that plots bars only from date fields or a milestone *with a due date*.
+Because this board's milestones are intentionally dateless, a Roadmap view renders an
+empty timeline. Roadmap is the right layout only if you choose to add per-item target
+dates — which reintroduces the date-pinning the conventions above deliberately avoid.
 
 ## Labels
 
