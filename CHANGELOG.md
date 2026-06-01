@@ -7,6 +7,12 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.27.1 — 2026-06-01
+
+**Bug fixes**
+- `/jared-stage`'s `is_pullable` no longer gates readiness on the `<details>` display wrapper — an issue with substantive `## Acceptance criteria` bullets is pullable whether or not the bullets sit inside the fold, so well-specified issues filed without the wrapper are no longer wrongly deferred as "non-canonical". (#307)
+- `/jared-stage`'s Blocked-revisit check keys on the populated `Status` field rather than `content.state` (which `gh project item-list` never populates), so a resolved blocker is detected by its Done-column placement. (#298)
+
 ## v0.27.0 — 2026-05-31
 
 **Features**
