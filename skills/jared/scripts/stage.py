@@ -55,9 +55,18 @@ class StageProposals:
 
 _TEMPLATE_FIRST_PARA = "One-sentence summary of what this issue is about and why it matters."
 _PLACEHOLDER_CRITERIA = re.compile(r"^\s*-\s*Criterion\s*\d+\s*$", re.MULTILINE)
+# Capture the `## Acceptance criteria` section body up to the next `## ` (h2)
+# heading or end-of-body. Wrapper-agnostic by design (#307): the `<details>`
+# fold is a *display* convention (see design-rationale.md § "reference, not
+# surface"), not a readiness signal. Readiness is "≥1 substantive bullet under
+# the canonical heading" — whether or not the bullets sit inside `<details>`.
+# `<details>`/`<summary>`/`</details>` lines don't start with `-`, so the
+# bullet counter below ignores them naturally. The heading text stays canonical
+# (`## Acceptance criteria`) — a short-form `## Acceptance` is still flagged
+# non-canonical by not_pullable_reason.
 _ACCEPTANCE_SECTION = re.compile(
-    r"##\s+Acceptance criteria\s*\n+<details>(.*?)</details>",
-    re.DOTALL,
+    r"^##\s+Acceptance criteria\s*\n(.*?)(?=\n##(?!#)|\Z)",
+    re.DOTALL | re.MULTILINE,
 )
 _BLOCKED_BY_SECTION = re.compile(r"##\s+Blocked by\s*\n(.*?)(?=\n##(?!#)|\Z)", re.DOTALL)
 _ACCEPTANCE_HEADING_ANY = re.compile(r"^##\s+Acceptance\b", re.MULTILINE)
@@ -198,10 +207,16 @@ def is_pullable(item: dict[str, Any]) -> bool:
         return False
 
     criteria_block = match.group(1)
+    # `"- "` (dash + space), not `"-"`: the wrapper-agnostic capture (#307) now
+    # extends past `</details>` to the next `## ` heading, so it swallows the
+    # template's trailing HTML comment. Its closing `-->` line starts with `-`
+    # but has no space — requiring the space excludes it while still matching
+    # every real bullet (`- text`, `- [ ] text`) and `- Criterion N`
+    # placeholders (which the next clause rejects).
     real_bullets = [
         line.strip()
         for line in criteria_block.splitlines()
-        if line.strip().startswith("-") and not _PLACEHOLDER_CRITERIA.match(line)
+        if line.strip().startswith("- ") and not _PLACEHOLDER_CRITERIA.match(line)
     ]
     return len(real_bullets) >= 1
 
@@ -223,16 +238,18 @@ def not_pullable_reason(item: dict[str, Any]) -> str:
         return "not pullable — placeholder summary"
 
     if _ACCEPTANCE_SECTION.search(body):
+        # Wrapper-agnostic since #307: the remediation is "add a real bullet",
+        # not "wrap it" — the `<details>` fold is display tidiness, not a
+        # readiness gate. Don't admonish about the wrapper here.
         return (
-            "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
-            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
+            "not pullable — acceptance section has no `-`-prefixed criterion bullets "
+            "(numbered lists, prose, and `- Criterion N` placeholders don't count)"
         )
 
     if _ACCEPTANCE_HEADING_ANY.search(body):
         return (
-            "not pullable — non-canonical acceptance section; normalize to "
-            "'## Acceptance criteria' wrapped in <details><summary>Expand</summary>"
+            "not pullable — non-canonical acceptance heading; "
+            "use the canonical '## Acceptance criteria'"
         )
 
     return "not pullable — no acceptance section"
