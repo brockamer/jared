@@ -6,6 +6,7 @@ import json
 import math
 from dataclasses import is_dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -133,10 +134,88 @@ class TestIsPullable:
         }
         assert stage.is_pullable(item) is True
 
-    def test_unclosed_details_is_not_pullable(self) -> None:
-        """Defensive: the relaxed regex must still require `</details>` to
-        close — otherwise the match could span unrelated content. Locks down
-        AC bullet 5 of #134."""
+    def test_unwrapped_canonical_ac_is_pullable(self) -> None:
+        """#307: canonical `## Acceptance criteria` heading with substantive
+        `-` bullets but NO `<details>` wrapper is pullable. This is the shape
+        the 2026-06-01 audit filed (#299–#305) — readiness is the bullets,
+        not the display fold."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary paragraph describing the work.\n\n"
+                "## Acceptance criteria\n"
+                "- Real criterion 1\n"
+                "- Real criterion 2\n\n"
+                "## Effort / Confidence\nS · High\n"
+            )
+        }
+        assert stage.is_pullable(item) is True
+
+    def test_unwrapped_checkbox_ac_is_pullable(self) -> None:
+        """#307: `- [ ]` checkbox bullets (start with `-`) count as real
+        criteria, wrapper or not — the exact bullet style #299–#305 used."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n"
+                "- [ ] `find_priority_inversions` reads the project field.\n"
+                "- [ ] `ruff` + `mypy --strict` clean.\n"
+            )
+        }
+        assert stage.is_pullable(item) is True
+
+    def test_unwrapped_placeholder_criteria_is_not_pullable(self) -> None:
+        """#307: dropping the wrapper requirement must NOT let a fresh,
+        unwrapped template body through — `- Criterion N` placeholders still
+        fail."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n"
+                "- Criterion 1\n"
+                "- Criterion 2\n"
+            )
+        }
+        assert stage.is_pullable(item) is False
+
+    def test_unwrapped_prose_only_is_not_pullable(self) -> None:
+        """#307: canonical heading + prose, no bullets, no wrapper → not
+        pullable. Readiness still requires at least one real bullet."""
+        stage = import_stage()
+        item = {
+            "body": (
+                "Real summary.\n\n"
+                "## Acceptance criteria\n"
+                "Criteria will be concretized once dependencies land.\n"
+            )
+        }
+        assert stage.is_pullable(item) is False
+
+    def test_half_filled_real_template_is_not_pullable(self) -> None:
+        """#307 regression guard: a body built from the real issue-body
+        template with a written summary but UNTOUCHED placeholder AC must stay
+        not-pullable. The wrapper-agnostic capture now extends past
+        `</details>` to the next `## ` heading, swallowing the template's
+        trailing HTML comment — whose closing `-->` line starts with `-`. If
+        the bullet matcher counted it, a half-filled template would sneak onto
+        Up Next. Built from the template verbatim so it tracks the real shape."""
+        stage = import_stage()
+        template = Path("skills/jared/assets/issue-body.md.template").read_text()
+        # Write a real summary; leave the `- Criterion N` placeholders intact.
+        body = template.replace(
+            "One-sentence summary of what this issue is about and why it matters.",
+            "Real summary describing genuine work to be done.",
+        )
+        assert stage.is_pullable({"body": body}) is False
+
+    def test_unclosed_details_with_real_bullet_is_pullable(self) -> None:
+        """#307: an unclosed `<details>` followed by a real criterion is now
+        pullable — the AC section is bounded by the next `## ` heading / EOF,
+        so the closing `</details>` is no longer load-bearing. This reverses
+        #134's `test_unclosed_details_is_not_pullable`, which was an artifact
+        of the old `<details>…</details>` delimiter approach."""
         stage = import_stage()
         item = {
             "body": (
@@ -144,7 +223,7 @@ class TestIsPullable:
                 # no closing </details>
             )
         }
-        assert stage.is_pullable(item) is False
+        assert stage.is_pullable(item) is True
 
 
 class TestNotPullableReason:
@@ -183,9 +262,8 @@ class TestNotPullableReason:
         }
         assert (
             stage.not_pullable_reason(item)
-            == "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
-            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
+            == "not pullable — acceptance section has no `-`-prefixed criterion bullets "
+            "(numbered lists, prose, and `- Criterion N` placeholders don't count)"
         )
 
     def test_numbered_list_bullets_fail(self) -> None:
@@ -204,9 +282,8 @@ class TestNotPullableReason:
         assert stage.is_pullable(item) is False
         assert (
             stage.not_pullable_reason(item)
-            == "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
-            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
+            == "not pullable — acceptance section has no `-`-prefixed criterion bullets "
+            "(numbered lists, prose, and `- Criterion N` placeholders don't count)"
         )
 
     def test_prose_only_acceptance_fails(self) -> None:
@@ -224,17 +301,16 @@ class TestNotPullableReason:
         assert stage.is_pullable(item) is False
         assert (
             stage.not_pullable_reason(item)
-            == "not pullable — acceptance section has no `-`-prefixed bullets "
-            "(numbered list, prose, or `- Criterion N` placeholders all fail); "
-            "keep the `<details><summary>Expand</summary>` wrapper around the bullets"
+            == "not pullable — acceptance section has no `-`-prefixed criterion bullets "
+            "(numbered lists, prose, and `- Criterion N` placeholders don't count)"
         )
 
-    def test_bullet_style_message_restates_wrapper_requirement(self) -> None:
-        """#195: when bullets are wrong-style but the `<details>` wrapper is
-        present, the error message must explicitly restate that the wrapper
-        should be preserved. Otherwise a fixer reading only this message
-        could drop the wrapper while fixing the bullets, landing in the
-        non-canonical-wrapper-missing failure mode on the next stage."""
+    def test_bullet_style_message_omits_wrapper_requirement(self) -> None:
+        """#307: the wrong-bullet-style message must NOT prescribe a
+        `<details>` wrapper. #195 originally required the message to restate
+        the wrapper requirement (to stop a fixer dropping it); #307 decoupled
+        readiness from the wrapper, so admonishing about it is now stale and
+        misleading — the only remediation is a real `-` bullet."""
         stage = import_stage()
         item = {
             "body": (
@@ -247,32 +323,22 @@ class TestNotPullableReason:
             )
         }
         reason = stage.not_pullable_reason(item)
-        assert "<details><summary>Expand</summary>" in reason
-        assert "wrapper" in reason
+        assert "wrapper" not in reason
+        assert "<details>" not in reason
+        assert "`-`-prefixed criterion bullets" in reason
 
     def test_non_canonical_heading_short_form(self) -> None:
-        """`## Acceptance` (no `criteria` suffix), no <details> wrapper."""
+        """`## Acceptance` (no `criteria` suffix) is still non-canonical — the
+        heading text stays a readiness requirement even though #307 dropped the
+        `<details>` wrapper requirement. The remediation points at the heading."""
         stage = import_stage()
         item = {
             "body": ("Real summary.\n\n## Acceptance\n\n- Real criterion 1\n- Real criterion 2\n")
         }
+        assert stage.is_pullable(item) is False
         reason = stage.not_pullable_reason(item)
         assert "non-canonical" in reason
         assert "## Acceptance criteria" in reason
-        assert "<details>" in reason
-
-    def test_non_canonical_missing_details_wrapper(self) -> None:
-        """Canonical `## Acceptance criteria` heading but no <details> wrapper."""
-        stage = import_stage()
-        item = {
-            "body": (
-                "Real summary.\n\n"
-                "## Acceptance criteria\n\n"
-                "- Real criterion 1\n"
-                "- Real criterion 2\n"
-            )
-        }
-        assert "non-canonical" in stage.not_pullable_reason(item)
 
     def test_no_acceptance_section_at_all(self) -> None:
         stage = import_stage()
