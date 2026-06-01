@@ -141,7 +141,14 @@ def has_no_open_blockers(item: dict[str, Any], items: list[dict[str, Any]]) -> b
         if blocker is None:
             # Unknown blocker reference — treat as still blocked (conservative).
             return False
-        if blocker.get("state", "").upper() != "CLOSED":
+        # Key on the populated `status` field, not `content.state`: `gh project
+        # item-list --format json` never populates `content.state` (see
+        # sweep.py's cold-path note + #189/#223), so the closed-blocker signal
+        # is its Done column placement. Assumes blockers reach Done via the
+        # normal close→auto-Done flow; an issue closed entirely outside the
+        # board would read as still-blocked, where the native blocked-by edge
+        # `state` (dropped in fetch_items_for_stage) would be the authority.
+        if blocker.get("status") != "Done":
             return False
     return True
 
@@ -401,7 +408,7 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
     """Fetch all open items from the board and normalise to stage.py's dict shape.
 
     Pure functions in this module take dicts with these keys:
-      number, status, priority, title, body, state, milestone, createdAt,
+      number, status, priority, title, body, milestone, createdAt,
       blocked_by_native (list[int]), labels (list[str]).
 
     `gh project item-list` returns most fields at the top level of each raw
@@ -430,7 +437,6 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
                 "priority": raw.get("priority"),
                 "title": content.get("title", ""),
                 "body": content.get("body", ""),
-                "state": content.get("state", "OPEN"),
                 "milestone": _normalise_milestone(raw.get("milestone")),
                 "createdAt": content.get("createdAt") or content.get("created_at"),
                 "blocked_by_native": blocked_by_native,
