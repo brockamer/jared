@@ -306,13 +306,15 @@ class TestHasNoOpenBlockers:
     def test_native_blocker_closed(self) -> None:
         stage = import_stage()
         target = {"number": 1, "body": "Summary.\n", "blocked_by_native": [2]}
-        blocker = {"number": 2, "state": "CLOSED"}
+        # Closed blockers land in the Done column — `status`, not `content.state`,
+        # is the populated signal (#298).
+        blocker = {"number": 2, "status": "Done"}
         assert stage.has_no_open_blockers(target, self._items(target, blocker)) is True
 
     def test_native_blocker_open(self) -> None:
         stage = import_stage()
         target = {"number": 1, "body": "Summary.\n", "blocked_by_native": [2]}
-        blocker = {"number": 2, "state": "OPEN"}
+        blocker = {"number": 2, "status": "In Progress"}
         assert stage.has_no_open_blockers(target, self._items(target, blocker)) is False
 
     def test_body_ref_blocker_open(self) -> None:
@@ -322,7 +324,7 @@ class TestHasNoOpenBlockers:
             "body": "Summary.\n\n## Blocked by\n\nWaiting on #2.\n",
             "blocked_by_native": [],
         }
-        blocker = {"number": 2, "state": "OPEN"}
+        blocker = {"number": 2, "status": "In Progress"}
         assert stage.has_no_open_blockers(target, self._items(target, blocker)) is False
 
     def test_body_ref_blocker_closed(self) -> None:
@@ -332,7 +334,7 @@ class TestHasNoOpenBlockers:
             "body": "Summary.\n\n## Blocked by\n\nWaiting on #2.\n",
             "blocked_by_native": [],
         }
-        blocker = {"number": 2, "state": "CLOSED"}
+        blocker = {"number": 2, "status": "Done"}
         assert stage.has_no_open_blockers(target, self._items(target, blocker)) is True
 
     def test_mixed_native_and_body_one_open(self) -> None:
@@ -342,8 +344,8 @@ class TestHasNoOpenBlockers:
             "body": "Summary.\n\n## Blocked by\n\nWaiting on #3.\n",
             "blocked_by_native": [2],
         }
-        b2 = {"number": 2, "state": "CLOSED"}
-        b3 = {"number": 3, "state": "OPEN"}
+        b2 = {"number": 2, "status": "Done"}
+        b3 = {"number": 3, "status": "In Progress"}
         assert stage.has_no_open_blockers(target, self._items(target, b2, b3)) is False
 
     def test_unknown_blocker_ref_treated_as_still_blocked(self) -> None:
@@ -370,8 +372,8 @@ class TestHasNoOpenBlockers:
             ),
             "blocked_by_native": [],
         }
-        b2 = {"number": 2, "state": "CLOSED"}
-        b3 = {"number": 3, "state": "OPEN"}
+        b2 = {"number": 2, "status": "Done"}
+        b3 = {"number": 3, "status": "In Progress"}
         assert stage.has_no_open_blockers(target, self._items(target, b2, b3)) is False
 
 
@@ -518,7 +520,6 @@ def _item(
     title: str = "Test",
     body: str | None = None,
     milestone_due: str | None = "2026-07-01T00:00:00Z",
-    state: str = "OPEN",
     created_days_ago: int = 7,
     blocked_by_native: list[int] | None = None,
     labels: list[str] | None = None,
@@ -539,7 +540,6 @@ def _item(
         "title": title,
         "body": body if body is not None else default_body,
         "milestone": ({"due_on": milestone_due} if milestone_due else None),
-        "state": state,
         "createdAt": datetime.fromtimestamp(created, tz=UTC).isoformat(),
         "blocked_by_native": blocked_by_native or [],
         "labels": labels or [],
@@ -683,7 +683,7 @@ class TestStageProposals:
         stage = import_stage()
         items = [
             _item(number=1, status="Blocked", blocked_by_native=[2]),
-            _item(number=2, status="Done", state="CLOSED"),
+            _item(number=2, status="Done"),
         ]
         result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
         assert len(result.unblocked) == 1
@@ -706,7 +706,7 @@ class TestStageProposals:
         stage = import_stage()
         items = [
             _item(number=1, blocked_by_native=[2]),  # blocked by #2 (open)
-            _item(number=2, status="Done", state="OPEN"),  # blocker still open
+            _item(number=2, status="In Progress"),  # blocker still open (not Done)
         ]
         result = stage.stage_proposals(items, up_next_cap=3, today=date.today())
         assert result.promotions == []
@@ -783,7 +783,6 @@ class TestFetchItemsForStage:
                             "number": 1,
                             "title": "Test",
                             "body": "Summary.",
-                            "state": "OPEN",
                             "createdAt": "2026-05-01T00:00:00Z",
                         },
                         "status": "Backlog",
@@ -850,7 +849,6 @@ class TestFetchItemsForStage:
                             "number": 2,
                             "title": "Unmilestoned",
                             "body": "Summary.",
-                            "state": "OPEN",
                             "createdAt": "2026-05-01T00:00:00Z",
                         },
                         "status": "Backlog",
@@ -884,6 +882,83 @@ class TestFetchItemsForStage:
 
         assert len(items) == 1
         assert items[0]["milestone"] is None
+
+    def test_done_blocker_reads_as_resolved_end_to_end(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A just-closed blocker (Done column) must unblock its dependent (#298).
+
+        Regression for the `content.state` family (#189/#223): `gh project
+        item-list --format json` does NOT populate `content.state`, so the
+        closed blocker's `content` block carries NO `state` key — `status:"Done"`
+        at the top level is the only populated signal. This test feeds that
+        realistic shape end-to-end through normalize → has_no_open_blockers;
+        it fails on the pre-#298 code (Done blocker reads as still-open) and
+        passes after keying resolution on `status`.
+        """
+        write_minimal_board(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        # #1 is Blocked by #2; #2 is closed → sits in the Done column with NO
+        # content.state key (the shape the live API actually returns).
+        items_json = json.dumps(
+            {
+                "items": [
+                    {
+                        "content": {
+                            "number": 1,
+                            "title": "Dependent",
+                            "body": "Summary.",
+                            "createdAt": "2026-05-01T00:00:00Z",
+                        },
+                        "status": "Blocked",
+                        "priority": "High",
+                    },
+                    {
+                        "content": {
+                            "number": 2,
+                            "title": "Closed blocker",
+                            "body": "Summary.",
+                            "createdAt": "2026-05-01T00:00:00Z",
+                        },
+                        "status": "Done",
+                        "priority": "High",
+                    },
+                ]
+            }
+        )
+        # #1 (open) is blockedBy #2 via a native dependency edge.
+        edges_json = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [
+                                {
+                                    "number": 1,
+                                    "blockedBy": {"nodes": [{"number": 2, "state": "CLOSED"}]},
+                                },
+                            ],
+                        }
+                    }
+                }
+            }
+        )
+        patch_gh_by_arg(
+            monkeypatch,
+            responses={"item-list": items_json, "blockedBy": edges_json},
+        )
+
+        stage = import_stage()
+        from skills.jared.scripts.lib.board import Board
+
+        board = Board.from_path(tmp_path / "docs" / "project-board.md")
+        items = stage.fetch_items_for_stage(board)
+
+        by_number = {i["number"]: i for i in items}
+        assert by_number[1]["blocked_by_native"] == [2]
+        assert stage.has_no_open_blockers(by_number[1], items) is True
 
 
 class TestMain:
