@@ -1039,6 +1039,21 @@ def fetch_issue_body_rest(repo: str, number: int) -> str:
     return data.get("body") or ""
 
 
+def fetch_issue_title_from_cwd(issue_number: int) -> str:
+    """Return the title for `issue_number` using the repo implied by CWD.
+
+    Calls ``gh issue view <N> --json title`` without an explicit ``--repo``
+    flag so `gh` resolves the repo from the current directory's git remote
+    (the same context worktree-add runs in). Returns empty string on any
+    failure so callers can fall back to a default slug gracefully.
+    """
+    try:
+        data = run_gh(["issue", "view", str(issue_number), "--json", "title"])
+        return str(data.get("title") or "")
+    except (GhInvocationError, OSError):
+        return ""
+
+
 def _child_env() -> dict[str, str]:
     """Env for `gh` subprocess calls, with GH_TOKEN/GITHUB_TOKEN removed.
 
