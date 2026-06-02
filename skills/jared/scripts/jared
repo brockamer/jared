@@ -35,6 +35,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     resolve_body,
     run_gh,
 )
+from lib.board_provider import BoardItem  # type: ignore[import-not-found]  # noqa: E402
 from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
 from lib import worktree as _worktree  # type: ignore[import-not-found]  # noqa: E402
 
@@ -681,6 +682,9 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # fix removed from the filing hot path. On failure the issue exists on
     # the repo but isn't fully configured on the board; the recovery line
     # below tells the user the exact command to finish the job.
+    # NOTE: provider.add_to_board lacks assume_new support, so this retains
+    # board.add_existing_to_board to preserve the ≤4 gh-call contract
+    # (test_file_makes_no_item_list_calls).
     try:
         board.add_existing_to_board(
             issue_number,
@@ -767,13 +771,18 @@ def _cmd_add_to_board(args: argparse.Namespace) -> int:
         name, value = spec.split("=", 1)
         fields.append((name, value))
 
-    board.add_existing_to_board(
+    board.provider.add_to_board(
         args.issue_number,
         priority=args.priority,
         status=status,
         labels=args.label or None,
         fields=fields,
     )
+    # Board mutations invalidate the on-disk snapshot so subsequent reads
+    # see the updated item list. Board._add_to_board used to call invalidate_items()
+    # internally; the provider layer deliberately does not touch the cache,
+    # so the CLI layer must drive invalidation explicitly here. (#52)
+    board.invalidate_items()
     print(f"OK: #{args.issue_number} on board → {status}, Priority={args.priority}")
     return 0
 
@@ -797,23 +806,12 @@ def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
 def _cmd_blocked_by(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     try:
-        dep_id = _resolve_issue_node_id(board, args.dependent)
-        blocker_id = _resolve_issue_node_id(board, args.blocker)
+        if args.remove:
+            board.provider.remove_blocked_by(args.dependent, args.blocker)
+        else:
+            board.provider.add_blocked_by(args.dependent, args.blocker)
     except GhInvocationError as e:
-        print(f"error: could not resolve issue node IDs: {e}", file=sys.stderr)
-        return 2
-
-    mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
-    query = (
-        "mutation($issueId: ID!, $blockingIssueId: ID!) { "
-        f"  {mutation_name}("
-        "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
-        "  ) { issue { number } }"
-        "}"
-    )
-    try:
-        board.run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
-    except GhInvocationError as e:
+        mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
         print(f"error: {mutation_name} failed: {e}", file=sys.stderr)
         return 2
 
@@ -862,24 +860,7 @@ def _cmd_comment(args: argparse.Namespace) -> int:
 
 def _cmd_set(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
-    item_id = board.find_item_id(args.issue_number)
-    field_id = board.field_id(args.field_name)
-    option_id = board.option_id(args.field_name, args.value)
-
-    board.run_gh(
-        [
-            "project",
-            "item-edit",
-            "--project-id",
-            board.project_id,
-            "--id",
-            item_id,
-            "--field-id",
-            field_id,
-            "--single-select-option-id",
-            option_id,
-        ]
-    )
+    board.provider.set_field(args.issue_number, args.field_name, args.value)
     # Project-field mutation invalidates the on-disk snapshot so other
     # processes (and the conversational layer) see fresh state on next
     # read. Covers _cmd_move and _cmd_close transitively (both delegate
@@ -910,7 +891,7 @@ def _session_labels(labels: Sequence[str]) -> list[str]:
     return sorted(matched, key=lambda s: int(s.split("-", 1)[1]))
 
 
-def _count_workstreams(items: list[dict[str, Any]]) -> int:
+def _count_workstreams(items: list[BoardItem]) -> int:
     """Per-session WIP arithmetic for In Progress items (#235).
 
     Workstream count = |distinct session-N labels seen| + |items with no
@@ -922,7 +903,7 @@ def _count_workstreams(items: list[dict[str, Any]]) -> int:
     distinct_sessions: set[str] = set()
     unlabeled = 0
     for item in items:
-        sessions = _session_labels(item.get("labels") or ())
+        sessions = _session_labels(item.labels)
         if sessions:
             distinct_sessions.update(sessions)
         else:
@@ -934,26 +915,23 @@ def _cmd_summary(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     if getattr(args, "fresh", False):
         board.invalidate_items()
-    items: list[dict[str, Any]] = board.open_items()
+    items: list[BoardItem] = board.provider.list_open_items()
 
-    def by_status(status: str) -> list[dict[str, Any]]:
-        return [i for i in items if i.get("status") == status]
+    def by_status(status: str) -> list[BoardItem]:
+        return [i for i in items if i.status == status]
 
-    def render_item(item: dict[str, Any], *, with_priority: bool = True) -> str:
-        content = item.get("content") or {}
-        num = content.get("number")
-        title = content.get("title", "")
+    def render_item(item: BoardItem, *, with_priority: bool = True) -> str:
         if with_priority:
-            prio = item.get("priority") or "-"
-            return f"  #{num} [{prio}] {title}"
-        return f"  #{num} {title}"
+            prio = item.priority or "-"
+            return f"  #{item.number} [{prio}] {item.title}"
+        return f"  #{item.number} {item.title}"
 
-    def render_in_progress_item(item: dict[str, Any]) -> str:
+    def render_in_progress_item(item: BoardItem) -> str:
         # Suffix any session-N labels so the collapse rendering is legible.
         # Dual-session labels on one item shouldn't happen — that's the
         # collision the discipline exists to prevent — but if they do,
         # show both rather than silently picking one.
-        sessions = _session_labels(item.get("labels") or ())
+        sessions = _session_labels(item.labels)
         base = render_item(item)
         if sessions:
             return f"{base} ({', '.join(sessions)})"
@@ -961,7 +939,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
 
     # Stuck-closed items: closed issues whose Status never auto-moved to
     # Done (typical drift path: PR-merge auto-close on a project where
-    # the built-in "Item closed → Done" workflow is off). open_items()
+    # the built-in "Item closed → Done" workflow is off). provider.list_open_items()
     # excludes closed items entirely (#185), so the detector pivots to a
     # 14-day recently-closed lookback + per-issue Status probe. Older
     # drift still gets flagged by sweep, which has the full board.
@@ -1039,8 +1017,8 @@ def _now_local_iso() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
-    """Wrapper that delegates to Board.open_items().
+def _fetch_board_items(board: Board) -> list[BoardItem]:
+    """Wrapper that delegates to board.provider.list_open_items().
 
     next-session-prompt's recommendation reads In Progress / Up Next, and
     its --session posture additionally scans Backlog for session-N-labeled
@@ -1050,7 +1028,7 @@ def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
     Closed items in the handoff come from `_fetch_recently_closed`, which
     runs separately.
     """
-    return board.open_items()
+    return board.provider.list_open_items()
 
 
 def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, Any]]:
@@ -1191,19 +1169,16 @@ def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
     return _extract_next_action(body)
 
 
-def _render_in_flight(item: dict[str, Any], note_one_liner: str | None) -> None:
+def _render_in_flight(item: BoardItem, note_one_liner: str | None) -> None:
     """Print one bullet for an In Progress item with optional last Session-note one-liner.
 
     Suffixes any `session-N` labels so the handoff carries the same
     grouping signal `jared summary` shows (#235).
     """
-    content = item.get("content") or {}
-    num = content.get("number")
-    prio = item.get("priority") or "-"
-    title = content.get("title", "")
-    sessions = _session_labels(item.get("labels") or ())
+    prio = item.priority or "-"
+    sessions = _session_labels(item.labels)
     suffix = f" ({', '.join(sessions)})" if sessions else ""
-    print(f"- #{num} [{prio}] {title}{suffix}")
+    print(f"- #{item.number} [{prio}] {item.title}{suffix}")
     if note_one_liner is not None:
         print(f'  Last session: "{note_one_liner}"')
 
@@ -1224,23 +1199,19 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     if getattr(args, "fresh", False):
         board.invalidate_items()
     items = _fetch_board_items(board)
-    in_progress = [i for i in items if i.get("status") == "In Progress"]
-    up_next_all = [i for i in items if i.get("status") == "Up Next"]
+    in_progress = [i for i in items if i.status == "In Progress"]
+    up_next_all = [i for i in items if i.status == "Up Next"]
     session_filter: int | None = getattr(args, "session", None)
     # Backlog items carrying the session-N label: staged but not yet promoted
     # to Up Next. propose-partition (#286) labels across all open issues, so
     # session work can sit in Backlog; surfacing it here keeps the --session
     # posture from lying with "(none labeled session-N)" while staged work exists.
-    staged_backlog: list[dict[str, Any]] = []
+    staged_backlog: list[BoardItem] = []
     if session_filter is not None:
         label = f"session-{session_filter}"
-        up_next_all = [
-            item for item in up_next_all if label in (item.get("labels") or ())
-        ]
+        up_next_all = [item for item in up_next_all if label in item.labels]
         staged_backlog = [
-            item
-            for item in items
-            if item.get("status") == "Backlog" and label in (item.get("labels") or ())
+            item for item in items if item.status == "Backlog" and label in item.labels
         ]
     up_next = up_next_all[:3]
     closed = _fetch_recently_closed(board, days=7)
@@ -1252,21 +1223,12 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     if in_progress:
         # One aliased GraphQL call covers every in-flight issue's comments,
         # replacing the per-issue `gh issue view --json comments` fan-out.
-        in_flight_numbers = [
-            n
-            for item in in_progress
-            if isinstance((n := (item.get("content") or {}).get("number")), int)
-        ]
+        in_flight_numbers = [item.number for item in in_progress]
         comments_by_number = fetch_recent_comments_batch(
             board.repo, in_flight_numbers, limit=10, cache="60s"
         )
         for item in in_progress:
-            num = (item.get("content") or {}).get("number")
-            note_one_liner = (
-                _latest_session_note_oneliner(comments_by_number.get(num, []))
-                if isinstance(num, int)
-                else None
-            )
+            note_one_liner = _latest_session_note_oneliner(comments_by_number.get(item.number, []))
             _render_in_flight(item, note_one_liner)
     else:
         print("(nothing in progress)")
@@ -1275,9 +1237,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print()
     if up_next:
         for item in up_next:
-            content = item.get("content") or {}
-            prio = item.get("priority") or "-"
-            print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+            prio = item.priority or "-"
+            print(f"- #{item.number} [{prio}] {item.title}")
     elif session_filter is not None and staged_backlog:
         # Nothing in Up Next, but staged work exists in Backlog (shown below).
         print(f"(none in Up Next — see staged session-{session_filter} below)")
@@ -1290,9 +1251,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
         print(f"## Session-{session_filter} staged (not yet in Up Next)")
         print()
         for item in staged_backlog:
-            content = item.get("content") or {}
-            prio = item.get("priority") or "-"
-            print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+            prio = item.priority or "-"
+            print(f"- #{item.number} [{prio}] {item.title}")
         print()
     print("## Recently closed (last 7 days)")
     print()
