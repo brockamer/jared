@@ -24,9 +24,10 @@ Two test kinds, treated differently:
 **Per-task gate (refactor discipline, not TDD ceremony):** this code is already tested. After each slice, the gate is:
 ```bash
 source .venv/bin/activate
-pytest -m 'not integration' -q && ruff check . && ruff format --check . && mypy
+pytest -m 'not integration' -q && ruff check . && mypy
+ruff format --check $(git diff --name-only main; git diff --name-only --cached) 2>/dev/null   # only files this work touched
 ```
-Expected: all green. Commit only when green.
+Expected: all green. Commit only when green. **Note:** `ruff format --check .` over the *whole tree* trips on `tests/test_stage.py`, which is unformatted on `main` itself (pre-existing, out of scope for #314 — do not reformat it). Only assert format-cleanliness on files this phase touches.
 
 **Dual-import gotcha (CLAUDE.md):** `from skills.jared.scripts.lib.board import Board` (tests) and `from lib.board import Board` (CLI) are two module objects. Keep `run_gh`/`run_gh_raw`/`run_graphql` as **module-level** functions in `board.py` (they already are, at lines 830/1120/1554); the provider calls *through* them, so `conftest`'s subprocess patching is unaffected. New files import them as `from .board import run_gh, run_gh_raw, run_graphql`.
 
