@@ -34,6 +34,29 @@ def test_get_item_prints_json(
     assert out["priority"] == "High"
 
 
+def test_get_item_fields_omits_unset_priority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Status SET but Priority UNSET → fields dict has 'status' key but no 'priority' key."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh(
+        monkeypatch,
+        stdout=graphql_item_response(
+            project_number=7, item_id="PVTI_bbb", status="Backlog", priority=None
+        ),
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "get-item", "55"])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    out = json.loads(captured.out)
+    fields = out["fields"]
+    assert "status" in fields, "status should be present when set"
+    assert "priority" not in fields, "priority key must be omitted when unset"
+
+
 def test_get_item_issue_not_found_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

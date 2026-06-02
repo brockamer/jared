@@ -396,6 +396,53 @@ def test_get_item_returns_none_when_not_on_board(monkeypatch: pytest.MonkeyPatch
     assert _provider().get_item(99) is None
 
 
+def test_find_item_id_uses_scoped_query_not_item_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_item (and _find_item_id) must use a scoped per-issue GraphQL query,
+    NOT `gh project item-list` (#109 performance guard).
+
+    Mirrors test_list_open_items_does_not_call_project_item_list for the
+    find_item_id path: exactly one graphql call, zero project item-list calls.
+    """
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "api graphql": json.dumps(
+                {
+                    "data": {
+                        "repository": {
+                            "issue": {
+                                "projectItems": {
+                                    "nodes": [
+                                        {
+                                            "id": "PVTI_scoped",
+                                            "project": {"number": 7},
+                                            "fieldValues": {"nodes": []},
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        },
+    )
+    _provider().get_item(7)
+
+    joined_calls = [" ".join(argv) for argv in calls]
+    # Guard: no full-list scan
+    assert not any("project item-list" in c for c in joined_calls), (
+        f"_find_item_id must NOT call `gh project item-list`; saw {joined_calls!r}"
+    )
+    # Exactly one scoped graphql lookup
+    graphql_calls = [c for c in joined_calls if "api graphql" in c]
+    assert len(graphql_calls) == 1, (
+        f"expected exactly 1 scoped graphql call; got {len(graphql_calls)}: {graphql_calls!r}"
+    )
+
+
 # ------------------------------------------------------------------ #
 # get_body                                                             #
 # ------------------------------------------------------------------ #
@@ -741,6 +788,13 @@ def test_add_to_board_extra_fields_emit_aliased_setextra_mutation(
     assert "setExtra0" in joined
     # Size resolved: field-id F3 / option-id SL
     assert "F3" in joined and "SL" in joined
+    # Single round-trip: all three fields must land in exactly ONE field-mutation call
+    # (a regression to per-field separate mutations would produce 3+).
+    mutation_calls = [c for c in graphql_calls if "updateProjectV2ItemFieldValue" in " ".join(c)]
+    assert len(mutation_calls) == 1, (
+        f"setExtra fields must ride the same aliased mutation (single round-trip); "
+        f"got {len(mutation_calls)} mutation calls"
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -943,6 +997,30 @@ def test_file_unknown_status_raises_before_any_gh_call(
 # ------------------------------------------------------------------ #
 # set_field                                                             #
 # ------------------------------------------------------------------ #
+
+
+def test_set_field_raises_item_not_found_when_off_board(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_field raises ItemNotFound when the issue is not on the board.
+
+    Mutation-check: replacing `raise ItemNotFound` with `return ""` in
+    _find_item_id makes this test fail (the item-edit would fire instead of
+    an exception being raised).
+    """
+    from skills.jared.scripts.lib.board import ItemNotFound
+
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": json.dumps(
+                {"data": {"repository": {"issue": {"projectItems": {"nodes": []}}}}}
+            ),
+            "item-edit": "{}",
+        },
+    )
+    with pytest.raises(ItemNotFound):
+        _provider().set_field(123456, "Status", "Done")
 
 
 def test_set_field_emits_item_edit_with_resolved_ids(
