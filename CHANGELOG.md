@@ -7,6 +7,15 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.28.0 — 2026-06-02
+
+**Refactor**
+- Board operations now route through a backend-neutral `BoardProvider` contract (`lib/board_provider.py`) — semantic methods speaking stable integer issue refs and neutral dataclasses (`BoardItem`, `Comment`, `Edge`, `Milestone`), with all `gh`/GraphQL/field-id/option-id detail sealed inside the sole implementation, `GitHubProjectsProvider` (`lib/github_provider.py`). `Board` becomes a thin config-parsing facade exposing `board.provider`, and the `jared` CLI subcommands route through it instead of raw `gh`. Behavior-preserving groundwork for the KanbanFlow back-end (epic #313, Phase 1 of 6). (#320)
+
+**Doctrine**
+- Codified the lightweight, theme-based milestone convention in `docs/project-board.md` — theme names over version numbers, one phase-milestone open at a time, a one-sentence deliverable required, dates optional. (#311)
+- Corrected the milestone Roadmap-view guidance: a dateless board surfaces its active phase via a Milestone-grouped Table/Board view, since GitHub's date-driven Roadmap layout renders an empty timeline against intentionally dateless milestones. (#312)
+
 ## v0.27.1 — 2026-06-01
 
 **Bug fixes**
