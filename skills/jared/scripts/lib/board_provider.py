@@ -65,15 +65,6 @@ class Milestone:
     due: str | None = None
 
 
-@dataclass
-class TieCandidate:
-    number: int
-    title: str
-    body: str
-    labels: list[str] = field(default_factory=list)
-    milestone: str | None = None
-
-
 @runtime_checkable
 class BoardProvider(Protocol):
     # --- reads ---
@@ -81,10 +72,8 @@ class BoardProvider(Protocol):
     def list_open_items(self) -> list[BoardItem]: ...
     def get_body(self, ref: IssueRef) -> str: ...
     def list_comments(self, ref: IssueRef) -> list[Comment]: ...
-    def fetch_ties(self, *, include_bodies: bool = True) -> list[TieCandidate]: ...
     def fetch_blocked_by_edges(self) -> list[Edge]: ...
     def recently_closed(self, *, days: int) -> list[dict[str, object]]: ...
-    def get_issue_title(self, ref: IssueRef) -> str: ...
 
     # --- writes ---
     def file(

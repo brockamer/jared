@@ -2,7 +2,7 @@
 
 Mirrors the observable-data assertions in test_board_open_items.py and
 test_board_fetch_for_ties.py, but against the provider and the neutral
-dataclass shapes (BoardItem, TieCandidate, Comment, Edge).
+dataclass shapes (BoardItem, Comment, Edge).
 
 All gh/GraphQL calls flow through board.py's module-level subprocess seam so
 patch_gh / patch_gh_by_arg intercept them correctly.
@@ -22,7 +22,6 @@ from skills.jared.scripts.lib.board_provider import (
     Comment,
     Edge,
     Milestone,
-    TieCandidate,
 )
 from skills.jared.scripts.lib.github_provider import GitHubProjectsProvider
 from tests.conftest import patch_gh, patch_gh_by_arg
@@ -463,202 +462,6 @@ def test_list_comments_empty_when_no_comments(monkeypatch: pytest.MonkeyPatch) -
         stdout=json.dumps({"data": {"repository": {"i10": {"comments": {"nodes": []}}}}}),
     )
     assert _provider().list_comments(10) == []
-
-
-# ------------------------------------------------------------------ #
-# fetch_ties                                                           #
-# ------------------------------------------------------------------ #
-
-_TIES_GQL_RESPONSE_FULL = {
-    "data": {
-        "repository": {
-            "issues": {
-                "nodes": [
-                    {
-                        "number": 10,
-                        "title": "Issue 10",
-                        "body": "Mentions #20",
-                        "labels": {"nodes": [{"name": "perf"}, {"name": "enhancement"}]},
-                        "milestone": {"title": "Phase 2 — perf settled"},
-                        "projectItems": {
-                            "nodes": [
-                                {
-                                    "fieldValueByName": {"name": "Backlog"},
-                                    "priority": {"name": "Medium"},
-                                }
-                            ]
-                        },
-                        "blockedBy": {"nodes": []},
-                    },
-                    {
-                        "number": 20,
-                        "title": "Issue 20",
-                        "body": "follow-up",
-                        "labels": {"nodes": []},
-                        "milestone": None,
-                        "projectItems": {
-                            "nodes": [
-                                {
-                                    "fieldValueByName": {"name": "Backlog"},
-                                    "priority": {"name": "Low"},
-                                }
-                            ]
-                        },
-                        "blockedBy": {"nodes": [{"number": 10}]},
-                    },
-                ],
-                "pageInfo": {"hasNextPage": False, "endCursor": None},
-            }
-        }
-    }
-}
-
-
-def test_fetch_ties_returns_tie_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """fetch_ties returns TieCandidate objects with correct fields."""
-    patch_gh(monkeypatch, stdout=json.dumps(_TIES_GQL_RESPONSE_FULL))
-    results = _provider().fetch_ties()
-    assert len(results) == 2
-    assert all(isinstance(r, TieCandidate) for r in results)
-    by_n = {r.number: r for r in results}
-    assert by_n[10].title == "Issue 10"
-    assert by_n[10].body == "Mentions #20"
-    assert "perf" in by_n[10].labels
-    assert "enhancement" in by_n[10].labels
-    assert by_n[10].milestone == "Phase 2 — perf settled"
-    assert by_n[20].milestone is None
-    # blocked_by is not in TieCandidate (dropped during mapping)
-
-
-def test_fetch_ties_filters_done(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Issues with Status=Done are filtered before TieCandidate construction."""
-    response = {
-        "data": {
-            "repository": {
-                "issues": {
-                    "nodes": [
-                        {
-                            "number": 1,
-                            "title": "Active",
-                            "body": "",
-                            "labels": {"nodes": []},
-                            "milestone": None,
-                            "projectItems": {
-                                "nodes": [
-                                    {"fieldValueByName": {"name": "In Progress"}, "priority": {}}
-                                ]
-                            },
-                            "blockedBy": {"nodes": []},
-                        },
-                        {
-                            "number": 2,
-                            "title": "Finished",
-                            "body": "",
-                            "labels": {"nodes": []},
-                            "milestone": None,
-                            "projectItems": {
-                                "nodes": [{"fieldValueByName": {"name": "Done"}, "priority": {}}]
-                            },
-                            "blockedBy": {"nodes": []},
-                        },
-                    ],
-                    "pageInfo": {"hasNextPage": False, "endCursor": None},
-                }
-            }
-        }
-    }
-    patch_gh(monkeypatch, stdout=json.dumps(response))
-    results = _provider().fetch_ties()
-    assert len(results) == 1
-    assert results[0].number == 1
-
-
-@pytest.mark.parametrize(
-    ("include_bodies", "expect_body_field"),
-    [(True, True), (False, False)],
-)
-def test_fetch_ties_body_field_selection_tracks_include_bodies(
-    monkeypatch: pytest.MonkeyPatch, include_bodies: bool, expect_body_field: bool
-) -> None:
-    """The GraphQL query selects the `body` field iff include_bodies is True.
-
-    The fixture node carries no `body` key, so the returned TieCandidate.body is
-    "" in both modes (body-propagation in True mode is covered separately by
-    test_fetch_ties_returns_tie_candidates). This test pins the *wire-level*
-    field selection: when include_bodies=False the query must omit `body`, so a
-    real partial-mode call skips the (large) body payload.
-    """
-    calls = patch_gh_by_arg(
-        monkeypatch,
-        responses={
-            "api graphql": json.dumps(
-                {
-                    "data": {
-                        "repository": {
-                            "issues": {
-                                "nodes": [
-                                    {
-                                        "number": 10,
-                                        "title": "Issue 10",
-                                        "labels": {"nodes": []},
-                                        "milestone": None,
-                                        "projectItems": {
-                                            "nodes": [
-                                                {
-                                                    "fieldValueByName": {"name": "Backlog"},
-                                                    "priority": {"name": "Medium"},
-                                                }
-                                            ]
-                                        },
-                                        "blockedBy": {"nodes": []},
-                                    }
-                                ],
-                                "pageInfo": {"hasNextPage": False, "endCursor": None},
-                            }
-                        }
-                    }
-                }
-            )
-        },
-    )
-    results = _provider().fetch_ties(include_bodies=include_bodies)
-    assert len(results) == 1
-    assert results[0].body == ""
-    # The query text is embedded in the `-f query=...` argv arg. The `body` field
-    # selection sits on its own line, so a standalone "body\n" substring is
-    # present iff the query selected the body field. ("title"/"blockedBy"/etc.
-    # contain no "body\n" token, so this discriminates cleanly.)
-    gql_calls = [" ".join(argv) for argv in calls if "api" in argv and "graphql" in argv]
-    assert gql_calls, "expected at least one graphql call"
-    assert all(("body\n" in call) is expect_body_field for call in gql_calls)
-
-
-def test_fetch_ties_uses_5m_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """fetch_ties passes cache='5m' to the GraphQL call."""
-    calls = patch_gh_by_arg(
-        monkeypatch,
-        responses={
-            "api graphql": json.dumps(
-                {
-                    "data": {
-                        "repository": {
-                            "issues": {
-                                "nodes": [],
-                                "pageInfo": {"hasNextPage": False, "endCursor": None},
-                            }
-                        }
-                    }
-                }
-            )
-        },
-    )
-    _provider().fetch_ties()
-    # Verify --cache 5m appears in the gh invocation
-    gql_calls = [argv for argv in calls if "api" in argv and "graphql" in argv]
-    assert gql_calls, "expected at least one graphql call"
-    assert any("--cache" in argv and "5m" in argv for argv in gql_calls), (
-        f"expected --cache 5m in graphql call, got {gql_calls!r}"
-    )
 
 
 # ------------------------------------------------------------------ #
