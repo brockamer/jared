@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from . import cache
 
 if TYPE_CHECKING:
+    from .github_provider import GitHubProjectsProvider
     from .ties import OpenIssueForTies
 
 
@@ -77,6 +78,11 @@ class Board:
     # constructed via those entry points (e.g. direct dataclass construction
     # in tests that don't need this feature).
     _raw_doc: str = field(default="", repr=False)
+    # Backend selector — defaults to "github". Parsed from the optional
+    # `- backend: <x>` bullet under `## Jared config` in project-board.md.
+    backend: str = "github"
+    # Cached provider instance, lazily populated by the `provider` property.
+    _provider: GitHubProjectsProvider | None = field(default=None, repr=False)
 
     @classmethod
     def find_default_path(cls, project_root: Path | None = None) -> Path | None:
@@ -186,6 +192,7 @@ class Board:
         field_ids, field_options = cls._parse_field_blocks(text)
         jared_config = cls._parse_jared_config(text)
         session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
+        backend = jared_config.get("backend", "github")
         session_start_checks = cls._parse_session_start_checks(text)
         operator_docs, code_surface = cls._parse_operator_docs(text)
 
@@ -202,6 +209,7 @@ class Board:
             operator_docs=operator_docs,
             code_surface=code_surface,
             _raw_doc=text,
+            backend=backend,
         )
 
     @staticmethod
@@ -381,6 +389,32 @@ class Board:
             return DEFAULT_LABEL_STOP_WORDS
         words = [w.strip() for w in bullet_match.group("words").split(",")]
         return frozenset(w for w in words if w)
+
+    @property
+    def provider(self) -> GitHubProjectsProvider:
+        """Return the configured backend provider, lazily constructed.
+
+        Only 'github' is implemented; any other `backend` value raises
+        BoardConfigError so callers get an actionable message rather than
+        an AttributeError deep in provider code.
+        """
+        if self.backend != "github":
+            raise BoardConfigError(
+                f"backend '{self.backend}' has no provider yet (Phase 3+). "
+                "Only 'github' is implemented."
+            )
+        if self._provider is None:
+            from .github_provider import GitHubProjectsProvider
+
+            self._provider = GitHubProjectsProvider(
+                project_number=self.project_number,
+                project_id=self.project_id,
+                owner=self.owner,
+                repo=self.repo,
+                field_ids=self._field_ids,
+                field_options=self._field_options,
+            )
+        return self._provider
 
     def run_gh(
         self, args: list[str], *, cache: str | None = None, input_text: str | None = None

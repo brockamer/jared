@@ -1702,3 +1702,47 @@ def test_fetch_recent_closed_prs_swallows_per_pr_view_failure(
             "files": ["src/bar.py"],
         }
     ]
+
+
+def test_board_provider_github_default(tmp_path: Path) -> None:
+    """Board with no backend bullet defaults to 'github' and exposes a
+    GitHubProjectsProvider whose capabilities() equals the full Capability set."""
+    from skills.jared.scripts.lib.board import Board
+    from skills.jared.scripts.lib.board_provider import Capability
+    from skills.jared.scripts.lib.github_provider import GitHubProjectsProvider
+
+    board = Board.from_path(_minimal_board(tmp_path))
+
+    assert board.backend == "github"
+    prov = board.provider
+    assert isinstance(prov, GitHubProjectsProvider)
+    assert prov.capabilities() == frozenset(Capability)
+
+
+def test_board_provider_unknown_backend_raises(tmp_path: Path) -> None:
+    """Board parsed from a doc with `- backend: kanbanflow` raises BoardConfigError
+    when .provider is accessed (Phase 3+ backends not yet implemented).
+
+    This also exercises the parse wiring: jared_config.get('backend') flows
+    through _parse into Board.backend for non-default values."""
+    from skills.jared.scripts.lib.board import Board, BoardConfigError
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+        - backend: kanbanflow
+        """)
+    )
+
+    board = Board.from_path(board_md)
+    assert board.backend == "kanbanflow"
+    with pytest.raises(BoardConfigError, match="kanbanflow"):
+        _ = board.provider
