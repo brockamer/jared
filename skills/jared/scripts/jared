@@ -9,9 +9,8 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +27,18 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     ItemNotFound,
     OptionNotFound,
     _find_project_root,
+    fetch_issue_title_from_cwd,
     fetch_project_items_batch,
     fetch_recent_comments_batch,
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
-    run_gh,
+)
+from lib.board_provider import BoardItem  # type: ignore[import-not-found]  # noqa: E402
+from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    FileBoardSetupError,
+    FileCreateError,
+    FileRoundTripError,
 )
 from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
 from lib import worktree as _worktree  # type: ignore[import-not-found]  # noqa: E402
@@ -434,21 +439,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _cmd_get_item(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
-    item = board.fetch_item_for_issue(args.issue_number)
-    if not item or not item.get("id"):
+    item = board.provider.get_item(args.issue_number)
+    if item is None or not item.provider_ref:
         from lib.board import ItemNotFound  # type: ignore[import-not-found]
 
         raise ItemNotFound(
             f"No project item for issue #{args.issue_number} in project "
             f"{board.project_number}. Is the issue added to the board?"
         )
-    excluded = {"id"}
+    # Build the fields dict to match the pre-migration shape: only include
+    # status/priority when they are SET (non-None), then append any extra
+    # single-select fields from BoardItem.fields (which already excludes Nones).
+    fields_out: dict[str, object] = {}
+    if item.status is not None:
+        fields_out["status"] = item.status
+    if item.priority is not None:
+        fields_out["priority"] = item.priority
+    fields_out.update(item.fields)
     output = {
         "issue_number": args.issue_number,
-        "item_id": item["id"],
-        "status": item.get("status"),
-        "priority": item.get("priority"),
-        "fields": {k: v for k, v in item.items() if k not in excluded},
+        "item_id": item.provider_ref,
+        "status": item.status,
+        "priority": item.priority,
+        "fields": fields_out,
     }
     print(json.dumps(output, indent=2))
     return 0
@@ -476,46 +489,19 @@ def _cmd_close(args: argparse.Namespace) -> int:
     # close failure leaves a recoverable state (open issue + stray comment,
     # user re-runs `jared close <N>` without --body).
     if body is not None:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
-            tf.write(body)
-            tmp_path = tf.name
-        try:
-            comment_url = board.run_gh_raw(
-                [
-                    "issue",
-                    "comment",
-                    str(args.issue_number),
-                    "--repo",
-                    board.repo,
-                    "--body-file",
-                    tmp_path,
-                ]
-            )
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
+        comment_url = board.provider.comment(args.issue_number, body)
         print(f"OK: commented on #{args.issue_number} ({comment_url})")
 
-    board.run_gh(
-        [
-            "issue",
-            "close",
-            str(args.issue_number),
-            "--repo",
-            board.repo,
-        ]
-    )
-
-    # Defense-in-depth (#137): GitHub's "Item closed → Done" project workflow
-    # has an observable false-positive mode where a post-close poll can claim
-    # Status=Done while the field hasn't actually changed (verified #135 repro).
-    # Always run the explicit set — cheap no-op if the workflow did fire,
-    # genuine save if it didn't. Source of truth is the field write, not a poll.
-    args.field_name = "Status"
-    args.value = "Done"
-    rc = _cmd_set(args)
-    if rc == 0:
-        print(f"OK: closed #{args.issue_number}, Status=Done")
-    return rc
+    # provider.close: gh issue close + defense-in-depth Status=Done (#137).
+    # PII pre-flight for the comment stays above (CLI layer).
+    board.provider.close(args.issue_number)
+    # Board mutations invalidate the on-disk snapshot so subsequent reads
+    # see the updated item list and closed-item cache. (#52 / #186)
+    board.invalidate_items()
+    board.invalidate_closed_items()
+    print(f"OK: set Status=Done on issue #{args.issue_number}")
+    print(f"OK: closed #{args.issue_number}, Status=Done")
+    return 0
 
 
 def _cmd_file(args: argparse.Namespace) -> int:
@@ -530,14 +516,6 @@ def _cmd_file(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     status = args.status or "Backlog"
 
-    # Pre-resolve before we touch GitHub: a misconfigured board fails fast
-    # without creating an orphan issue. add_existing_to_board re-resolves
-    # the same names — the duplication is intentional, since this catches
-    # bad config *before* `gh issue create` is called.
-    board.field_id("Priority")
-    board.option_id("Priority", args.priority)
-    board.field_id("Status")
-    board.option_id("Status", status)
     extra_specs: list[tuple[str, str]] = []
     for spec in args.field or []:
         if "=" not in spec:
@@ -547,8 +525,6 @@ def _cmd_file(args: argparse.Namespace) -> int:
             )
             return 1
         name, value = spec.split("=", 1)
-        board.field_id(name)
-        board.option_id(name, value)
         extra_specs.append((name, value))
 
     # Milestone resolution (#238). Every filing must declare intent: either
@@ -559,14 +535,10 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # is cheaper than catching it in every sweep.
     milestone_title: str | None = None
     if not args.no_milestone:
-        # Query params on the URL — `gh api -f key=value` is a request body
-        # field, and on /milestones a body flips GET-list into POST-create.
-        milestones = board.run_gh(["api", f"repos/{board.repo}/milestones?state=open&per_page=100"])
-        # Defensive: REST returns a list; an empty/missing payload is treated
-        # as "no open milestones" rather than crashing on attribute access.
-        open_titles = [
-            m.get("title", "") for m in (milestones if isinstance(milestones, list) else [])
-        ]
+        # provider.list_milestones() uses the query-string form:
+        # `gh api repos/{repo}/milestones?state=open&per_page=100`
+        # (NOT -f key=value which flips GET-list into POST-create — #254).
+        open_titles = [m.name for m in board.provider.list_milestones()]
         if args.milestone is None:
             print(
                 "error: --milestone NAME or --no-milestone is required (see #238).",
@@ -603,8 +575,7 @@ def _cmd_file(args: argparse.Namespace) -> int:
         milestone_title = args.milestone
 
     # Resolve body before any gh call: inline --body, --body-file path, or
-    # --body-file - (stdin). gh issue create still wants a path, so we round-
-    # trip through a temp file. Single resolution seam keeps #97's redactor
+    # --body-file - (stdin). Single resolution seam keeps #97's redactor
     # ergonomic — one place to scan.
     body = resolve_body(args.body, args.body_file)
 
@@ -616,95 +587,53 @@ def _cmd_file(args: argparse.Namespace) -> int:
         print_redaction_diff(report, file=sys.stderr)
         return 2
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as tf:
-        tf.write(body)
-        body_tmp_path = tf.name
-
-    # Round-trip fence: read the staged file back and verify it matches
-    # what we tried to write. Catches a different failure mode than the
-    # gh-error path below — silent staging corruption (filesystem oddity,
-    # future routing surprise) where gh would otherwise succeed with
-    # empty/wrong body and the user gets a corrupt issue with no signal
-    # anything went wrong. Cheap I/O on a tmpfs-backed file.
-    if Path(body_tmp_path).read_text(encoding="utf-8") != body:
+    # provider.file() owns: staging, round-trip fence, gh issue create,
+    # item-add, and field mutations (all with assume_new=True). It raises
+    # typed exceptions so this layer can produce the right error messages.
+    try:
+        item = board.provider.file(
+            title=args.title,
+            body=body,
+            priority=args.priority,
+            status=status,
+            labels=args.label or None,
+            milestone=milestone_title,
+            fields=extra_specs or None,
+        )
+    except FileRoundTripError as e:
         print(
             "error: inline --body failed to stage to temp file (round-trip mismatch)",
             file=sys.stderr,
         )
         print(
-            f"  staged at: {body_tmp_path} — retry with --body-file <path>",
+            f"  staged at: {e.staged_path} — retry with --body-file <path>",
             file=sys.stderr,
         )
-        Path(body_tmp_path).unlink(missing_ok=True)
         return 2
-
-    create_args = [
-        "issue",
-        "create",
-        "--repo",
-        board.repo,
-        "--title",
-        args.title,
-        "--body-file",
-        body_tmp_path,
-    ]
-    for label in args.label or []:
-        create_args.extend(["--label", label])
-    if milestone_title is not None:
-        create_args.extend(["--milestone", milestone_title])
-    # Preserve the staged temp file on any create-step failure so the user can
-    # retry without re-typing the body. #100: closes the fallback loop where
-    # an opaque `jared file` failure → Claude shells out to plain `gh issue
-    # create` → off-board ghost issue. The staged file is cleaned up on the
-    # success path further down.
-    try:
-        issue_url = board.run_gh_raw(create_args)
-    except GhInvocationError as e:
+    except FileCreateError as e:
         print(f"error: gh issue create failed: {e}", file=sys.stderr)
         print(
-            f"  body staged at: {body_tmp_path} (retry with: --body-file {body_tmp_path})",
+            f"  body staged at: {e.staged_path} (retry with: --body-file {e.staged_path})",
             file=sys.stderr,
         )
         return 2
-    if not issue_url.startswith("http"):
-        print(f"error: unexpected gh issue create output: {issue_url[:200]}", file=sys.stderr)
+    except FileBoardSetupError as e:
+        recovery = _build_add_to_board_command(e.issue_number, args.priority, status, extra_specs)
         print(
-            f"  body staged at: {body_tmp_path} (retry with: --body-file {body_tmp_path})",
-            file=sys.stderr,
-        )
-        return 2
-    issue_number = int(issue_url.rsplit("/", 1)[-1])
-    # Past the create step — issue exists, no need to keep the staged body.
-    Path(body_tmp_path).unlink(missing_ok=True)
-
-    # assume_new=True skips the find_item_id membership scan that #4's perf
-    # fix removed from the filing hot path. On failure the issue exists on
-    # the repo but isn't fully configured on the board; the recovery line
-    # below tells the user the exact command to finish the job.
-    try:
-        board.add_existing_to_board(
-            issue_number,
-            priority=args.priority,
-            status=status,
-            fields=extra_specs,
-            assume_new=True,
-        )
-    except (
-        GhInvocationError,
-        FieldNotFound,
-        OptionNotFound,
-        ItemNotFound,
-    ) as e:
-        recovery = _build_add_to_board_command(issue_number, args.priority, status, extra_specs)
-        print(
-            f"error: filed issue #{issue_number} ({issue_url}) but failed to "
-            f"finish board setup: {e}",
+            f"error: filed issue #{e.issue_number} ({e.issue_url}) but failed to "
+            f"finish board setup: {e.cause}",
             file=sys.stderr,
         )
         print(f"  recover with: {recovery}", file=sys.stderr)
         return 2
 
-    print(f"OK: filed #{issue_number} → {status}, Priority={args.priority}")
+    # Board mutations invalidate the on-disk snapshot so stage.py / sweep.py
+    # cold-path reads see the just-filed issue. Board._add_to_board used to
+    # call invalidate_items() internally; the provider layer deliberately does
+    # not touch the cache, so the CLI layer must drive invalidation here. (#52)
+    board.invalidate_items()
+    issue_url = f"https://github.com/{board.repo}/issues/{item.number}"
+    print(f"OK: filed #{item.number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
     return 0
 
@@ -767,53 +696,31 @@ def _cmd_add_to_board(args: argparse.Namespace) -> int:
         name, value = spec.split("=", 1)
         fields.append((name, value))
 
-    board.add_existing_to_board(
+    board.provider.add_to_board(
         args.issue_number,
         priority=args.priority,
         status=status,
         labels=args.label or None,
         fields=fields,
     )
+    # Board mutations invalidate the on-disk snapshot so subsequent reads
+    # see the updated item list. Board._add_to_board used to call invalidate_items()
+    # internally; the provider layer deliberately does not touch the cache,
+    # so the CLI layer must drive invalidation explicitly here. (#52)
+    board.invalidate_items()
     print(f"OK: #{args.issue_number} on board → {status}, Priority={args.priority}")
     return 0
-
-
-def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
-    data = board.run_gh(
-        [
-            "issue",
-            "view",
-            str(issue_number),
-            "--repo",
-            board.repo,
-            "--json",
-            "id",
-        ]
-    )
-    node_id: str = data["id"]
-    return node_id
 
 
 def _cmd_blocked_by(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     try:
-        dep_id = _resolve_issue_node_id(board, args.dependent)
-        blocker_id = _resolve_issue_node_id(board, args.blocker)
+        if args.remove:
+            board.provider.remove_blocked_by(args.dependent, args.blocker)
+        else:
+            board.provider.add_blocked_by(args.dependent, args.blocker)
     except GhInvocationError as e:
-        print(f"error: could not resolve issue node IDs: {e}", file=sys.stderr)
-        return 2
-
-    mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
-    query = (
-        "mutation($issueId: ID!, $blockingIssueId: ID!) { "
-        f"  {mutation_name}("
-        "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
-        "  ) { issue { number } }"
-        "}"
-    )
-    try:
-        board.run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
-    except GhInvocationError as e:
+        mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
         print(f"error: {mutation_name} failed: {e}", file=sys.stderr)
         return 2
 
@@ -836,55 +743,22 @@ def _cmd_comment(args: argparse.Namespace) -> int:
         print_redaction_diff(report, file=sys.stderr)
         return 2
 
-    # gh issue comment requires a file path, even when we got the body
-    # from stdin — write a temp file, invoke, clean up.
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
-        tf.write(body)
-        tmp_path = tf.name
-    try:
-        # gh issue comment prints the new comment's URL as plain text, not JSON.
-        comment_url = board.run_gh_raw(
-            [
-                "issue",
-                "comment",
-                str(args.issue_number),
-                "--repo",
-                board.repo,
-                "--body-file",
-                tmp_path,
-            ]
-        )
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    # gh issue comment prints the new comment's URL as plain text, not JSON.
+    # provider.comment() stages the body in a temp file, posts, cleans up,
+    # and returns the URL.
+    comment_url = board.provider.comment(args.issue_number, body)
     print(f"OK: commented on #{args.issue_number} ({comment_url})")
     return 0
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
-    item_id = board.find_item_id(args.issue_number)
-    field_id = board.field_id(args.field_name)
-    option_id = board.option_id(args.field_name, args.value)
-
-    board.run_gh(
-        [
-            "project",
-            "item-edit",
-            "--project-id",
-            board.project_id,
-            "--id",
-            item_id,
-            "--field-id",
-            field_id,
-            "--single-select-option-id",
-            option_id,
-        ]
-    )
+    board.provider.set_field(args.issue_number, args.field_name, args.value)
     # Project-field mutation invalidates the on-disk snapshot so other
     # processes (and the conversational layer) see fresh state on next
-    # read. Covers _cmd_move and _cmd_close transitively (both delegate
-    # here). Without this, a `jared move` followed by `jared summary`
-    # within TTL returns the pre-move snapshot. (#52 Phase 1.)
+    # read. Covers _cmd_move transitively (it delegates here). Without
+    # this, a `jared move` followed by `jared summary` within TTL returns
+    # the pre-move snapshot. (#52 Phase 1.)
     board.invalidate_items()
     # Status writes are the only first-party path that can move an item
     # into or out of the closed-cache's set, so invalidate it conditionally
@@ -910,7 +784,7 @@ def _session_labels(labels: Sequence[str]) -> list[str]:
     return sorted(matched, key=lambda s: int(s.split("-", 1)[1]))
 
 
-def _count_workstreams(items: list[dict[str, Any]]) -> int:
+def _count_workstreams(items: list[BoardItem]) -> int:
     """Per-session WIP arithmetic for In Progress items (#235).
 
     Workstream count = |distinct session-N labels seen| + |items with no
@@ -922,7 +796,7 @@ def _count_workstreams(items: list[dict[str, Any]]) -> int:
     distinct_sessions: set[str] = set()
     unlabeled = 0
     for item in items:
-        sessions = _session_labels(item.get("labels") or ())
+        sessions = _session_labels(item.labels)
         if sessions:
             distinct_sessions.update(sessions)
         else:
@@ -934,26 +808,23 @@ def _cmd_summary(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     if getattr(args, "fresh", False):
         board.invalidate_items()
-    items: list[dict[str, Any]] = board.open_items()
+    items: list[BoardItem] = board.provider.list_open_items()
 
-    def by_status(status: str) -> list[dict[str, Any]]:
-        return [i for i in items if i.get("status") == status]
+    def by_status(status: str) -> list[BoardItem]:
+        return [i for i in items if i.status == status]
 
-    def render_item(item: dict[str, Any], *, with_priority: bool = True) -> str:
-        content = item.get("content") or {}
-        num = content.get("number")
-        title = content.get("title", "")
+    def render_item(item: BoardItem, *, with_priority: bool = True) -> str:
         if with_priority:
-            prio = item.get("priority") or "-"
-            return f"  #{num} [{prio}] {title}"
-        return f"  #{num} {title}"
+            prio = item.priority or "-"
+            return f"  #{item.number} [{prio}] {item.title}"
+        return f"  #{item.number} {item.title}"
 
-    def render_in_progress_item(item: dict[str, Any]) -> str:
+    def render_in_progress_item(item: BoardItem) -> str:
         # Suffix any session-N labels so the collapse rendering is legible.
         # Dual-session labels on one item shouldn't happen — that's the
         # collision the discipline exists to prevent — but if they do,
         # show both rather than silently picking one.
-        sessions = _session_labels(item.get("labels") or ())
+        sessions = _session_labels(item.labels)
         base = render_item(item)
         if sessions:
             return f"{base} ({', '.join(sessions)})"
@@ -961,7 +832,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
 
     # Stuck-closed items: closed issues whose Status never auto-moved to
     # Done (typical drift path: PR-merge auto-close on a project where
-    # the built-in "Item closed → Done" workflow is off). open_items()
+    # the built-in "Item closed → Done" workflow is off). provider.list_open_items()
     # excludes closed items entirely (#185), so the detector pivots to a
     # 14-day recently-closed lookback + per-issue Status probe. Older
     # drift still gets flagged by sweep, which has the full board.
@@ -1024,23 +895,13 @@ def _extract_next_action(session_note_body: str) -> str | None:
     return " ".join(text.split())
 
 
-def _date_n_days_ago(days: int) -> str:
-    """ISO date (YYYY-MM-DD) `days` days ago in UTC.
-
-    Used for `gh issue list --search closed:>=DATE`, which interprets
-    the date in UTC. Local-time math would create off-by-one errors
-    at day boundaries.
-    """
-    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
-
-
 def _now_local_iso() -> str:
     """Local timezone-naive ISO timestamp to the minute, for prompt headers."""
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
-    """Wrapper that delegates to Board.open_items().
+def _fetch_board_items(board: Board) -> list[BoardItem]:
+    """Wrapper that delegates to board.provider.list_open_items().
 
     next-session-prompt's recommendation reads In Progress / Up Next, and
     its --session posture additionally scans Backlog for session-N-labeled
@@ -1050,7 +911,7 @@ def _fetch_board_items(board: Board) -> list[dict[str, Any]]:
     Closed items in the handoff come from `_fetch_recently_closed`, which
     runs separately.
     """
-    return board.open_items()
+    return board.provider.list_open_items()
 
 
 def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, Any]]:
@@ -1122,51 +983,13 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
 
 
 def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
-    """Use `gh issue list --state closed --search "closed:>YYYY-MM-DD"`.
+    """Delegate to provider.recently_closed(days=days).
 
-    Returns a list of {"number", "title", "closedAt"} dicts, sorted by
-    closedAt desc (newest first). Empty list if none.
-
-    Raises GhInvocationError on silent-truncation at the --limit cap —
-    same discipline as `Board.board_items()` and `sweep.fetch_items`.
-    Both summary's stuck-closed detector and next-session-prompt's
-    Recently-closed section produce silently-wrong output if items
-    past the cap are dropped.
-
-    Limit set to 200 (was 50): active boards in heavy-shipping mode
-    can close >50 items in 7-14d. Caller-side fallback in
-    `_detect_stuck_closed_recent` catches the truncation error and
-    keeps `jared summary` rendering even when the cap is hit.
+    Thin wrapper kept for call-site continuity — callers use the same
+    `_fetch_recently_closed(board, days=N)` signature; the gh call and
+    truncation guard now live in GitHubProjectsProvider.recently_closed.
     """
-    cutoff = _date_n_days_ago(days)
-    limit = 200
-    data = board.run_gh(
-        [
-            "issue",
-            "list",
-            "--repo",
-            board.repo,
-            "--state",
-            "closed",
-            "--search",
-            f"closed:>={cutoff}",
-            "--limit",
-            str(limit),
-            "--json",
-            "number,title,closedAt",
-        ]
-    )
-    # gh returns a top-level list, not an object — run_gh hands back whatever
-    # JSON it parsed. Accept both shapes defensively.
-    items = data if isinstance(data, list) else data.get("issues", [])
-    if len(items) == limit:
-        raise GhInvocationError(
-            f"gh issue list --state closed returned exactly {limit} items "
-            f"in the last {days}d — likely truncated. Narrow the lookback "
-            f"window or paginate; do not trust this snapshot."
-        )
-    items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
-    return items
+    return board.provider.recently_closed(days=days)
 
 
 def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
@@ -1191,19 +1014,16 @@ def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
     return _extract_next_action(body)
 
 
-def _render_in_flight(item: dict[str, Any], note_one_liner: str | None) -> None:
+def _render_in_flight(item: BoardItem, note_one_liner: str | None) -> None:
     """Print one bullet for an In Progress item with optional last Session-note one-liner.
 
     Suffixes any `session-N` labels so the handoff carries the same
     grouping signal `jared summary` shows (#235).
     """
-    content = item.get("content") or {}
-    num = content.get("number")
-    prio = item.get("priority") or "-"
-    title = content.get("title", "")
-    sessions = _session_labels(item.get("labels") or ())
+    prio = item.priority or "-"
+    sessions = _session_labels(item.labels)
     suffix = f" ({', '.join(sessions)})" if sessions else ""
-    print(f"- #{num} [{prio}] {title}{suffix}")
+    print(f"- #{item.number} [{prio}] {item.title}{suffix}")
     if note_one_liner is not None:
         print(f'  Last session: "{note_one_liner}"')
 
@@ -1224,23 +1044,19 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     if getattr(args, "fresh", False):
         board.invalidate_items()
     items = _fetch_board_items(board)
-    in_progress = [i for i in items if i.get("status") == "In Progress"]
-    up_next_all = [i for i in items if i.get("status") == "Up Next"]
+    in_progress = [i for i in items if i.status == "In Progress"]
+    up_next_all = [i for i in items if i.status == "Up Next"]
     session_filter: int | None = getattr(args, "session", None)
     # Backlog items carrying the session-N label: staged but not yet promoted
     # to Up Next. propose-partition (#286) labels across all open issues, so
     # session work can sit in Backlog; surfacing it here keeps the --session
     # posture from lying with "(none labeled session-N)" while staged work exists.
-    staged_backlog: list[dict[str, Any]] = []
+    staged_backlog: list[BoardItem] = []
     if session_filter is not None:
         label = f"session-{session_filter}"
-        up_next_all = [
-            item for item in up_next_all if label in (item.get("labels") or ())
-        ]
+        up_next_all = [item for item in up_next_all if label in item.labels]
         staged_backlog = [
-            item
-            for item in items
-            if item.get("status") == "Backlog" and label in (item.get("labels") or ())
+            item for item in items if item.status == "Backlog" and label in item.labels
         ]
     up_next = up_next_all[:3]
     closed = _fetch_recently_closed(board, days=7)
@@ -1252,21 +1068,12 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     if in_progress:
         # One aliased GraphQL call covers every in-flight issue's comments,
         # replacing the per-issue `gh issue view --json comments` fan-out.
-        in_flight_numbers = [
-            n
-            for item in in_progress
-            if isinstance((n := (item.get("content") or {}).get("number")), int)
-        ]
+        in_flight_numbers = [item.number for item in in_progress]
         comments_by_number = fetch_recent_comments_batch(
             board.repo, in_flight_numbers, limit=10, cache="60s"
         )
         for item in in_progress:
-            num = (item.get("content") or {}).get("number")
-            note_one_liner = (
-                _latest_session_note_oneliner(comments_by_number.get(num, []))
-                if isinstance(num, int)
-                else None
-            )
+            note_one_liner = _latest_session_note_oneliner(comments_by_number.get(item.number, []))
             _render_in_flight(item, note_one_liner)
     else:
         print("(nothing in progress)")
@@ -1275,9 +1082,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print()
     if up_next:
         for item in up_next:
-            content = item.get("content") or {}
-            prio = item.get("priority") or "-"
-            print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+            prio = item.priority or "-"
+            print(f"- #{item.number} [{prio}] {item.title}")
     elif session_filter is not None and staged_backlog:
         # Nothing in Up Next, but staged work exists in Backlog (shown below).
         print(f"(none in Up Next — see staged session-{session_filter} below)")
@@ -1290,9 +1096,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
         print(f"## Session-{session_filter} staged (not yet in Up Next)")
         print()
         for item in staged_backlog:
-            content = item.get("content") or {}
-            prio = item.get("priority") or "-"
-            print(f"- #{content.get('number')} [{prio}] {content.get('title', '')}")
+            prio = item.priority or "-"
+            print(f"- #{item.number} [{prio}] {item.title}")
         print()
     print("## Recently closed (last 7 days)")
     print()
@@ -1528,12 +1333,11 @@ def _resolve_worktree_slug(args: argparse.Namespace) -> str:
     a usable slug."""
     if args.title:
         return _slugify(args.title) or "worktree"
-    try:
-        data = run_gh(["issue", "view", str(args.issue), "--json", "title"])
-        slug = _slugify((data or {}).get("title") or "")
-    except (GhInvocationError, OSError):
-        slug = ""
-    return slug or "worktree"
+    # fetch_issue_title_from_cwd routes through board.py's run_gh (which uses
+    # the repo inferred from the current git directory), so the test's
+    # subprocess patch applies and real git calls pass through unaffected.
+    title = fetch_issue_title_from_cwd(args.issue)
+    return _slugify(title) or "worktree"
 
 
 def _cmd_worktree_add(args: argparse.Namespace) -> int:
