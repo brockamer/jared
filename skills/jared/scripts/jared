@@ -34,11 +34,15 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     print_redaction_diff,
     resolve_body,
 )
-from lib.board_provider import BoardItem  # type: ignore[import-not-found]  # noqa: E402
+from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    BoardItem,
+    ClosedItem,
+)
 from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
     FileBoardSetupError,
     FileCreateError,
     FileRoundTripError,
+    IssueResolutionError,
 )
 from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
 from lib import worktree as _worktree  # type: ignore[import-not-found]  # noqa: E402
@@ -527,6 +531,17 @@ def _cmd_file(args: argparse.Namespace) -> int:
         name, value = spec.split("=", 1)
         extra_specs.append((name, value))
 
+    # Validate Priority/Status/extra field values up front — before the
+    # read-only milestone GET and the body PII scan — so a bad --priority/
+    # --status/--field fails fast without paying for that I/O or being
+    # mislabeled as a PII refusal (exit 1, not 2). The provider raises
+    # FieldNotFound/OptionNotFound, caught by main() → exit 1; the resolved
+    # IDs never cross back into the CLI (#321 item 4, preserving the #314
+    # fork-gate). provider.file() re-validates as its own fence.
+    board.provider.validate_fields(
+        priority=args.priority, status=status, fields=extra_specs or None
+    )
+
     # Milestone resolution (#238). Every filing must declare intent: either
     # --milestone NAME (validated against open milestones) or --no-milestone
     # (explicit opt-out). Missing both → refuse with a listing. Eight
@@ -632,7 +647,11 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # call invalidate_items() internally; the provider layer deliberately does
     # not touch the cache, so the CLI layer must drive invalidation here. (#52)
     board.invalidate_items()
-    issue_url = f"https://github.com/{board.repo}/issues/{item.number}"
+    # Echo the URL gh emitted at create time (carried on the BoardItem), not a
+    # reconstructed github.com URL — the two diverge on GitHub Enterprise hosts
+    # (#321 item 3). Reconstruct only as a defensive fallback if the provider
+    # somehow left it unset; GitHubProjectsProvider.file() always populates it.
+    issue_url = item.url or f"https://github.com/{board.repo}/issues/{item.number}"
     print(f"OK: filed #{item.number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
     return 0
@@ -719,6 +738,13 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
             board.provider.remove_blocked_by(args.dependent, args.blocker)
         else:
             board.provider.add_blocked_by(args.dependent, args.blocker)
+    except IssueResolutionError as e:
+        # Node-id resolution failed before the mutation ever ran. The
+        # provider's message already carries the "could not resolve issue
+        # node IDs" phrasing — print it verbatim (#321 item 5). Must precede
+        # the GhInvocationError branch since IssueResolutionError subclasses it.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     except GhInvocationError as e:
         mutation_name = "removeBlockedBy" if args.remove else "addBlockedBy"
         print(f"error: {mutation_name} failed: {e}", file=sys.stderr)
@@ -948,14 +974,12 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
             file=sys.stderr,
         )
         return []
-    numbers = [entry["number"] for entry in closed if isinstance(entry.get("number"), int)]
+    # ClosedItem.number is always an int (provider constructs it via int()),
+    # so the old isinstance guard against malformed dicts is no longer needed.
+    numbers = [entry.number for entry in closed]
     if not numbers:
         return []
-    titles = {
-        entry["number"]: entry.get("title") or ""
-        for entry in closed
-        if isinstance(entry.get("number"), int)
-    }
+    titles = {entry.number: entry.title for entry in closed}
     # One aliased GraphQL call covers every recently-closed issue's
     # projectItems lookup, instead of N per-issue calls — the wall-clock
     # bottleneck on mature boards (gh-cli startup overhead dominates).
@@ -982,7 +1006,7 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
     return stuck
 
 
-def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
+def _fetch_recently_closed(board: Board, *, days: int) -> list[ClosedItem]:
     """Delegate to provider.recently_closed(days=days).
 
     Thin wrapper kept for call-site continuity — callers use the same
@@ -1103,8 +1127,8 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print()
     if closed:
         for c in closed:
-            date = (c.get("closedAt") or "")[:10]
-            print(f"- #{c['number']} {c['title']}  ({date})")
+            date = c.closed_at[:10]
+            print(f"- #{c.number} {c.title}  ({date})")
     else:
         print("(none)")
     print()
