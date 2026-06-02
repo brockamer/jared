@@ -571,12 +571,9 @@ class GitHubProjectsProvider:
 
         try:
             issue_url = run_gh_raw(create_args)
-        except GhInvocationError:
-            Path(body_tmp_path).unlink(missing_ok=True)
-            raise
         finally:
-            # On the success path we clean up; on error we already unlinked
-            # above. unlink(missing_ok=True) is a safe no-op on the error path.
+            # Runs on both the success and error paths; missing_ok keeps it a
+            # safe no-op if the temp file was already removed.
             Path(body_tmp_path).unlink(missing_ok=True)
 
         issue_number = int(issue_url.rsplit("/", 1)[-1])
@@ -661,7 +658,9 @@ class GitHubProjectsProvider:
         PII pre-flight for the comment stays in the CLI layer (Task 6).
         """
         if comment is not None:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".md", delete=False, encoding="utf-8"
+            ) as tf:
                 tf.write(comment)
                 tmp_path = tf.name
             try:
@@ -700,7 +699,7 @@ class GitHubProjectsProvider:
         Mirrors capture-context.py's write_body:
         `gh issue edit <n> --repo <repo> --body-file <path>`.
         """
-        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
             f.write(text)
             path = f.name
         try:
@@ -716,7 +715,9 @@ class GitHubProjectsProvider:
 
         PII pre-flight stays in the CLI layer (Task 6).
         """
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as tf:
             tf.write(body)
             tmp_path = tf.name
         try:
@@ -742,22 +743,31 @@ class GitHubProjectsProvider:
         """Remove a label from an issue. Idempotent."""
         run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--remove-label", name])
 
+    def _mutate_blocked_by(self, ref: IssueRef, blocker: IssueRef, *, mutation: str) -> None:
+        """Resolve both issue node-ids and run an (add|remove)BlockedBy mutation.
+
+        Shared by add_blocked_by / remove_blocked_by — the two differ only in
+        the mutation field name (`mutation`). The emitted query is byte-identical
+        to _cmd_blocked_by's apart from that one token.
+        """
+        dep_id = self._resolve_issue_node_id(ref)
+        blocker_id = self._resolve_issue_node_id(blocker)
+        query = (
+            "mutation($issueId: ID!, $blockingIssueId: ID!) { "
+            f"  {mutation}("
+            "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
+            "  ) { issue { number } }"
+            "}"
+        )
+        run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
+
     def add_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
         """Add a native GitHub blocked-by dependency edge.
 
         Mirrors _cmd_blocked_by (remove=False): resolve both issue node-ids
         via `gh issue view --json id`, then emit the addBlockedBy mutation.
         """
-        dep_id = self._resolve_issue_node_id(ref)
-        blocker_id = self._resolve_issue_node_id(blocker)
-        query = (
-            "mutation($issueId: ID!, $blockingIssueId: ID!) { "
-            "  addBlockedBy("
-            "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
-            "  ) { issue { number } }"
-            "}"
-        )
-        run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
+        self._mutate_blocked_by(ref, blocker, mutation="addBlockedBy")
 
     def remove_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
         """Remove a native GitHub blocked-by dependency edge.
@@ -765,16 +775,7 @@ class GitHubProjectsProvider:
         Mirrors _cmd_blocked_by (remove=True): resolve both issue node-ids
         via `gh issue view --json id`, then emit the removeBlockedBy mutation.
         """
-        dep_id = self._resolve_issue_node_id(ref)
-        blocker_id = self._resolve_issue_node_id(blocker)
-        query = (
-            "mutation($issueId: ID!, $blockingIssueId: ID!) { "
-            "  removeBlockedBy("
-            "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
-            "  ) { issue { number } }"
-            "}"
-        )
-        run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
+        self._mutate_blocked_by(ref, blocker, mutation="removeBlockedBy")
 
     def set_milestone(self, ref: IssueRef, name: str) -> None:
         """Assign a milestone to an issue by title.
