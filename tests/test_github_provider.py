@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+from skills.jared.scripts.lib.board import OptionNotFound
 from skills.jared.scripts.lib.board_provider import (
     BoardItem,
     BoardProvider,
@@ -1063,6 +1064,77 @@ def test_file_returns_board_item_with_correct_fields(
     assert item.priority == "Medium"
     assert item.labels == []
     assert item.milestone is None
+
+
+def test_file_unknown_priority_raises_before_any_gh_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A misconfigured Priority must fail BEFORE `gh issue create` — no ghost issue.
+
+    This is the off-board-ghost fence (the invariant `jared file` exists to
+    protect): if `file()` created the issue and only THEN discovered the bad
+    field, you'd be left with a created-but-not-on-board issue.
+
+    The load-bearing assertion is `calls == []`, NOT merely that OptionNotFound
+    is raised. `_add_existing` (the post-create board-setup step) re-resolves the
+    same Priority/Status names and is wrapped in `except OptionNotFound` — so a
+    `pytest.raises(OptionNotFound)`-only check would pass against BOTH the correct
+    pre-create ordering AND a broken ordering that resolved after creating the
+    issue. Only "zero gh calls" discriminates: pre-resolution is the very first
+    thing `file()` does, before even temp-file staging, so a clean fence means
+    nothing — not even `gh issue create` — was invoked.
+
+    `issue create` is mapped to a valid URL so that if the fence were removed,
+    this test would go red precisely on the recorded create call (a clean
+    demonstration of the ordering), not on an unrelated FileCreateError path.
+    """
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://github.com/brockamer/findajob/issues/99\n",
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+
+    with pytest.raises(OptionNotFound):
+        _provider().file(
+            title="Ghost candidate",
+            body="Body content.",
+            priority="Critical",  # not in {High, Medium, Low}
+            status="Backlog",
+        )
+
+    # The fence: zero gh calls. The issue was never created.
+    assert calls == [], f"file() must fail before any gh call; got: {calls}"
+
+
+def test_file_unknown_status_raises_before_any_gh_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Symmetric to the Priority fence: a bad Status also fails before create.
+
+    Status is the second required field; both must be resolvable before the
+    issue is created. Same `calls == []` discriminator as the Priority case.
+    """
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://github.com/brockamer/findajob/issues/99\n",
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+
+    with pytest.raises(OptionNotFound):
+        _provider().file(
+            title="Ghost candidate",
+            body="Body content.",
+            priority="High",
+            status="Shipped",  # not a valid Status column
+        )
+
+    assert calls == [], f"file() must fail before any gh call; got: {calls}"
 
 
 # ------------------------------------------------------------------ #
