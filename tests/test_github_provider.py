@@ -205,6 +205,71 @@ def test_list_open_items_includes_labels(monkeypatch: pytest.MonkeyPatch) -> Non
     assert items[0].labels == ["session-1", "enhancement"]
 
 
+def test_list_open_items_routes_extra_single_selects_into_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single-select fields beyond Status/Priority land in BoardItem.fields.
+
+    `_flatten_project_item_for_project` lowercases every single-select field
+    name, so a board with a third field (e.g. Size) surfaces it; the provider's
+    `_item_from_flat` routes anything past status/priority into `fields`.
+    """
+    patch_gh(
+        monkeypatch,
+        stdout=json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": [
+                                {
+                                    "number": 7,
+                                    "title": "Sized",
+                                    "state": "OPEN",
+                                    "labels": {"nodes": []},
+                                    "projectItems": {
+                                        "nodes": [
+                                            {
+                                                "id": "PVTI_s",
+                                                "project": {"number": 7},
+                                                "fieldValues": {
+                                                    "nodes": [
+                                                        {
+                                                            "name": "Up Next",
+                                                            "field": {"name": "Status"},
+                                                        },
+                                                        {
+                                                            "name": "High",
+                                                            "field": {"name": "Priority"},
+                                                        },
+                                                        {
+                                                            "name": "Large",
+                                                            "field": {"name": "Size"},
+                                                        },
+                                                    ]
+                                                },
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        ),
+    )
+    items = _provider().list_open_items()
+    assert len(items) == 1
+    item = items[0]
+    assert item.status == "Up Next"
+    assert item.priority == "High"
+    # Extra single-select keyed by lowercased field name; status/priority and
+    # the internal `id` key are NOT leaked into fields.
+    assert item.fields == {"size": "Large"}
+
+
 def test_list_open_items_raises_on_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
     """hasNextPage=true → GhInvocationError (same guard as Board.open_items)."""
     from skills.jared.scripts.lib.board import GhInvocationError
@@ -477,8 +542,21 @@ def test_fetch_ties_filters_done(monkeypatch: pytest.MonkeyPatch) -> None:
     assert results[0].number == 1
 
 
-def test_fetch_ties_partial_mode_omits_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    """include_bodies=False → body field absent from query, body="" on result."""
+@pytest.mark.parametrize(
+    ("include_bodies", "expect_body_field"),
+    [(True, True), (False, False)],
+)
+def test_fetch_ties_body_field_selection_tracks_include_bodies(
+    monkeypatch: pytest.MonkeyPatch, include_bodies: bool, expect_body_field: bool
+) -> None:
+    """The GraphQL query selects the `body` field iff include_bodies is True.
+
+    The fixture node carries no `body` key, so the returned TieCandidate.body is
+    "" in both modes (body-propagation in True mode is covered separately by
+    test_fetch_ties_returns_tie_candidates). This test pins the *wire-level*
+    field selection: when include_bodies=False the query must omit `body`, so a
+    real partial-mode call skips the (large) body payload.
+    """
     calls = patch_gh_by_arg(
         monkeypatch,
         responses={
@@ -512,15 +590,16 @@ def test_fetch_ties_partial_mode_omits_body(monkeypatch: pytest.MonkeyPatch) -> 
             )
         },
     )
-    results = _provider().fetch_ties(include_bodies=False)
+    results = _provider().fetch_ties(include_bodies=include_bodies)
     assert len(results) == 1
     assert results[0].body == ""
-    # Verify "body" was NOT in the GraphQL query string sent
+    # The query text is embedded in the `-f query=...` argv arg. The `body` field
+    # selection sits on its own line, so a standalone "body\n" substring is
+    # present iff the query selected the body field. ("title"/"blockedBy"/etc.
+    # contain no "body\n" token, so this discriminates cleanly.)
     gql_calls = [" ".join(argv) for argv in calls if "api" in argv and "graphql" in argv]
     assert gql_calls, "expected at least one graphql call"
-    for call in gql_calls:
-        # The query body is embedded in the -f query= arg; check the full call string
-        assert "body\n" not in call or "include_bodies" not in call
+    assert all(("body\n" in call) is expect_body_field for call in gql_calls)
 
 
 def test_fetch_ties_uses_5m_cache(monkeypatch: pytest.MonkeyPatch) -> None:
