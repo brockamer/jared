@@ -33,7 +33,6 @@ from .board_provider import (
     Edge,
     IssueRef,
     Milestone,
-    TieCandidate,
 )
 
 
@@ -314,79 +313,6 @@ class GitHubProjectsProvider:
             for node in nodes
         ]
 
-    def fetch_ties(self, *, include_bodies: bool = True) -> list[TieCandidate]:
-        """Fetch open issues for tie analysis, returning TieCandidate records.
-
-        Uses the same paginated GraphQL query as Board.fetch_open_issues_for_ties
-        with cache="5m". Done items are filtered before construction.
-
-        Mapping notes:
-        - status drives the Done filter; it is not carried on TieCandidate.
-        - the query also selects priority (mirroring board.py's ties query) but
-          this method does not read it — priority is not a TieCandidate field.
-        - blocked_by is dropped (not in TieCandidate).
-        - labels: list built from node["labels"]["nodes"][*]["name"].
-        - milestone: from node["milestone"]["title"] or None.
-        """
-        body_field = "body" if include_bodies else ""
-        owner, name = self.repo.split("/", 1)
-        query = f"""
-        query OpenIssuesForTies($owner: String!, $name: String!, $cursor: String) {{
-          repository(owner: $owner, name: $name) {{
-            issues(states: OPEN, first: 100, after: $cursor) {{
-              nodes {{
-                number
-                title
-                {body_field}
-                labels(first: 20) {{ nodes {{ name }} }}
-                milestone {{ title }}
-                projectItems(first: 5) {{
-                  nodes {{
-                    fieldValueByName(name: "Status") {{
-                      ... on ProjectV2ItemFieldSingleSelectValue {{ name }}
-                    }}
-                    priority: fieldValueByName(name: "Priority") {{
-                      ... on ProjectV2ItemFieldSingleSelectValue {{ name }}
-                    }}
-                  }}
-                }}
-                blockedBy(first: 20) {{ nodes {{ number }} }}
-              }}
-              pageInfo {{ hasNextPage endCursor }}
-            }}
-          }}
-        }}
-        """
-        cursor: str | None = None
-        all_records: list[TieCandidate] = []
-        while True:
-            kwargs: dict[str, str | int | bool] = {"owner": owner, "name": name}
-            if cursor is not None:
-                kwargs["cursor"] = cursor
-            data = run_graphql(query, cache="5m", **kwargs)
-            page = data["data"]["repository"]["issues"]
-            for node in page["nodes"]:
-                project_items = node.get("projectItems", {}).get("nodes") or []
-                project_item = project_items[0] if project_items else {}
-                status_field = project_item.get("fieldValueByName") or {}
-                status = str(status_field.get("name") or "Backlog")
-                if status == "Done":
-                    continue
-                milestone_obj = node.get("milestone") or {}
-                all_records.append(
-                    TieCandidate(
-                        number=int(node["number"]),
-                        title=str(node["title"]),
-                        body=str(node.get("body") or ""),
-                        labels=list(n["name"] for n in (node.get("labels", {}).get("nodes") or [])),
-                        milestone=milestone_obj.get("title"),
-                    )
-                )
-            if not page["pageInfo"]["hasNextPage"]:
-                break
-            cursor = page["pageInfo"]["endCursor"]
-        return all_records
-
     def fetch_blocked_by_edges(self) -> list[Edge]:
         """Return all blocked-by edges for open issues in this repo.
 
@@ -601,28 +527,6 @@ class GitHubProjectsProvider:
             )
         items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
         return items
-
-    def get_issue_title(self, ref: IssueRef) -> str:
-        """Return the title for issue `ref`.
-
-        Uses ``gh issue view --json title`` (same call as _resolve_worktree_slug).
-        Returns empty string on any failure so callers can fall back gracefully.
-        """
-        try:
-            data = run_gh(
-                [
-                    "issue",
-                    "view",
-                    str(ref),
-                    "--repo",
-                    self.repo,
-                    "--json",
-                    "title",
-                ]
-            )
-            return str(data.get("title") or "")
-        except GhInvocationError:
-            return ""
 
     def file(
         self,
