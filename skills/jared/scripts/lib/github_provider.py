@@ -562,6 +562,68 @@ class GitHubProjectsProvider:
     # WRITE methods (implemented in Task 4)                               #
     # ------------------------------------------------------------------ #
 
+    def recently_closed(self, *, days: int) -> list[dict[str, Any]]:
+        """Return issues closed in the last `days` days.
+
+        Uses `gh issue list --state closed --search "closed:>=DATE"` (same
+        query as the CLI's `_fetch_recently_closed`). Returns a list of
+        ``{"number", "title", "closedAt"}`` dicts, sorted by closedAt desc
+        (newest first). Empty list if none.
+
+        Raises GhInvocationError on silent-truncation at the 200-item cap.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
+        limit = 200
+        data = run_gh(
+            [
+                "issue",
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "closed",
+                "--search",
+                f"closed:>={cutoff}",
+                "--limit",
+                str(limit),
+                "--json",
+                "number,title,closedAt",
+            ]
+        )
+        items: list[dict[str, Any]] = data if isinstance(data, list) else data.get("issues", [])
+        if len(items) == limit:
+            raise GhInvocationError(
+                f"gh issue list --state closed returned exactly {limit} items "
+                f"in the last {days}d — likely truncated. Narrow the lookback "
+                f"window or paginate; do not trust this snapshot."
+            )
+        items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
+        return items
+
+    def get_issue_title(self, ref: IssueRef) -> str:
+        """Return the title for issue `ref`.
+
+        Uses ``gh issue view --json title`` (same call as _resolve_worktree_slug).
+        Returns empty string on any failure so callers can fall back gracefully.
+        """
+        try:
+            data = run_gh(
+                [
+                    "issue",
+                    "view",
+                    str(ref),
+                    "--repo",
+                    self.repo,
+                    "--json",
+                    "title",
+                ]
+            )
+            return str(data.get("title") or "")
+        except GhInvocationError:
+            return ""
+
     def file(
         self,
         *,
@@ -591,6 +653,19 @@ class GitHubProjectsProvider:
         this method).
         """
         effective_status = status or "Backlog"
+
+        # Pre-resolve field/option IDs before ANY gh call so misconfiguration
+        # raises before the issue is created (mirrors the original CLI guard and
+        # Board.add_existing_to_board's "pre-resolve everything up front"
+        # discipline). _add_existing re-resolves the same names — the duplication
+        # is intentional: the pre-create check is the fail-before-create fence.
+        self._field_id("Priority")
+        self._option_id("Priority", priority)
+        self._field_id("Status")
+        self._option_id("Status", effective_status)
+        for name, value in fields or []:
+            self._field_id(name)
+            self._option_id(name, value)
 
         # Stage body in a temp file; gh issue create requires a file path.
         with tempfile.NamedTemporaryFile(

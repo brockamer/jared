@@ -9,9 +9,8 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +27,12 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     ItemNotFound,
     OptionNotFound,
     _find_project_root,
+    fetch_issue_title_from_cwd,
     fetch_project_items_batch,
     fetch_recent_comments_batch,
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
-    run_gh,
 )
 from lib.board_provider import BoardItem  # type: ignore[import-not-found]  # noqa: E402
 from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
@@ -489,46 +488,18 @@ def _cmd_close(args: argparse.Namespace) -> int:
     # close failure leaves a recoverable state (open issue + stray comment,
     # user re-runs `jared close <N>` without --body).
     if body is not None:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
-            tf.write(body)
-            tmp_path = tf.name
-        try:
-            comment_url = board.run_gh_raw(
-                [
-                    "issue",
-                    "comment",
-                    str(args.issue_number),
-                    "--repo",
-                    board.repo,
-                    "--body-file",
-                    tmp_path,
-                ]
-            )
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
+        comment_url = board.provider.comment(args.issue_number, body)
         print(f"OK: commented on #{args.issue_number} ({comment_url})")
 
-    board.run_gh(
-        [
-            "issue",
-            "close",
-            str(args.issue_number),
-            "--repo",
-            board.repo,
-        ]
-    )
-
-    # Defense-in-depth (#137): GitHub's "Item closed → Done" project workflow
-    # has an observable false-positive mode where a post-close poll can claim
-    # Status=Done while the field hasn't actually changed (verified #135 repro).
-    # Always run the explicit set — cheap no-op if the workflow did fire,
-    # genuine save if it didn't. Source of truth is the field write, not a poll.
-    args.field_name = "Status"
-    args.value = "Done"
-    rc = _cmd_set(args)
-    if rc == 0:
-        print(f"OK: closed #{args.issue_number}, Status=Done")
-    return rc
+    # provider.close: gh issue close + defense-in-depth Status=Done (#137).
+    # PII pre-flight for the comment stays above (CLI layer).
+    board.provider.close(args.issue_number)
+    # Board mutations invalidate the on-disk snapshot so subsequent reads
+    # see the updated item list and closed-item cache. (#52 / #186)
+    board.invalidate_items()
+    board.invalidate_closed_items()
+    print(f"OK: closed #{args.issue_number}, Status=Done")
+    return 0
 
 
 def _cmd_file(args: argparse.Namespace) -> int:
@@ -543,14 +514,6 @@ def _cmd_file(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     status = args.status or "Backlog"
 
-    # Pre-resolve before we touch GitHub: a misconfigured board fails fast
-    # without creating an orphan issue. provider.file re-resolves the same
-    # names — the duplication is intentional, since this catches bad config
-    # *before* any gh call is made.
-    board.field_id("Priority")
-    board.option_id("Priority", args.priority)
-    board.field_id("Status")
-    board.option_id("Status", status)
     extra_specs: list[tuple[str, str]] = []
     for spec in args.field or []:
         if "=" not in spec:
@@ -560,8 +523,6 @@ def _cmd_file(args: argparse.Namespace) -> int:
             )
             return 1
         name, value = spec.split("=", 1)
-        board.field_id(name)
-        board.option_id(name, value)
         extra_specs.append((name, value))
 
     # Milestone resolution (#238). Every filing must declare intent: either
@@ -572,14 +533,10 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # is cheaper than catching it in every sweep.
     milestone_title: str | None = None
     if not args.no_milestone:
-        # Query params on the URL — `gh api -f key=value` is a request body
-        # field, and on /milestones a body flips GET-list into POST-create.
-        milestones = board.run_gh(["api", f"repos/{board.repo}/milestones?state=open&per_page=100"])
-        # Defensive: REST returns a list; an empty/missing payload is treated
-        # as "no open milestones" rather than crashing on attribute access.
-        open_titles = [
-            m.get("title", "") for m in (milestones if isinstance(milestones, list) else [])
-        ]
+        # provider.list_milestones() uses the query-string form:
+        # `gh api repos/{repo}/milestones?state=open&per_page=100`
+        # (NOT -f key=value which flips GET-list into POST-create — #254).
+        open_titles = [m.name for m in board.provider.list_milestones()]
         if args.milestone is None:
             print(
                 "error: --milestone NAME or --no-milestone is required (see #238).",
@@ -746,22 +703,6 @@ def _cmd_add_to_board(args: argparse.Namespace) -> int:
     board.invalidate_items()
     print(f"OK: #{args.issue_number} on board → {status}, Priority={args.priority}")
     return 0
-
-
-def _resolve_issue_node_id(board: Board, issue_number: int) -> str:
-    data = board.run_gh(
-        [
-            "issue",
-            "view",
-            str(issue_number),
-            "--repo",
-            board.repo,
-            "--json",
-            "id",
-        ]
-    )
-    node_id: str = data["id"]
-    return node_id
 
 
 def _cmd_blocked_by(args: argparse.Namespace) -> int:
@@ -947,16 +888,6 @@ def _extract_next_action(session_note_body: str) -> str | None:
     return " ".join(text.split())
 
 
-def _date_n_days_ago(days: int) -> str:
-    """ISO date (YYYY-MM-DD) `days` days ago in UTC.
-
-    Used for `gh issue list --search closed:>=DATE`, which interprets
-    the date in UTC. Local-time math would create off-by-one errors
-    at day boundaries.
-    """
-    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
-
-
 def _now_local_iso() -> str:
     """Local timezone-naive ISO timestamp to the minute, for prompt headers."""
     return datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1045,51 +976,13 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
 
 
 def _fetch_recently_closed(board: Board, *, days: int) -> list[dict[str, Any]]:
-    """Use `gh issue list --state closed --search "closed:>YYYY-MM-DD"`.
+    """Delegate to provider.recently_closed(days=days).
 
-    Returns a list of {"number", "title", "closedAt"} dicts, sorted by
-    closedAt desc (newest first). Empty list if none.
-
-    Raises GhInvocationError on silent-truncation at the --limit cap —
-    same discipline as `Board.board_items()` and `sweep.fetch_items`.
-    Both summary's stuck-closed detector and next-session-prompt's
-    Recently-closed section produce silently-wrong output if items
-    past the cap are dropped.
-
-    Limit set to 200 (was 50): active boards in heavy-shipping mode
-    can close >50 items in 7-14d. Caller-side fallback in
-    `_detect_stuck_closed_recent` catches the truncation error and
-    keeps `jared summary` rendering even when the cap is hit.
+    Thin wrapper kept for call-site continuity — callers use the same
+    `_fetch_recently_closed(board, days=N)` signature; the gh call and
+    truncation guard now live in GitHubProjectsProvider.recently_closed.
     """
-    cutoff = _date_n_days_ago(days)
-    limit = 200
-    data = board.run_gh(
-        [
-            "issue",
-            "list",
-            "--repo",
-            board.repo,
-            "--state",
-            "closed",
-            "--search",
-            f"closed:>={cutoff}",
-            "--limit",
-            str(limit),
-            "--json",
-            "number,title,closedAt",
-        ]
-    )
-    # gh returns a top-level list, not an object — run_gh hands back whatever
-    # JSON it parsed. Accept both shapes defensively.
-    items = data if isinstance(data, list) else data.get("issues", [])
-    if len(items) == limit:
-        raise GhInvocationError(
-            f"gh issue list --state closed returned exactly {limit} items "
-            f"in the last {days}d — likely truncated. Narrow the lookback "
-            f"window or paginate; do not trust this snapshot."
-        )
-    items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
-    return items
+    return board.provider.recently_closed(days=days)
 
 
 def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
@@ -1433,12 +1326,11 @@ def _resolve_worktree_slug(args: argparse.Namespace) -> str:
     a usable slug."""
     if args.title:
         return _slugify(args.title) or "worktree"
-    try:
-        data = run_gh(["issue", "view", str(args.issue), "--json", "title"])
-        slug = _slugify((data or {}).get("title") or "")
-    except (GhInvocationError, OSError):
-        slug = ""
-    return slug or "worktree"
+    # fetch_issue_title_from_cwd routes through board.py's run_gh (which uses
+    # the repo inferred from the current git directory), so the test's
+    # subprocess patch applies and real git calls pass through unaffected.
+    title = fetch_issue_title_from_cwd(args.issue)
+    return _slugify(title) or "worktree"
 
 
 def _cmd_worktree_add(args: argparse.Namespace) -> int:
