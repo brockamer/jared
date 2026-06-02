@@ -1,6 +1,6 @@
 # Board provider abstraction — Phase 1: interface extraction
 
-**Issue:** (to be filed — epic + Phase-1 child on project #4 at implementation transition)
+**Issue:** #314 (Phase 1). Parent epic: #313.
 **Date:** 2026-06-02
 **Status:** Design — not yet started.
 **Related references:** `skills/jared/scripts/lib/board.py`, `tests/conftest.py`, `CLAUDE.md` (§ "Dual import path", § "The `Board` helper"), `docs/project-board.md`.
