@@ -498,6 +498,7 @@ def _cmd_close(args: argparse.Namespace) -> int:
     # see the updated item list and closed-item cache. (#52 / #186)
     board.invalidate_items()
     board.invalidate_closed_items()
+    print(f"OK: set Status=Done on issue #{args.issue_number}")
     print(f"OK: closed #{args.issue_number}, Status=Done")
     return 0
 
@@ -625,6 +626,11 @@ def _cmd_file(args: argparse.Namespace) -> int:
         print(f"  recover with: {recovery}", file=sys.stderr)
         return 2
 
+    # Board mutations invalidate the on-disk snapshot so stage.py / sweep.py
+    # cold-path reads see the just-filed issue. Board._add_to_board used to
+    # call invalidate_items() internally; the provider layer deliberately does
+    # not touch the cache, so the CLI layer must drive invalidation here. (#52)
+    board.invalidate_items()
     issue_url = f"https://github.com/{board.repo}/issues/{item.number}"
     print(f"OK: filed #{item.number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
@@ -749,9 +755,9 @@ def _cmd_set(args: argparse.Namespace) -> int:
     board.provider.set_field(args.issue_number, args.field_name, args.value)
     # Project-field mutation invalidates the on-disk snapshot so other
     # processes (and the conversational layer) see fresh state on next
-    # read. Covers _cmd_move and _cmd_close transitively (both delegate
-    # here). Without this, a `jared move` followed by `jared summary`
-    # within TTL returns the pre-move snapshot. (#52 Phase 1.)
+    # read. Covers _cmd_move transitively (it delegates here). Without
+    # this, a `jared move` followed by `jared summary` within TTL returns
+    # the pre-move snapshot. (#52 Phase 1.)
     board.invalidate_items()
     # Status writes are the only first-party path that can move an item
     # into or out of the closed-cache's set, so invalidate it conditionally

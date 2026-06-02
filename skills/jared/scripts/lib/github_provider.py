@@ -142,7 +142,6 @@ class GitHubProjectsProvider:
         self.repo = repo
         self._field_ids = field_ids
         self._field_options = field_options
-        self._items: list[dict[str, object]] | None = None
 
     _CAPABILITIES = frozenset(Capability)  # GitHub advertises the full set
 

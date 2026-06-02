@@ -1181,9 +1181,8 @@ def _flatten_project_item_for_project(
     single-select field names lowercased.
 
     Returns None when the issue has no item on this project (off-board
-    ghost; see `fetch_item_for_issue`'s contract for the upstream usage).
-    Module-level so `Board.fetch_item_for_issue`, `Board.open_items`,
-    and `fetch_project_items_batch` share one flattener.
+    ghost). Module-level so GitHubProjectsProvider.get_item / _find_item_id,
+    Board.open_items, and fetch_project_items_batch share one flattener.
     """
     if not isinstance(project_items_node, dict):
         return None

@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from skills.jared.scripts.lib.board import OptionNotFound
+from skills.jared.scripts.lib.board import GhInvocationError, OptionNotFound
 from skills.jared.scripts.lib.board_provider import (
     BoardItem,
     BoardProvider,
@@ -24,7 +24,7 @@ from skills.jared.scripts.lib.board_provider import (
     Milestone,
 )
 from skills.jared.scripts.lib.github_provider import GitHubProjectsProvider
-from tests.conftest import patch_gh, patch_gh_by_arg
+from tests.conftest import FakeGhResult, patch_gh, patch_gh_by_arg
 
 
 def _provider() -> GitHubProjectsProvider:
@@ -1339,3 +1339,49 @@ def test_list_milestones_emits_correct_api_url(
         assert not field.startswith("state="), (
             f"`-f {field}` without --method GET would POST to milestones; use query string"
         )
+
+
+# ------------------------------------------------------------------ #
+# _item_add retry safeguard (jared#112, Phase 1.10 regression port)  #
+# ------------------------------------------------------------------ #
+
+
+def test_item_add_retries_when_id_missing_on_first_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gh project item-add occasionally returns a body with no id on the first
+    call but succeeds immediately on retry (jared#112). _item_add must retry
+    once and return the id from the second call.
+    """
+    call_count = 0
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        nonlocal call_count
+        if "item-add" in " ".join(args):
+            call_count += 1
+            if call_count == 1:
+                return FakeGhResult(stdout="{}")  # id absent on first call
+            return FakeGhResult(stdout='{"id": "PVTI_retry_ok"}')
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    item_id = _provider()._item_add(99)
+    assert item_id == "PVTI_retry_ok"
+    assert call_count == 2, "expected exactly 2 item-add calls (first miss + retry)"
+
+
+def test_item_add_raises_after_retry_still_missing_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If both the first and retry item-add calls return no id, raise GhInvocationError."""
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        if "item-add" in " ".join(args):
+            return FakeGhResult(stdout="{}")  # id always absent
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    with pytest.raises(GhInvocationError, match="no id.*after retry"):
+        _provider()._item_add(99)
