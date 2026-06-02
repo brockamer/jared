@@ -36,6 +36,42 @@ from .board_provider import (
     TieCandidate,
 )
 
+
+class FileRoundTripError(Exception):
+    """Staging wrote wrong content — the body cannot be trusted; gh was not called.
+
+    `staged_path` is the temp file path (already unlinked by the time this is
+    raised). Carry it so the CLI can include it in the error message.
+    """
+
+    def __init__(self, staged_path: str) -> None:
+        self.staged_path = staged_path
+        super().__init__(f"round-trip mismatch staging body to {staged_path!r}")
+
+
+class FileCreateError(Exception):
+    """gh issue create failed. The staged body temp file is PRESERVED so the
+    caller can tell the user to retry with --body-file <staged_path>.
+    """
+
+    def __init__(self, staged_path: str, message: str) -> None:
+        self.staged_path = staged_path
+        super().__init__(message)
+
+
+class FileBoardSetupError(Exception):
+    """Issue created successfully but post-create board setup failed.
+
+    `issue_number` and `issue_url` let the CLI build a recovery command.
+    """
+
+    def __init__(self, issue_number: int, issue_url: str, cause: Exception) -> None:
+        self.issue_number = issue_number
+        self.issue_url = issue_url
+        self.cause = cause
+        super().__init__(str(cause))
+
+
 _OPEN_ITEMS_QUERY = """
     query($owner: String!, $repo: String!) {
       repository(owner: $owner, name: $repo) {
@@ -249,7 +285,9 @@ class GitHubProjectsProvider:
         flat = _flatten_project_item_for_project(issue.get("projectItems"), self.project_number)
         if flat is None:
             return None
-        return self._item_from_flat(number=ref, title="", flat=flat)
+        item = self._item_from_flat(number=ref, title="", flat=flat)
+        item.provider_ref = str(flat["id"]) if flat.get("id") else None
+        return item
 
     def get_body(self, ref: IssueRef) -> str:
         """Return the issue's Markdown body via REST (with ETag/conditional GET)."""
@@ -537,13 +575,20 @@ class GitHubProjectsProvider:
     ) -> BoardItem:
         """Atomic: create issue, add to project, set Priority + Status + extras.
 
-        Mirrors _cmd_file's core gh sequence (without the CLI-layer concerns:
-        pre-flight redaction, round-trip fence, recovery-command printing, and
-        milestone-requirement enforcement all stay in the CLI layer in Task 6).
+        Implements the #100 staged-body discipline: the body is staged to a temp
+        file before any gh call. The round-trip fence verifies staging fidelity;
+        on mismatch it unlinks the temp file and raises FileRoundTripError. On
+        gh issue create failure the temp file is PRESERVED and FileCreateError is
+        raised (with staged_path) so the caller can tell the user to retry with
+        --body-file <path>. On post-create board-setup failure FileBoardSetupError
+        is raised carrying the issue_number and issue_url.
+
+        CLI-layer concerns (pre-flight redaction, milestone-requirement
+        enforcement) stay in the CLI layer before this call.
 
         Milestone is passed to gh issue create verbatim when given (caller is
         responsible for validation — same as how the CLI validates before calling
-        this method in Task 6).
+        this method).
         """
         effective_status = status or "Backlog"
 
@@ -553,6 +598,13 @@ class GitHubProjectsProvider:
         ) as tf:
             tf.write(body)
             body_tmp_path = tf.name
+
+        # Round-trip fence: verify the staged file matches what we wrote.
+        # Catches silent staging corruption (filesystem oddity, future routing
+        # surprise) where gh would otherwise succeed with empty/wrong body.
+        if Path(body_tmp_path).read_text(encoding="utf-8") != body:
+            Path(body_tmp_path).unlink(missing_ok=True)
+            raise FileRoundTripError(body_tmp_path)
 
         create_args = [
             "issue",
@@ -569,22 +621,37 @@ class GitHubProjectsProvider:
         if milestone is not None:
             create_args.extend(["--milestone", milestone])
 
+        # Preserve the staged temp file on any create-step failure so the user
+        # can retry without re-typing the body (#100). Unlink ONLY on success.
         try:
             issue_url = run_gh_raw(create_args)
-        finally:
-            # Runs on both the success and error paths; missing_ok keeps it a
-            # safe no-op if the temp file was already removed.
-            Path(body_tmp_path).unlink(missing_ok=True)
+        except GhInvocationError as e:
+            # Staged file preserved (not unlinked) — caller must surface the
+            # path and unlink after confirming the user has it.
+            raise FileCreateError(body_tmp_path, str(e)) from e
+
+        if not issue_url.startswith("http"):
+            # Unexpected output: also a create failure; preserve staged file.
+            raise FileCreateError(
+                body_tmp_path,
+                f"unexpected gh issue create output: {issue_url[:200]}",
+            )
+
+        # Past the create step — issue exists, safe to clean up staged body.
+        Path(body_tmp_path).unlink(missing_ok=True)
 
         issue_number = int(issue_url.rsplit("/", 1)[-1])
 
-        self._add_existing(
-            issue_number,
-            priority=priority,
-            status=effective_status,
-            fields=fields,
-            assume_new=True,
-        )
+        try:
+            self._add_existing(
+                issue_number,
+                priority=priority,
+                status=effective_status,
+                fields=fields,
+                assume_new=True,
+            )
+        except (GhInvocationError, FieldNotFound, OptionNotFound, ItemNotFound) as e:
+            raise FileBoardSetupError(issue_number, issue_url, e) from e
 
         return BoardItem(
             number=issue_number,
@@ -707,11 +774,12 @@ class GitHubProjectsProvider:
         finally:
             Path(path).unlink(missing_ok=True)
 
-    def comment(self, ref: IssueRef, body: str) -> None:
-        """Post a comment on an issue.
+    def comment(self, ref: IssueRef, body: str) -> str:
+        """Post a comment on an issue and return the new comment URL.
 
         Mirrors _cmd_comment: stages body in a temp file, then calls
         `gh issue comment <n> --repo <repo> --body-file <path>`.
+        The raw stdout (comment URL) is returned so the CLI can echo it.
 
         PII pre-flight stays in the CLI layer (Task 6).
         """
@@ -721,7 +789,7 @@ class GitHubProjectsProvider:
             tf.write(body)
             tmp_path = tf.name
         try:
-            run_gh_raw(
+            url = run_gh_raw(
                 [
                     "issue",
                     "comment",
@@ -734,6 +802,7 @@ class GitHubProjectsProvider:
             )
         finally:
             Path(tmp_path).unlink(missing_ok=True)
+        return url
 
     def add_label(self, ref: IssueRef, name: str) -> None:
         """Add a label to an issue. Idempotent."""
