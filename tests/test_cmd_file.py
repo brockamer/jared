@@ -1,4 +1,5 @@
 import json as _json
+import os
 import subprocess as _subprocess
 import tempfile
 from io import StringIO
@@ -7,6 +8,7 @@ from textwrap import dedent
 
 import pytest
 
+from skills.jared.scripts.lib import cache
 from tests.conftest import FakeGhResult, import_cli
 
 
@@ -1224,3 +1226,56 @@ def test_file_milestone_lookup_uses_get_query_string_not_form_body(
                 f"on /milestones that hits the create-milestone POST. "
                 f"argv: {argv}"
             )
+
+
+# ------------------------------------------------------------------ #
+# Regression: _cmd_file must invalidate the on-disk item-list cache  #
+# ------------------------------------------------------------------ #
+
+
+def test_file_invalidates_item_list_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Regression for the Phase 1.10 review finding: _cmd_file was missing
+    board.invalidate_items() after provider.file() returns, so stage.py /
+    sweep.py cold-path reads would return a stale snapshot that excluded the
+    just-filed issue.  Mirrors the pattern in test_cmd_set.py's
+    test_set_status_invalidates_closed_cache.
+    """
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Body content.")
+
+    # Prime the on-disk item-list cache for project 7.
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    cache.set_item_list(
+        project_number=7,
+        items=[{"content": {"number": 1}, "status": "Backlog"}],
+        cache_dir=cache_dir,
+    )
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is not None, (
+        "pre-condition: cache must be populated before running file"
+    )
+
+    # Reuse the existing _routed_fake helper — item-add returns an id, file
+    # succeeds rc 0.  Pass --no-milestone to skip the milestones API call.
+    _routed_fake(monkeypatch)
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "New regression test issue",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "Medium",
+            "--no-milestone",
+        ]
+    )
+    assert rc == 0
+
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is None, (
+        "_cmd_file must invalidate the on-disk item-list cache after a successful "
+        "file so that stage.py / sweep.py cold-path reads see the newly filed issue."
+    )
