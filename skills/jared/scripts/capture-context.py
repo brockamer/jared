@@ -30,18 +30,14 @@ import datetime as dt
 import difflib
 import re
 import sys
-import tempfile
 from pathlib import Path
 from typing import cast
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
-    fetch_issue_body_rest as board_fetch_issue_body_rest,
-)
-from lib.board import (
-    run_gh_raw as board_run_gh_raw,
+from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    GitHubProjectsProvider,
 )
 
 SECTION_ORDER = [
@@ -54,24 +50,38 @@ SECTION_ORDER = [
 ]
 
 
+def _make_provider(repo: str) -> GitHubProjectsProvider:
+    # capture-context.py only calls get_body / set_body, which are repo-only
+    # operations (they never touch project_number, project_id, owner, or the
+    # field maps). Construct a minimal provider from the owner/repo slug so the
+    # right repo is always targeted regardless of cwd's project-board.md — the
+    # script is routinely invoked against bake-site repos that differ from the
+    # local board. Dummy values for project-level fields are intentional; they
+    # would raise if any project method were called, surfacing misuse clearly.
+    owner = repo.split("/")[0]
+    return GitHubProjectsProvider(
+        project_number=0,
+        project_id="",
+        owner=owner,
+        repo=repo,
+        field_ids={},
+        field_options={},
+    )
+
+
 def fetch_body(repo: str, number: int) -> str:
     # REST `core` bucket with ETag/conditional GET (#216): delegates to
-    # lib.board.fetch_issue_body_rest, the body-read twin of
-    # fetch_issue_state_rest, so repeat reads can short-circuit to a 304.
-    return cast("str", board_fetch_issue_body_rest(repo, number))
+    # provider.get_body → lib.board.fetch_issue_body_rest, the body-read twin
+    # of fetch_issue_state_rest, so repeat reads can short-circuit to a 304.
+    # cast: GitHubProjectsProvider imported with type: ignore[import-not-found]
+    # is opaque to mypy, so .get_body() is typed Any; we know it returns str.
+    return cast("str", _make_provider(repo).get_body(number))
 
 
 def write_body(repo: str, number: int, body: str) -> None:
-    # gh issue edit --body-file requires a path, so stage the new body in a
-    # temp file and clean up after. No atomic-write trickery needed — the
-    # temp file isn't the issue body; gh reads it and POSTs the contents.
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
-        f.write(body)
-        path = f.name
-    try:
-        board_run_gh_raw(["issue", "edit", str(number), "--repo", repo, "--body-file", path])
-    finally:
-        Path(path).unlink(missing_ok=True)
+    # Delegates to provider.set_body, which stages the new body in a temp file
+    # and calls `gh issue edit --body-file` — same mechanism as before.
+    _make_provider(repo).set_body(number, body)
 
 
 # ---------- Body parsing ----------

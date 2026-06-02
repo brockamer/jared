@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from . import cache
 
 if TYPE_CHECKING:
+    from .github_provider import GitHubProjectsProvider
     from .ties import OpenIssueForTies
 
 
@@ -77,6 +78,11 @@ class Board:
     # constructed via those entry points (e.g. direct dataclass construction
     # in tests that don't need this feature).
     _raw_doc: str = field(default="", repr=False)
+    # Backend selector — defaults to "github". Parsed from the optional
+    # `- backend: <x>` bullet under `## Jared config` in project-board.md.
+    backend: str = "github"
+    # Cached provider instance, lazily populated by the `provider` property.
+    _provider: GitHubProjectsProvider | None = field(default=None, repr=False)
 
     @classmethod
     def find_default_path(cls, project_root: Path | None = None) -> Path | None:
@@ -186,6 +192,7 @@ class Board:
         field_ids, field_options = cls._parse_field_blocks(text)
         jared_config = cls._parse_jared_config(text)
         session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
+        backend = jared_config.get("backend", "github")
         session_start_checks = cls._parse_session_start_checks(text)
         operator_docs, code_surface = cls._parse_operator_docs(text)
 
@@ -202,6 +209,7 @@ class Board:
             operator_docs=operator_docs,
             code_surface=code_surface,
             _raw_doc=text,
+            backend=backend,
         )
 
     @staticmethod
@@ -382,15 +390,36 @@ class Board:
         words = [w.strip() for w in bullet_match.group("words").split(",")]
         return frozenset(w for w in words if w)
 
+    @property
+    def provider(self) -> GitHubProjectsProvider:
+        """Return the configured backend provider, lazily constructed.
+
+        Only 'github' is implemented; any other `backend` value raises
+        BoardConfigError so callers get an actionable message rather than
+        an AttributeError deep in provider code.
+        """
+        if self.backend != "github":
+            raise BoardConfigError(
+                f"backend '{self.backend}' has no provider yet (Phase 3+). "
+                "Only 'github' is implemented."
+            )
+        if self._provider is None:
+            from .github_provider import GitHubProjectsProvider
+
+            self._provider = GitHubProjectsProvider(
+                project_number=self.project_number,
+                project_id=self.project_id,
+                owner=self.owner,
+                repo=self.repo,
+                field_ids=self._field_ids,
+                field_options=self._field_options,
+            )
+        return self._provider
+
     def run_gh(
         self, args: list[str], *, cache: str | None = None, input_text: str | None = None
     ) -> Any:
         return run_gh(args, cache=cache, input_text=input_text)
-
-    def run_gh_raw(
-        self, args: list[str], *, cache: str | None = None, input_text: str | None = None
-    ) -> str:
-        return run_gh_raw(args, cache=cache, input_text=input_text)
 
     def board_items(self) -> list[dict[str, Any]]:
         """Cached `gh project item-list` result, shared across processes.
@@ -544,188 +573,6 @@ class Board:
             )
         return items
 
-    _ISSUE_PROJECT_ITEM_QUERY = """
-    query($owner: String!, $repo: String!, $number: Int!) {
-      repository(owner: $owner, name: $repo) {
-        issue(number: $number) {
-          projectItems(first: 10) {
-            nodes {
-              id
-              project { number }
-              fieldValues(first: 20) {
-                nodes {
-                  ... on ProjectV2ItemFieldSingleSelectValue {
-                    name
-                    field { ... on ProjectV2SingleSelectField { name } }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-
-    def fetch_item_for_issue(self, issue_number: int) -> dict[str, Any] | None:
-        """Fetch this issue's project item via a scoped projectItems query.
-
-        Costs ~1-3 GraphQL points vs ~200-300 for a full item-list scan.
-        Returns a dict with at least 'id' plus any single-select fields
-        lowercased (e.g. 'status', 'priority'), or None if the issue is
-        not on this board. Fix for #109.
-
-        For batched lookups across many issues, prefer the module-level
-        `fetch_project_items_batch` (one gh call instead of N).
-        """
-        owner, repo_name = self.repo.split("/", 1)
-        data = self.run_graphql(
-            self._ISSUE_PROJECT_ITEM_QUERY,
-            owner=owner,
-            repo=repo_name,
-            number=issue_number,
-        )
-        issue = (data.get("data") or {}).get("repository", {}).get("issue") or {}
-        return _flatten_project_item_for_project(issue.get("projectItems"), self.project_number)
-
-    def find_item_id(self, issue_number: int) -> str:
-        """Look up the ProjectV2Item id for a given issue number on this board.
-
-        Uses a scoped per-issue projectItems query (~1-3 GraphQL points)
-        instead of a full item-list scan (~200-300 points). Fix for #109.
-        """
-        item = self.fetch_item_for_issue(issue_number)
-        if item and item.get("id"):
-            return str(item["id"])
-        raise ItemNotFound(
-            f"No project item for issue #{issue_number} in project "
-            f"{self.project_number}. Is the issue added to the board?"
-        )
-
-    def _add_to_board(self, issue_number: int) -> str:
-        """Call `gh project item-add` for `issue_number` and return the new item-id.
-
-        Invalidates the cached item-list snapshot so subsequent `find_item_id`
-        calls in the same process see the addition.
-
-        Empirically idempotent (jared#71, 2026-05-01): calling item-add on an
-        already-on-board issue exits 0 and returns the existing item-id, so
-        the `assume_new=True` short-circuit in `add_existing_to_board` and
-        the recovery flow from #64 are safe to re-run.
-        """
-        url = f"https://github.com/{self.repo}/issues/{issue_number}"
-        data = self.run_gh(
-            [
-                "project",
-                "item-add",
-                str(self.project_number),
-                "--owner",
-                self.owner,
-                "--url",
-                url,
-                "--format",
-                "json",
-            ]
-        )
-        self.invalidate_items()
-        item_id = data.get("id") or ""
-        if not item_id:
-            # gh project item-add occasionally returns a body with no `id` on
-            # the first call but succeeds immediately on retry (jared#112).
-            data = self.run_gh(
-                [
-                    "project",
-                    "item-add",
-                    str(self.project_number),
-                    "--owner",
-                    self.owner,
-                    "--url",
-                    url,
-                    "--format",
-                    "json",
-                ]
-            )
-            item_id = str(data.get("id") or "")
-        if not item_id:
-            raise GhInvocationError(f"item-add returned no id for issue {issue_number} after retry")
-        return item_id
-
-    def add_existing_to_board(
-        self,
-        issue_number: int,
-        *,
-        priority: str,
-        status: str,
-        labels: list[str] | None = None,
-        fields: list[tuple[str, str]] | None = None,
-        assume_new: bool = False,
-    ) -> str:
-        """Add an issue to the board (if needed), apply labels, set Priority/Status/extras.
-
-        Idempotent: re-running on a fully-configured item is a no-op at the
-        GitHub API level — `gh project item-edit` exits 0 when the field
-        already holds the requested option, and `gh issue edit --add-label`
-        is a no-op for labels already present.
-
-        `assume_new=True` skips the `find_item_id` membership check and goes
-        straight to `gh project item-add`. Used by `_cmd_file` after a fresh
-        `gh issue create` to preserve the perf fix from #4 (no `item-list`
-        scan in the filing hot path). Recovery callers leave it False so a
-        re-run on an already-added item finds the existing item-id.
-
-        Returns the item_id. Pre-resolves all field/option IDs before any
-        GitHub call so misconfiguration raises before side effects. On any
-        gh failure raises GhInvocationError; the caller may catch and
-        synthesize a paste-and-run recovery command.
-        """
-        # Pre-resolve everything up front. FieldNotFound / OptionNotFound
-        # raise here, before we touch GitHub.
-        prio_field_id = self.field_id("Priority")
-        prio_option_id = self.option_id("Priority", priority)
-        status_field_id = self.field_id("Status")
-        status_option_id = self.option_id("Status", status)
-        extras: list[tuple[str, str]] = []
-        for name, value in fields or []:
-            extras.append((self.field_id(name), self.option_id(name, value)))
-
-        # Resolve item-id. assume_new short-circuits the membership scan.
-        item_id: str
-        if assume_new:
-            item_id = self._add_to_board(issue_number)
-        else:
-            try:
-                item_id = self.find_item_id(issue_number)
-            except ItemNotFound:
-                item_id = self._add_to_board(issue_number)
-
-        # Labels are issue-scoped, not item-scoped; gh issue edit handles it.
-        if labels:
-            label_args = ["issue", "edit", str(issue_number), "--repo", self.repo]
-            for label in labels:
-                label_args.extend(["--add-label", label])
-            self.run_gh(label_args)
-
-        # Build a single aliased mutation that sets Priority, Status, and any
-        # extras in one GraphQL round-trip. IDs are opaque internal values
-        # resolved above from project-board.md — interpolating them directly
-        # is safe. cache=None is required (mutations must never be cached).
-        all_fields = [
-            ("setPriority", prio_field_id, prio_option_id),
-            ("setStatus", status_field_id, status_option_id),
-            *[(f"setExtra{i}", fid, oid) for i, (fid, oid) in enumerate(extras)],
-        ]
-        mutation_parts = "\n  ".join(
-            f"{alias}: updateProjectV2ItemFieldValue("
-            f'input: {{projectId: "{self.project_id}", itemId: "{item_id}", '
-            f'fieldId: "{fid}", value: {{singleSelectOptionId: "{oid}"}}}}'
-            f") {{ projectV2Item {{ id }} }}"
-            for alias, fid, oid in all_fields
-        )
-        mutation = f"mutation {{\n  {mutation_parts}\n}}"
-        self.run_graphql(mutation, cache=None)
-
-        return item_id
-
     def fetch_open_issues_for_ties(self, *, include_bodies: bool = True) -> list[OpenIssueForTies]:
         """Single batched GraphQL fetch for ties analysis.
 
@@ -809,14 +656,6 @@ class Board:
             cursor = page["pageInfo"]["endCursor"]
         # Filter Done if any leaked in (defensive — `states: OPEN` should already exclude).
         return [r for r in all_records if r.status != "Done"]
-
-    def get_issue(self, number: int) -> OpenIssueForTies | None:
-        """Return one issue's tie-relevant record, or None if it's not open
-        on this repo. Used by _cmd_ties to confirm target is pullable."""
-        matching = [
-            i for i in self.fetch_open_issues_for_ties(include_bodies=True) if i.number == number
-        ]
-        return matching[0] if matching else None
 
     def run_graphql(
         self, query: str, *, cache: str | None = None, **variables: str | int | bool
@@ -1003,6 +842,21 @@ def fetch_issue_body_rest(repo: str, number: int) -> str:
     if data is None:
         return ""
     return data.get("body") or ""
+
+
+def fetch_issue_title_from_cwd(issue_number: int) -> str:
+    """Return the title for `issue_number` using the repo implied by CWD.
+
+    Calls ``gh issue view <N> --json title`` without an explicit ``--repo``
+    flag so `gh` resolves the repo from the current directory's git remote
+    (the same context worktree-add runs in). Returns empty string on any
+    failure so callers can fall back to a default slug gracefully.
+    """
+    try:
+        data = run_gh(["issue", "view", str(issue_number), "--json", "title"])
+        return str(data.get("title") or "")
+    except (GhInvocationError, OSError):
+        return ""
 
 
 def _child_env() -> dict[str, str]:
@@ -1327,9 +1181,8 @@ def _flatten_project_item_for_project(
     single-select field names lowercased.
 
     Returns None when the issue has no item on this project (off-board
-    ghost; see `fetch_item_for_issue`'s contract for the upstream usage).
-    Module-level so `Board.fetch_item_for_issue`, `Board.open_items`,
-    and `fetch_project_items_batch` share one flattener.
+    ghost). Module-level so GitHubProjectsProvider.get_item / _find_item_id,
+    Board.open_items, and fetch_project_items_batch share one flattener.
     """
     if not isinstance(project_items_node, dict):
         return None
