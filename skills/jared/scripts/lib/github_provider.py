@@ -278,9 +278,11 @@ class GitHubProjectsProvider:
         with cache="5m". Done items are filtered before construction.
 
         Mapping notes:
-        - status and priority are used for Done filtering but not in TieCandidate.
+        - status drives the Done filter; it is not carried on TieCandidate.
+        - the query also selects priority (mirroring board.py's ties query) but
+          this method does not read it — priority is not a TieCandidate field.
         - blocked_by is dropped (not in TieCandidate).
-        - labels tuple→list conversion applied.
+        - labels: list built from node["labels"]["nodes"][*]["name"].
         - milestone: from node["milestone"]["title"] or None.
         """
         body_field = "body" if include_bodies else ""
