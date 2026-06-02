@@ -869,6 +869,47 @@ def test_add_to_board_find_existing_item_when_not_assume_new(
     assert graphql_calls
 
 
+def test_add_to_board_extra_fields_emit_aliased_setextra_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Extra single-select fields are appended as setExtra<i> aliases in the mutation.
+
+    Pins the `setExtra{i}` enumeration in `_add_existing`'s aliased-mutation
+    builder: the first extra field resolves to its field-id/option-id and rides
+    the same single GraphQL round-trip as Priority/Status.
+    """
+    provider = GitHubProjectsProvider(
+        project_number=7,
+        project_id="PVT_x",
+        owner="brockamer",
+        repo="brockamer/findajob",
+        field_ids={"Status": "F1", "Priority": "F2", "Size": "F3"},
+        field_options={
+            "Status": {"Backlog": "A"},
+            "Priority": {"High": "H"},
+            "Size": {"Large": "SL"},
+        },
+    )
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    provider.add_to_board(42, priority="High", status="Backlog", fields=[("Size", "Large")])
+
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert graphql_calls, "expected graphql call for field mutations"
+    joined = " ".join(" ".join(c) for c in graphql_calls)
+    # Priority/Status/Size all ride one mutation; Size is the setExtra0 alias.
+    assert "setPriority" in joined
+    assert "setStatus" in joined
+    assert "setExtra0" in joined
+    # Size resolved: field-id F3 / option-id SL
+    assert "F3" in joined and "SL" in joined
+
+
 # ------------------------------------------------------------------ #
 # file                                                                  #
 # ------------------------------------------------------------------ #
