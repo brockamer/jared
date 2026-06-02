@@ -7,15 +7,20 @@ patching is preserved.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from .board import (
     FieldNotFound,
     GhInvocationError,
+    ItemNotFound,
     OptionNotFound,
     _flatten_project_item_for_project,
     fetch_issue_body_rest,
     fetch_recent_comments_batch,
+    run_gh,
+    run_gh_raw,
     run_graphql,
 )
 from .board import (
@@ -365,6 +370,157 @@ class GitHubProjectsProvider:
         return edges
 
     # ------------------------------------------------------------------ #
+    # Private write helpers                                               #
+    # ------------------------------------------------------------------ #
+
+    def _find_item_id(self, issue_number: int) -> str:
+        """Look up the ProjectV2Item id for a given issue number.
+
+        Uses the provider's existing scoped-per-issue query (same as
+        Board.find_item_id but routed through module-level run_graphql).
+        Raises ItemNotFound when the issue is not on this board.
+        """
+        owner, repo_name = self.repo.split("/", 1)
+        data = run_graphql(
+            _ISSUE_PROJECT_ITEM_QUERY,
+            owner=owner,
+            repo=repo_name,
+            number=issue_number,
+        )
+        issue = (data.get("data") or {}).get("repository", {}).get("issue") or {}
+        flat = _flatten_project_item_for_project(issue.get("projectItems"), self.project_number)
+        if flat and flat.get("id"):
+            return str(flat["id"])
+        raise ItemNotFound(
+            f"No project item for issue #{issue_number} in project "
+            f"{self.project_number}. Is the issue added to the board?"
+        )
+
+    def _item_add(self, issue_number: int) -> str:
+        """Call `gh project item-add` and return the new item-id.
+
+        Mirrors Board._add_to_board exactly, including the no-id retry
+        (jared#112). Idempotent (jared#71): re-running on an already-on-board
+        issue exits 0 and returns the existing item-id.
+        """
+        url = f"https://github.com/{self.repo}/issues/{issue_number}"
+        data = run_gh(
+            [
+                "project",
+                "item-add",
+                str(self.project_number),
+                "--owner",
+                self.owner,
+                "--url",
+                url,
+                "--format",
+                "json",
+            ]
+        )
+        item_id = data.get("id") or ""
+        if not item_id:
+            # gh project item-add occasionally returns a body with no `id` on
+            # the first call but succeeds immediately on retry (jared#112).
+            data = run_gh(
+                [
+                    "project",
+                    "item-add",
+                    str(self.project_number),
+                    "--owner",
+                    self.owner,
+                    "--url",
+                    url,
+                    "--format",
+                    "json",
+                ]
+            )
+            item_id = str(data.get("id") or "")
+        if not item_id:
+            raise GhInvocationError(f"item-add returned no id for issue {issue_number} after retry")
+        return item_id
+
+    def _add_existing(
+        self,
+        issue_number: int,
+        *,
+        priority: str,
+        status: str,
+        labels: list[str] | None = None,
+        fields: list[tuple[str, str]] | None = None,
+        assume_new: bool = False,
+    ) -> str:
+        """Add an issue to the board (if needed), apply labels, set fields.
+
+        Mirrors Board.add_existing_to_board exactly. Pre-resolves all
+        field/option IDs before any GitHub call so misconfiguration raises
+        before side effects. Returns the item_id.
+
+        `assume_new=True` skips the membership scan (used by `file` after a
+        fresh issue create — same perf optimisation as Board).
+        """
+        # Pre-resolve before any gh call.
+        prio_field_id = self._field_id("Priority")
+        prio_option_id = self._option_id("Priority", priority)
+        status_field_id = self._field_id("Status")
+        status_option_id = self._option_id("Status", status)
+        extras: list[tuple[str, str]] = []
+        for name, value in fields or []:
+            extras.append((self._field_id(name), self._option_id(name, value)))
+
+        # Resolve item-id.
+        item_id: str
+        if assume_new:
+            item_id = self._item_add(issue_number)
+        else:
+            try:
+                item_id = self._find_item_id(issue_number)
+            except ItemNotFound:
+                item_id = self._item_add(issue_number)
+
+        # Labels are issue-scoped; gh issue edit handles them.
+        if labels:
+            label_args = ["issue", "edit", str(issue_number), "--repo", self.repo]
+            for label in labels:
+                label_args.extend(["--add-label", label])
+            run_gh(label_args)
+
+        # Single aliased mutation sets Priority, Status, and any extras in one
+        # GraphQL round-trip.  IDs are opaque internal values resolved above
+        # from project-board.md — interpolating them directly is safe.
+        # cache=None is required (mutations must never be cached).
+        all_fields = [
+            ("setPriority", prio_field_id, prio_option_id),
+            ("setStatus", status_field_id, status_option_id),
+            *[(f"setExtra{i}", fid, oid) for i, (fid, oid) in enumerate(extras)],
+        ]
+        mutation_parts = "\n  ".join(
+            f"{alias}: updateProjectV2ItemFieldValue("
+            f'input: {{projectId: "{self.project_id}", itemId: "{item_id}", '
+            f'fieldId: "{fid}", value: {{singleSelectOptionId: "{oid}"}}}}'
+            f") {{ projectV2Item {{ id }} }}"
+            for alias, fid, oid in all_fields
+        )
+        mutation = f"mutation {{\n  {mutation_parts}\n}}"
+        run_graphql(mutation, cache=None)
+
+        return item_id
+
+    def _resolve_issue_node_id(self, issue_number: int) -> str:
+        """Return the GitHub node-id for `issue_number` (needed for blocked-by)."""
+        data = run_gh(
+            [
+                "issue",
+                "view",
+                str(issue_number),
+                "--repo",
+                self.repo,
+                "--json",
+                "id",
+            ]
+        )
+        return str(data["id"])
+
+    # ------------------------------------------------------------------ #
     # WRITE methods (implemented in Task 4)                               #
     # ------------------------------------------------------------------ #
 
@@ -379,7 +535,68 @@ class GitHubProjectsProvider:
         milestone: str | None = None,
         fields: list[tuple[str, str]] | None = None,
     ) -> BoardItem:
-        raise NotImplementedError
+        """Atomic: create issue, add to project, set Priority + Status + extras.
+
+        Mirrors _cmd_file's core gh sequence (without the CLI-layer concerns:
+        pre-flight redaction, round-trip fence, recovery-command printing, and
+        milestone-requirement enforcement all stay in the CLI layer in Task 6).
+
+        Milestone is passed to gh issue create verbatim when given (caller is
+        responsible for validation — same as how the CLI validates before calling
+        this method in Task 6).
+        """
+        effective_status = status or "Backlog"
+
+        # Stage body in a temp file; gh issue create requires a file path.
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as tf:
+            tf.write(body)
+            body_tmp_path = tf.name
+
+        create_args = [
+            "issue",
+            "create",
+            "--repo",
+            self.repo,
+            "--title",
+            title,
+            "--body-file",
+            body_tmp_path,
+        ]
+        for label in labels or []:
+            create_args.extend(["--label", label])
+        if milestone is not None:
+            create_args.extend(["--milestone", milestone])
+
+        try:
+            issue_url = run_gh_raw(create_args)
+        except GhInvocationError:
+            Path(body_tmp_path).unlink(missing_ok=True)
+            raise
+        finally:
+            # On the success path we clean up; on error we already unlinked
+            # above. unlink(missing_ok=True) is a safe no-op on the error path.
+            Path(body_tmp_path).unlink(missing_ok=True)
+
+        issue_number = int(issue_url.rsplit("/", 1)[-1])
+
+        self._add_existing(
+            issue_number,
+            priority=priority,
+            status=effective_status,
+            fields=fields,
+            assume_new=True,
+        )
+
+        return BoardItem(
+            number=issue_number,
+            title=title,
+            status=effective_status,
+            priority=priority,
+            labels=list(labels or []),
+            milestone=milestone,
+        )
 
     def add_to_board(
         self,
@@ -390,37 +607,200 @@ class GitHubProjectsProvider:
         labels: list[str] | None = None,
         fields: list[tuple[str, str]] | None = None,
     ) -> None:
-        raise NotImplementedError
+        """Add an existing issue to the board, apply labels and fields.
+
+        Idempotent — safe to re-run. Mirrors _cmd_add_to_board's call to
+        Board.add_existing_to_board (assume_new=False).
+        """
+        self._add_existing(
+            ref,
+            priority=priority,
+            status=status,
+            labels=labels,
+            fields=fields,
+            assume_new=False,
+        )
 
     def set_field(self, ref: IssueRef, field_name: str, value: str) -> None:
-        raise NotImplementedError
+        """Set a single-select project field on an issue.
+
+        Mirrors _cmd_set: find item-id via scoped graphql query, then emit
+        `gh project item-edit --project-id … --id … --field-id … --single-select-option-id …`.
+        Does NOT call the aliased updateProjectV2ItemFieldValue mutation — that
+        is only used by add_to_board / file for atomic multi-field sets.
+        """
+        item_id = self._find_item_id(ref)
+        field_id = self._field_id(field_name)
+        option_id = self._option_id(field_name, value)
+
+        run_gh(
+            [
+                "project",
+                "item-edit",
+                "--project-id",
+                self.project_id,
+                "--id",
+                item_id,
+                "--field-id",
+                field_id,
+                "--single-select-option-id",
+                option_id,
+            ]
+        )
 
     def move(self, ref: IssueRef, status: str) -> None:
-        raise NotImplementedError
+        """Move an issue to a new Status column. Delegates to set_field."""
+        self.set_field(ref, "Status", status)
 
     def close(self, ref: IssueRef, *, comment: str | None = None) -> None:
-        raise NotImplementedError
+        """Close an issue and set Status=Done.
+
+        Mirrors _cmd_close: optional comment → gh issue close → set_field
+        (always, per #137 defense-in-depth; no poll).
+
+        PII pre-flight for the comment stays in the CLI layer (Task 6).
+        """
+        if comment is not None:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
+                tf.write(comment)
+                tmp_path = tf.name
+            try:
+                run_gh_raw(
+                    [
+                        "issue",
+                        "comment",
+                        str(ref),
+                        "--repo",
+                        self.repo,
+                        "--body-file",
+                        tmp_path,
+                    ]
+                )
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+
+        run_gh(
+            [
+                "issue",
+                "close",
+                str(ref),
+                "--repo",
+                self.repo,
+            ]
+        )
+
+        # Defense-in-depth (#137): always set Status=Done explicitly; cheap
+        # no-op if the GitHub "Item closed → Done" workflow fired, genuine
+        # save if it didn't.
+        self.set_field(ref, "Status", "Done")
 
     def set_body(self, ref: IssueRef, text: str) -> None:
-        raise NotImplementedError
+        """Replace the issue body.
+
+        Mirrors capture-context.py's write_body:
+        `gh issue edit <n> --repo <repo> --body-file <path>`.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(text)
+            path = f.name
+        try:
+            run_gh_raw(["issue", "edit", str(ref), "--repo", self.repo, "--body-file", path])
+        finally:
+            Path(path).unlink(missing_ok=True)
 
     def comment(self, ref: IssueRef, body: str) -> None:
-        raise NotImplementedError
+        """Post a comment on an issue.
+
+        Mirrors _cmd_comment: stages body in a temp file, then calls
+        `gh issue comment <n> --repo <repo> --body-file <path>`.
+
+        PII pre-flight stays in the CLI layer (Task 6).
+        """
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tf:
+            tf.write(body)
+            tmp_path = tf.name
+        try:
+            run_gh_raw(
+                [
+                    "issue",
+                    "comment",
+                    str(ref),
+                    "--repo",
+                    self.repo,
+                    "--body-file",
+                    tmp_path,
+                ]
+            )
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
     def add_label(self, ref: IssueRef, name: str) -> None:
-        raise NotImplementedError
+        """Add a label to an issue. Idempotent."""
+        run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--add-label", name])
 
     def remove_label(self, ref: IssueRef, name: str) -> None:
-        raise NotImplementedError
+        """Remove a label from an issue. Idempotent."""
+        run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--remove-label", name])
 
     def add_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
-        raise NotImplementedError
+        """Add a native GitHub blocked-by dependency edge.
+
+        Mirrors _cmd_blocked_by (remove=False): resolve both issue node-ids
+        via `gh issue view --json id`, then emit the addBlockedBy mutation.
+        """
+        dep_id = self._resolve_issue_node_id(ref)
+        blocker_id = self._resolve_issue_node_id(blocker)
+        query = (
+            "mutation($issueId: ID!, $blockingIssueId: ID!) { "
+            "  addBlockedBy("
+            "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
+            "  ) { issue { number } }"
+            "}"
+        )
+        run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
 
     def remove_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
-        raise NotImplementedError
+        """Remove a native GitHub blocked-by dependency edge.
+
+        Mirrors _cmd_blocked_by (remove=True): resolve both issue node-ids
+        via `gh issue view --json id`, then emit the removeBlockedBy mutation.
+        """
+        dep_id = self._resolve_issue_node_id(ref)
+        blocker_id = self._resolve_issue_node_id(blocker)
+        query = (
+            "mutation($issueId: ID!, $blockingIssueId: ID!) { "
+            "  removeBlockedBy("
+            "    input: { issueId: $issueId, blockingIssueId: $blockingIssueId }"
+            "  ) { issue { number } }"
+            "}"
+        )
+        run_graphql(query, issueId=dep_id, blockingIssueId=blocker_id)
 
     def set_milestone(self, ref: IssueRef, name: str) -> None:
-        raise NotImplementedError
+        """Assign a milestone to an issue by title.
+
+        Mirrors `gh issue edit <n> --milestone <name>` — gh accepts the title
+        string directly, no numeric id resolution required.
+        """
+        run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--milestone", name])
 
     def list_milestones(self) -> list[Milestone]:
-        raise NotImplementedError
+        """Return open milestones for this repo.
+
+        Mirrors _cmd_file's milestone lookup:
+        `gh api repos/{repo}/milestones?state=open&per_page=100`.
+        The query string form is intentional — -f filters on /milestones would
+        hit the POST-create endpoint (#254).
+        """
+        raw = run_gh(["api", f"repos/{self.repo}/milestones?state=open&per_page=100"])
+        milestones: list[Milestone] = []
+        for m in raw if isinstance(raw, list) else []:
+            milestones.append(
+                Milestone(
+                    name=m.get("title", ""),
+                    description=m.get("description") or "",
+                    state=m.get("state"),
+                    due=m.get("due_on"),
+                )
+            )
+        return milestones

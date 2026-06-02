@@ -20,6 +20,7 @@ from skills.jared.scripts.lib.board_provider import (
     Capability,
     Comment,
     Edge,
+    Milestone,
     TieCandidate,
 )
 from skills.jared.scripts.lib.github_provider import GitHubProjectsProvider
@@ -755,3 +756,638 @@ def test_option_id_raises_for_unknown_option() -> None:
 
     with pytest.raises(OptionNotFound, match="Nope"):
         _provider()._option_id("Status", "Nope")
+
+
+# ------------------------------------------------------------------ #
+# WRITE methods (Phase 1.4)                                           #
+# ------------------------------------------------------------------ #
+
+# Shared board fixture for write tests: matches the field IDs / option IDs
+# used in _provider() so assertions can be exact.
+#
+# field_ids:    Status → "F1",  Priority → "F2"
+# field_options Status: Backlog→"A", Up Next→"B", In Progress→"C",
+#                       Blocked→"D", Done→"E"
+#               Priority: High→"H", Medium→"M", Low→"L"
+# project_id:   "PVT_x"
+# project_number: 7
+# owner:        "brockamer"
+# repo:         "brockamer/findajob"
+
+
+def _scoped_item_response(item_id: str = "PVTI_aaa") -> str:
+    """Minimal GraphQL response for the per-issue projectItems query."""
+    return json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "issue": {
+                        "projectItems": {
+                            "nodes": [
+                                {
+                                    "id": item_id,
+                                    "project": {"number": 7},
+                                    "fieldValues": {"nodes": []},
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+
+# ------------------------------------------------------------------ #
+# add_to_board                                                         #
+# ------------------------------------------------------------------ #
+
+
+def test_add_to_board_calls_item_add_and_graphql_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """add_to_board emits item-add + one aliased updateProjectV2ItemFieldValue mutation."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    _provider().add_to_board(42, priority="High", status="Backlog")
+
+    assert any("item-add" in " ".join(c) for c in calls), "expected item-add call"
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert graphql_calls, "expected graphql call for field mutations"
+    joined = " ".join(" ".join(c) for c in graphql_calls)
+    # Priority resolved: F2 / H
+    assert "F2" in joined and "H" in joined
+    # Status resolved: F1 / A (Backlog)
+    assert "F1" in joined and "A" in joined
+    # updateProjectV2ItemFieldValue mutation present
+    assert "updateProjectV2ItemFieldValue" in joined
+    # No item-edit (field edits go through graphql in add_to_board path)
+    assert not any("item-edit" in " ".join(c) for c in calls)
+
+
+def test_add_to_board_applies_labels_via_issue_edit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Labels are applied via `gh issue edit --add-label`, not the graphql mutation."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    _provider().add_to_board(42, priority="Low", status="Up Next", labels=["session-1"])
+
+    label_calls = [c for c in calls if "issue" in c and "edit" in c and "--add-label" in c]
+    assert label_calls, "expected gh issue edit --add-label call"
+    assert any("session-1" in " ".join(c) for c in label_calls)
+
+
+def test_add_to_board_find_existing_item_when_not_assume_new(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the issue is already on the board, item-add must be skipped (uses find_item_id)."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": _scoped_item_response("PVTI_existing"),
+            "item-edit": "{}",
+        },
+    )
+    _provider().add_to_board(42, priority="Medium", status="Backlog")
+
+    assert not any("item-add" in " ".join(c) for c in calls), (
+        "item-add must not fire when issue is already on the board"
+    )
+    # The graphql mutation for field-setting still fires
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert graphql_calls
+
+
+# ------------------------------------------------------------------ #
+# file                                                                  #
+# ------------------------------------------------------------------ #
+
+
+def test_file_sequences_create_add_graphql(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """file emits gh issue create → item-add → graphql mutation (same as _cmd_file)."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://github.com/brockamer/findajob/issues/99\n",
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    result = _provider().file(
+        title="New issue",
+        body="Body content.",
+        priority="High",
+        status="Backlog",
+    )
+
+    # issue create happened
+    assert any("issue" in c and "create" in c for c in calls)
+    # item-add happened
+    assert any("item-add" in " ".join(c) for c in calls)
+    # graphql mutation happened with correct field IDs
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    joined = " ".join(" ".join(c) for c in graphql_calls)
+    assert "updateProjectV2ItemFieldValue" in joined
+    assert "F2" in joined and "H" in joined  # Priority=High
+    assert "F1" in joined and "A" in joined  # Status=Backlog
+    # no item-edit (field mutations go through graphql)
+    assert not any("item-edit" in " ".join(c) for c in calls)
+
+    # Returns BoardItem with correct fields
+    assert isinstance(result, BoardItem)
+    assert result.number == 99
+    assert result.title == "New issue"
+    assert result.status == "Backlog"
+    assert result.priority == "High"
+
+
+def test_file_passes_milestone_to_gh_create(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When milestone is given, --milestone is passed to gh issue create."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://github.com/brockamer/findajob/issues/10\n",
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    _provider().file(
+        title="T",
+        body="B",
+        priority="Low",
+        status="Backlog",
+        milestone="v1.0",
+    )
+
+    create_calls = [c for c in calls if "issue" in c and "create" in c]
+    assert len(create_calls) == 1
+    argv = create_calls[0]
+    assert "--milestone" in argv
+    idx = argv.index("--milestone")
+    assert argv[idx + 1] == "v1.0"
+
+
+def test_file_passes_labels_to_gh_create(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Labels are forwarded to gh issue create via --label."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://github.com/brockamer/findajob/issues/11\n",
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    _provider().file(
+        title="T",
+        body="B",
+        priority="Low",
+        status="Backlog",
+        labels=["enhancement"],
+    )
+
+    create_calls = [c for c in calls if "issue" in c and "create" in c]
+    assert any("--label" in " ".join(c) for c in create_calls)
+    assert any("enhancement" in " ".join(c) for c in create_calls)
+
+
+def test_file_returns_board_item_with_correct_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """file returns a BoardItem with the right number/title/status/priority."""
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://github.com/brockamer/findajob/issues/55\n",
+            "item-add": '{"id": "PVTI_x"}',
+            "api graphql": "{}",
+        },
+    )
+    item = _provider().file(
+        title="Check fields",
+        body="B",
+        priority="Medium",
+        status="Up Next",
+    )
+
+    assert isinstance(item, BoardItem)
+    assert item.number == 55
+    assert item.title == "Check fields"
+    assert item.status == "Up Next"
+    assert item.priority == "Medium"
+    assert item.labels == []
+    assert item.milestone is None
+
+
+# ------------------------------------------------------------------ #
+# set_field                                                             #
+# ------------------------------------------------------------------ #
+
+
+def test_set_field_emits_item_edit_with_resolved_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_field resolves item-id then emits `gh project item-edit` (NOT a graphql mutation).
+
+    Oracle: mirrors test_cmd_set.py::test_set_invokes_item_edit_with_resolved_ids.
+    project_id="PVT_x", item_id="PVTI_aaa", field_id="F2", option_id="H".
+    """
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": _scoped_item_response("PVTI_aaa"),
+            "item-edit": "{}",
+        },
+    )
+    _provider().set_field(42, "Priority", "High")
+
+    edit_calls = [c for c in calls if "item-edit" in c]
+    assert edit_calls, "expected gh project item-edit call"
+    joined = " ".join(edit_calls[0])
+    assert "PVT_x" in joined  # project_id
+    assert "PVTI_aaa" in joined  # item_id
+    assert "F2" in joined  # field_id for Priority
+    assert "H" in joined  # option_id for High
+
+
+def test_set_field_emits_item_edit_not_graphql_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_field must use item-edit, not the aliased updateProjectV2 mutation."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": _scoped_item_response(),
+            "item-edit": "{}",
+        },
+    )
+    _provider().set_field(42, "Status", "Done")
+
+    # item-edit present
+    assert any("item-edit" in " ".join(c) for c in calls)
+    # The graphql call is only the item-lookup, NOT a mutation
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    assert not any("updateProjectV2ItemFieldValue" in " ".join(c) for c in graphql_calls), (
+        "set_field must not emit the aliased mutation — that belongs to add_to_board/file"
+    )
+
+
+# ------------------------------------------------------------------ #
+# move                                                                  #
+# ------------------------------------------------------------------ #
+
+
+def test_move_delegates_to_set_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """move(ref, status) delegates to set_field(ref, 'Status', status)."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": _scoped_item_response("PVTI_mv"),
+            "item-edit": "{}",
+        },
+    )
+    _provider().move(42, "In Progress")
+
+    edit_calls = [c for c in calls if "item-edit" in c]
+    assert edit_calls
+    joined = " ".join(edit_calls[0])
+    assert "F1" in joined  # Status field_id
+    assert "C" in joined  # In Progress option_id
+
+
+# ------------------------------------------------------------------ #
+# close                                                                 #
+# ------------------------------------------------------------------ #
+
+
+def test_close_emits_gh_issue_close_then_sets_status_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """close emits `gh issue close` then always sets Status=Done via set_field (#137)."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            # item-lookup for set_field's find_item_id
+            "api graphql": _scoped_item_response("PVTI_cl"),
+            "issue close": "",
+            "item-edit": "{}",
+        },
+    )
+    _provider().close(42)
+
+    close_calls = [c for c in calls if "issue" in c and "close" in c]
+    assert close_calls, "expected gh issue close"
+    assert "brockamer/findajob" in " ".join(close_calls[0])
+
+    edit_calls = [c for c in calls if "item-edit" in c]
+    assert edit_calls, "expected gh project item-edit for Status=Done"
+    joined = " ".join(edit_calls[0])
+    assert "F1" in joined  # Status field_id
+    assert "E" in joined  # Done option_id
+
+
+def test_close_with_comment_emits_comment_before_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When comment is given, `gh issue comment` fires before `gh issue close`."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": _scoped_item_response("PVTI_cl"),
+            "issue comment": "https://github.com/brockamer/findajob/issues/42#comment-1",
+            "issue close": "",
+            "item-edit": "{}",
+        },
+    )
+    _provider().close(42, comment="Session note text")
+
+    comment_calls = [c for c in calls if "issue" in c and "comment" in c]
+    assert comment_calls, "expected gh issue comment call"
+    assert "--body-file" in comment_calls[0]
+
+    # comment must precede close in the call order
+    comment_idx = next(i for i, c in enumerate(calls) if "issue" in c and "comment" in c)
+    close_idx = next(i for i, c in enumerate(calls) if "issue" in c and "close" in c)
+    assert comment_idx < close_idx, "comment must fire before close"
+
+
+def test_close_always_sets_status_done_no_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """close always emits item-edit for Status=Done; it does NOT poll first."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "api graphql": _scoped_item_response("PVTI_cl"),
+            "issue close": "",
+            "item-edit": "{}",
+        },
+    )
+    _provider().close(42)
+
+    # The graphql call is only the item-lookup for set_field, not a poll
+    graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
+    # Only one graphql call allowed: the item-id lookup
+    assert len(graphql_calls) == 1, (
+        f"close must not poll; expected only the item-id lookup, "
+        f"got {len(graphql_calls)} graphql calls"
+    )
+
+
+# ------------------------------------------------------------------ #
+# set_body                                                              #
+# ------------------------------------------------------------------ #
+
+
+def test_set_body_emits_issue_edit_body_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_body emits `gh issue edit <n> --repo <repo> --body-file <path>`.
+
+    Oracle: mirrors capture-context.py write_body.
+    """
+    calls = patch_gh_by_arg(monkeypatch, {"issue edit": ""})
+    _provider().set_body(42, "New body text")
+
+    edit_calls = [c for c in calls if "issue" in c and "edit" in c]
+    assert edit_calls, "expected gh issue edit call"
+    argv = edit_calls[0]
+    joined = " ".join(argv)
+    assert "42" in joined
+    assert "brockamer/findajob" in joined
+    assert "--body-file" in argv
+
+
+# ------------------------------------------------------------------ #
+# comment                                                               #
+# ------------------------------------------------------------------ #
+
+
+def test_comment_emits_issue_comment_body_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """comment emits `gh issue comment <n> --repo <repo> --body-file <path>`.
+
+    Oracle: mirrors _cmd_comment's gh invocation.
+    """
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {"issue comment": "https://github.com/brockamer/findajob/issues/42#comment-1"},
+    )
+    _provider().comment(42, "A comment body")
+
+    comment_calls = [c for c in calls if "issue" in c and "comment" in c]
+    assert comment_calls, "expected gh issue comment call"
+    argv = comment_calls[0]
+    assert "--body-file" in argv
+    assert "42" in argv
+    assert "brockamer/findajob" in " ".join(argv)
+
+
+# ------------------------------------------------------------------ #
+# add_label / remove_label                                             #
+# ------------------------------------------------------------------ #
+
+
+def test_add_label_emits_issue_edit_add_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """add_label emits `gh issue edit <n> --repo <repo> --add-label <name>`."""
+    calls = patch_gh_by_arg(monkeypatch, {"issue edit": "{}"})
+    _provider().add_label(42, "enhancement")
+
+    edit_calls = [c for c in calls if "issue" in c and "edit" in c]
+    assert edit_calls
+    argv = edit_calls[0]
+    assert "--add-label" in argv
+    assert "enhancement" in argv
+    assert "brockamer/findajob" in " ".join(argv)
+
+
+def test_remove_label_emits_issue_edit_remove_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """remove_label emits `gh issue edit <n> --repo <repo> --remove-label <name>`."""
+    calls = patch_gh_by_arg(monkeypatch, {"issue edit": "{}"})
+    _provider().remove_label(42, "session-1")
+
+    edit_calls = [c for c in calls if "issue" in c and "edit" in c]
+    assert edit_calls
+    argv = edit_calls[0]
+    assert "--remove-label" in argv
+    assert "session-1" in argv
+
+
+# ------------------------------------------------------------------ #
+# add_blocked_by / remove_blocked_by                                   #
+# ------------------------------------------------------------------ #
+
+
+def test_add_blocked_by_emits_addBlockedBy_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """add_blocked_by resolves node IDs then emits addBlockedBy mutation.
+
+    Oracle: mirrors test_cmd_blocked_by.py::test_blocked_by_add_edge.
+    Two issue-view calls + one graphql call with addBlockedBy and both node IDs.
+    """
+
+    def fake_run(args: list[str], **kw: object) -> object:
+        from tests.conftest import FakeGhResult
+
+        joined = " ".join(args)
+        if "issue" in args and "view" in args:
+            idx = args.index("view")
+            num = int(args[idx + 1])
+            node_ids = {99: "I_blockee", 42: "I_blocker"}
+            return FakeGhResult(stdout=f'{{"id": "{node_ids[num]}"}}')
+        if "graphql" in joined:
+            return FakeGhResult(stdout='{"data": {"addBlockedBy": {"issue": {"number": 99}}}}')
+        return FakeGhResult(stdout="{}")
+
+    calls: list[list[str]] = []
+
+    def recording_fake(args: list[str], **kw: object) -> object:
+        calls.append(args)
+        return fake_run(args, **kw)
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", recording_fake)
+
+    _provider().add_blocked_by(99, 42)
+
+    view_calls = [c for c in calls if "view" in c]
+    assert len(view_calls) == 2, "expected two issue-view calls for node-id resolution"
+
+    gql = next(c for c in calls if "graphql" in " ".join(c))
+    query_arg = next(a for a in gql if a.startswith("query="))
+    assert "addBlockedBy" in query_arg
+    assert "removeBlockedBy" not in query_arg
+    assert any("issueId=I_blockee" in a for a in gql)
+    assert any("blockingIssueId=I_blocker" in a for a in gql)
+
+
+def test_remove_blocked_by_emits_removeBlockedBy_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """remove_blocked_by emits removeBlockedBy mutation.
+
+    Oracle: mirrors test_cmd_blocked_by.py::test_blocked_by_remove_edge.
+    """
+
+    def fake_run(args: list[str], **kw: object) -> object:
+        from tests.conftest import FakeGhResult
+
+        joined = " ".join(args)
+        if "issue" in args and "view" in args:
+            idx = args.index("view")
+            num = int(args[idx + 1])
+            node_ids = {99: "I_blockee", 42: "I_blocker"}
+            return FakeGhResult(stdout=f'{{"id": "{node_ids[num]}"}}')
+        if "graphql" in joined:
+            return FakeGhResult(stdout='{"data": {"removeBlockedBy": {"issue": {"number": 99}}}}')
+        return FakeGhResult(stdout="{}")
+
+    calls: list[list[str]] = []
+
+    def recording_fake(args: list[str], **kw: object) -> object:
+        calls.append(args)
+        return fake_run(args, **kw)
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", recording_fake)
+
+    _provider().remove_blocked_by(99, 42)
+
+    gql = next(c for c in calls if "graphql" in " ".join(c))
+    query_arg = next(a for a in gql if a.startswith("query="))
+    assert "removeBlockedBy" in query_arg
+    assert "addBlockedBy" not in query_arg
+
+
+# ------------------------------------------------------------------ #
+# set_milestone                                                         #
+# ------------------------------------------------------------------ #
+
+
+def test_set_milestone_emits_issue_edit_milestone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_milestone emits `gh issue edit <n> --repo <repo> --milestone <name>`."""
+    calls = patch_gh_by_arg(monkeypatch, {"issue edit": "{}"})
+    _provider().set_milestone(42, "v2.0")
+
+    edit_calls = [c for c in calls if "issue" in c and "edit" in c]
+    assert edit_calls
+    argv = edit_calls[0]
+    assert "--milestone" in argv
+    idx = argv.index("--milestone")
+    assert argv[idx + 1] == "v2.0"
+    assert "brockamer/findajob" in " ".join(argv)
+
+
+# ------------------------------------------------------------------ #
+# list_milestones                                                       #
+# ------------------------------------------------------------------ #
+
+
+def test_list_milestones_emits_correct_api_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """list_milestones uses query-string form, not -f form (#254 regression guard)."""
+    import json as _json
+
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        {
+            "milestones": _json.dumps(
+                [
+                    {
+                        "title": "v1.0",
+                        "description": "First release",
+                        "state": "open",
+                        "due_on": "2026-06-30",
+                    }
+                ]
+            )
+        },
+    )
+    milestones = _provider().list_milestones()
+
+    assert len(milestones) == 1
+    assert isinstance(milestones[0], Milestone)
+    assert milestones[0].name == "v1.0"
+    assert milestones[0].state == "open"
+
+    milestone_calls = [c for c in calls if "milestones" in " ".join(c)]
+    assert milestone_calls, "expected a milestones API call"
+    argv = milestone_calls[0]
+
+    # Must use query-string form (not -f filters which would POST-create)
+    url_arg = next((a for a in argv if "milestones" in a), "")
+    assert "state=open" in url_arg, (
+        "milestone URL must carry state=open in query string to avoid hitting POST endpoint; "
+        f"got: {url_arg!r}"
+    )
+    # No bare -f state= without --method GET
+    f_fields = [argv[i + 1] for i, t in enumerate(argv) if t == "-f" and i + 1 < len(argv)]
+    for field in f_fields:
+        assert not field.startswith("state="), (
+            f"`-f {field}` without --method GET would POST to milestones; use query string"
+        )
