@@ -447,14 +447,15 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
             f"No project item for issue #{args.issue_number} in project "
             f"{board.project_number}. Is the issue added to the board?"
         )
-    # Build the fields dict to match the pre-migration shape: all flat keys
-    # minus the internal id, which means status+priority are included alongside
-    # any extra single-select fields stored in BoardItem.fields.
-    fields_out: dict[str, str | None] = {
-        "status": item.status,
-        "priority": item.priority,
-        **item.fields,
-    }
+    # Build the fields dict to match the pre-migration shape: only include
+    # status/priority when they are SET (non-None), then append any extra
+    # single-select fields from BoardItem.fields (which already excludes Nones).
+    fields_out: dict[str, object] = {}
+    if item.status is not None:
+        fields_out["status"] = item.status
+    if item.priority is not None:
+        fields_out["priority"] = item.priority
+    fields_out.update(item.fields)
     output = {
         "issue_number": args.issue_number,
         "item_id": item.provider_ref,
