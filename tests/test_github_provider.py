@@ -2,7 +2,7 @@
 
 Mirrors the observable-data assertions in test_board_open_items.py and
 test_board_fetch_for_ties.py, but against the provider and the neutral
-dataclass shapes (BoardItem, Comment, Edge).
+dataclass shapes (BoardItem, Edge, ClosedItem).
 
 All gh/GraphQL calls flow through board.py's module-level subprocess seam so
 patch_gh / patch_gh_by_arg intercept them correctly.
@@ -19,7 +19,7 @@ from skills.jared.scripts.lib.board_provider import (
     BoardItem,
     BoardProvider,
     Capability,
-    Comment,
+    ClosedItem,
     Edge,
     Milestone,
 )
@@ -34,15 +34,22 @@ def _provider() -> GitHubProjectsProvider:
         owner="brockamer",
         repo="brockamer/findajob",
         field_ids={"Status": "F1", "Priority": "F2"},
+        # Distinctive multi-char option-ids (not single letters) so substring
+        # asserts like `"OID_PRIO_HIGH" in joined` can't pass by accident — a
+        # bare "H" matches "GitHub", a node-id, etc. (#321 item 6).
         field_options={
             "Status": {
-                "Backlog": "A",
-                "Up Next": "B",
-                "In Progress": "C",
-                "Blocked": "D",
-                "Done": "E",
+                "Backlog": "OID_STAT_BACKLOG",
+                "Up Next": "OID_STAT_UPNEXT",
+                "In Progress": "OID_STAT_INPROGRESS",
+                "Blocked": "OID_STAT_BLOCKED",
+                "Done": "OID_STAT_DONE",
             },
-            "Priority": {"High": "H", "Medium": "M", "Low": "L"},
+            "Priority": {
+                "High": "OID_PRIO_HIGH",
+                "Medium": "OID_PRIO_MEDIUM",
+                "Low": "OID_PRIO_LOW",
+            },
         },
     )
 
@@ -467,51 +474,6 @@ def test_get_body_returns_empty_string_on_missing(monkeypatch: pytest.MonkeyPatc
 
 
 # ------------------------------------------------------------------ #
-# list_comments                                                        #
-# ------------------------------------------------------------------ #
-
-
-def test_list_comments_returns_comment_objects(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Comments come back as Comment dataclass instances."""
-    patch_gh(
-        monkeypatch,
-        stdout=json.dumps(
-            {
-                "data": {
-                    "repository": {
-                        "i42": {
-                            "comments": {
-                                "nodes": [
-                                    {"body": "First comment", "createdAt": "2026-01-01T00:00:00Z"},
-                                    {"body": "Second comment", "createdAt": "2026-01-02T00:00:00Z"},
-                                ]
-                            }
-                        }
-                    }
-                }
-            }
-        ),
-    )
-    comments = _provider().list_comments(42)
-    assert len(comments) == 2
-    assert all(isinstance(c, Comment) for c in comments)
-    assert comments[0].body == "First comment"
-    assert comments[0].created_at == "2026-01-01T00:00:00Z"
-    # author is absent from fetch_recent_comments_batch query → documented empty string
-    assert comments[0].author == ""
-    assert comments[1].body == "Second comment"
-
-
-def test_list_comments_empty_when_no_comments(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Issue with no comments → empty list."""
-    patch_gh(
-        monkeypatch,
-        stdout=json.dumps({"data": {"repository": {"i10": {"comments": {"nodes": []}}}}}),
-    )
-    assert _provider().list_comments(10) == []
-
-
-# ------------------------------------------------------------------ #
 # fetch_blocked_by_edges                                               #
 # ------------------------------------------------------------------ #
 
@@ -627,8 +589,8 @@ def test_field_id_raises_for_unknown_field() -> None:
 
 
 def test_option_id_returns_id_for_known_option() -> None:
-    assert _provider()._option_id("Status", "Done") == "E"
-    assert _provider()._option_id("Priority", "High") == "H"
+    assert _provider()._option_id("Status", "Done") == "OID_STAT_DONE"
+    assert _provider()._option_id("Priority", "High") == "OID_PRIO_HIGH"
 
 
 def test_option_id_raises_for_unknown_option() -> None:
@@ -639,6 +601,58 @@ def test_option_id_raises_for_unknown_option() -> None:
 
 
 # ------------------------------------------------------------------ #
+# validate_fields (#321 item 4)                                        #
+# ------------------------------------------------------------------ #
+
+
+def test_validate_fields_does_not_raise_for_known_values() -> None:
+    """No exception when Priority/Status/extra fields all resolve."""
+    provider = GitHubProjectsProvider(
+        project_number=7,
+        project_id="PVT_x",
+        owner="brockamer",
+        repo="brockamer/findajob",
+        field_ids={"Status": "F1", "Priority": "F2", "Size": "F3"},
+        field_options={
+            "Status": {"Backlog": "OID_STAT_BACKLOG"},
+            "Priority": {"High": "OID_PRIO_HIGH"},
+            "Size": {"Large": "OID_SIZE_LARGE"},
+        },
+    )
+    # Must not raise (returns None — asserting `is None` would trip mypy's
+    # func-returns-value lint on a -> None call).
+    provider.validate_fields(priority="High", status="Backlog", fields=[("Size", "Large")])
+
+
+def test_validate_fields_raises_optionnotfound_for_bad_priority() -> None:
+    from skills.jared.scripts.lib.board import OptionNotFound
+
+    with pytest.raises(OptionNotFound):
+        _provider().validate_fields(priority="Bogus", status="Backlog")
+
+
+def test_validate_fields_raises_fieldnotfound_for_unknown_extra_field() -> None:
+    from skills.jared.scripts.lib.board import FieldNotFound
+
+    with pytest.raises(FieldNotFound):
+        _provider().validate_fields(
+            priority="High", status="Backlog", fields=[("Nonexistent", "X")]
+        )
+
+
+def test_validate_fields_makes_no_gh_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pure dict lookups — never shells out. Lets the CLI call it as a cheap
+    pre-flight before the milestone GET, and file() call it again as a fence."""
+
+    def explode(*a: object, **k: object) -> object:
+        raise AssertionError("validate_fields must not invoke gh/subprocess")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", explode)
+    # Must not raise (and the explode guard proves no gh/subprocess call fired).
+    _provider().validate_fields(priority="High", status="Backlog")
+
+
+# ------------------------------------------------------------------ #
 # WRITE methods (Phase 1.4)                                           #
 # ------------------------------------------------------------------ #
 
@@ -646,9 +660,10 @@ def test_option_id_raises_for_unknown_option() -> None:
 # used in _provider() so assertions can be exact.
 #
 # field_ids:    Status → "F1",  Priority → "F2"
-# field_options Status: Backlog→"A", Up Next→"B", In Progress→"C",
-#                       Blocked→"D", Done→"E"
-#               Priority: High→"H", Medium→"M", Low→"L"
+# field_options Status: Backlog→"OID_STAT_BACKLOG", Up Next→"OID_STAT_UPNEXT",
+#                       In Progress→"OID_STAT_INPROGRESS", Blocked→"OID_STAT_BLOCKED",
+#                       Done→"OID_STAT_DONE"
+#               Priority: High→"OID_PRIO_HIGH", Medium→"OID_PRIO_MEDIUM", Low→"OID_PRIO_LOW"
 # project_id:   "PVT_x"
 # project_number: 7
 # owner:        "brockamer"
@@ -700,10 +715,10 @@ def test_add_to_board_calls_item_add_and_graphql_mutation(
     graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
     assert graphql_calls, "expected graphql call for field mutations"
     joined = " ".join(" ".join(c) for c in graphql_calls)
-    # Priority resolved: F2 / H
-    assert "F2" in joined and "H" in joined
-    # Status resolved: F1 / A (Backlog)
-    assert "F1" in joined and "A" in joined
+    # Priority resolved: F2 / OID_PRIO_HIGH
+    assert "F2" in joined and "OID_PRIO_HIGH" in joined
+    # Status resolved: F1 / OID_STAT_BACKLOG
+    assert "F1" in joined and "OID_STAT_BACKLOG" in joined
     # updateProjectV2ItemFieldValue mutation present
     assert "updateProjectV2ItemFieldValue" in joined
     # No item-edit (field edits go through graphql in add_to_board path)
@@ -765,9 +780,9 @@ def test_add_to_board_extra_fields_emit_aliased_setextra_mutation(
         repo="brockamer/findajob",
         field_ids={"Status": "F1", "Priority": "F2", "Size": "F3"},
         field_options={
-            "Status": {"Backlog": "A"},
-            "Priority": {"High": "H"},
-            "Size": {"Large": "SL"},
+            "Status": {"Backlog": "OID_STAT_BACKLOG"},
+            "Priority": {"High": "OID_PRIO_HIGH"},
+            "Size": {"Large": "OID_SIZE_LARGE"},
         },
     )
     calls = patch_gh_by_arg(
@@ -786,8 +801,8 @@ def test_add_to_board_extra_fields_emit_aliased_setextra_mutation(
     assert "setPriority" in joined
     assert "setStatus" in joined
     assert "setExtra0" in joined
-    # Size resolved: field-id F3 / option-id SL
-    assert "F3" in joined and "SL" in joined
+    # Size resolved: field-id F3 / option-id OID_SIZE_LARGE
+    assert "F3" in joined and "OID_SIZE_LARGE" in joined
     # Single round-trip: all three fields must land in exactly ONE field-mutation call
     # (a regression to per-field separate mutations would produce 3+).
     mutation_calls = [c for c in graphql_calls if "updateProjectV2ItemFieldValue" in " ".join(c)]
@@ -829,8 +844,8 @@ def test_file_sequences_create_add_graphql(
     graphql_calls = [c for c in calls if "api" in c and "graphql" in c]
     joined = " ".join(" ".join(c) for c in graphql_calls)
     assert "updateProjectV2ItemFieldValue" in joined
-    assert "F2" in joined and "H" in joined  # Priority=High
-    assert "F1" in joined and "A" in joined  # Status=Backlog
+    assert "F2" in joined and "OID_PRIO_HIGH" in joined  # Priority=High
+    assert "F1" in joined and "OID_STAT_BACKLOG" in joined  # Status=Backlog
     # no item-edit (field mutations go through graphql)
     assert not any("item-edit" in " ".join(c) for c in calls)
 
@@ -840,6 +855,36 @@ def test_file_sequences_create_add_graphql(
     assert result.title == "New issue"
     assert result.status == "Backlog"
     assert result.priority == "High"
+    # url carries gh's actual create output (#321 item 3)
+    assert result.url == "https://github.com/brockamer/findajob/issues/99"
+
+
+def test_file_url_is_gh_create_output_not_reconstructed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """file() carries the URL gh emitted at create, verbatim — never a
+    reconstructed `https://github.com/{repo}/issues/{n}` (#321 item 3).
+
+    Proven with a GitHub Enterprise host in the create output: a reconstructed
+    github.com URL would NOT carry it, so this assertion can only pass if the
+    real create URL is threaded onto the BoardItem.
+    """
+    patch_gh_by_arg(
+        monkeypatch,
+        {
+            "issue create": "https://ghe.example.com/brockamer/findajob/issues/77\n",
+            "item-add": '{"id": "PVTI_new"}',
+            "api graphql": "{}",
+        },
+    )
+    result = _provider().file(
+        title="Enterprise issue",
+        body="Body.",
+        priority="High",
+        status="Backlog",
+    )
+    assert result.number == 77
+    assert result.url == "https://ghe.example.com/brockamer/findajob/issues/77"
 
 
 def test_file_passes_milestone_to_gh_create(
@@ -1046,7 +1091,7 @@ def test_set_field_emits_item_edit_with_resolved_ids(
     assert "PVT_x" in joined  # project_id
     assert "PVTI_aaa" in joined  # item_id
     assert "F2" in joined  # field_id for Priority
-    assert "H" in joined  # option_id for High
+    assert "OID_PRIO_HIGH" in joined  # option_id for High
 
 
 def test_set_field_emits_item_edit_not_graphql_mutation(
@@ -1093,7 +1138,7 @@ def test_move_delegates_to_set_field(
     assert edit_calls
     joined = " ".join(edit_calls[0])
     assert "F1" in joined  # Status field_id
-    assert "C" in joined  # In Progress option_id
+    assert "OID_STAT_INPROGRESS" in joined  # In Progress option_id
 
 
 # ------------------------------------------------------------------ #
@@ -1124,7 +1169,7 @@ def test_close_emits_gh_issue_close_then_sets_status_done(
     assert edit_calls, "expected gh project item-edit for Status=Done"
     joined = " ".join(edit_calls[0])
     assert "F1" in joined  # Status field_id
-    assert "E" in joined  # Done option_id
+    assert "OID_STAT_DONE" in joined  # Done option_id
 
 
 def test_close_with_comment_emits_comment_before_close(
@@ -1347,6 +1392,28 @@ def test_remove_blocked_by_emits_removeBlockedBy_mutation(
     assert "addBlockedBy" not in query_arg
 
 
+def test_add_blocked_by_raises_issue_resolution_error_on_view_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `gh issue view` failure during node-id resolution surfaces as
+    IssueResolutionError (distinguishable from a mutation failure), carrying
+    the 'could not resolve issue node IDs' message so the CLI can restore the
+    specific error (#321 item 5). The subclass relationship keeps it catchable
+    as GhInvocationError for any generic handler."""
+    from skills.jared.scripts.lib.github_provider import IssueResolutionError
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        if "issue" in args and "view" in args:
+            return FakeGhResult(returncode=1, stderr="gh: not found")
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    assert issubclass(IssueResolutionError, GhInvocationError)
+    with pytest.raises(IssueResolutionError, match="could not resolve issue node IDs"):
+        _provider().add_blocked_by(99, 42)
+
+
 # ------------------------------------------------------------------ #
 # set_milestone                                                         #
 # ------------------------------------------------------------------ #
@@ -1463,3 +1530,38 @@ def test_item_add_raises_after_retry_still_missing_id(
 
     with pytest.raises(GhInvocationError, match="no id.*after retry"):
         _provider()._item_add(99)
+
+
+# ------------------------------------------------------------------ #
+# recently_closed (#321 item 1 — neutral ClosedItem, no closedAt leak) #
+# ------------------------------------------------------------------ #
+
+
+def test_recently_closed_maps_to_closeditem_sorted_desc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """recently_closed returns neutral ClosedItems (number/title/closed_at),
+    newest first — gh's camelCase `closedAt` is mapped at the boundary and
+    never escapes as a dict key (#321 item 1)."""
+    import json as _json
+
+    payload = _json.dumps(
+        [
+            {"number": 10, "title": "older", "closedAt": "2026-05-01T10:00:00Z"},
+            {"number": 20, "title": "newer", "closedAt": "2026-05-09T10:00:00Z"},
+        ]
+    )
+    patch_gh(monkeypatch, stdout=payload)
+
+    closed = _provider().recently_closed(days=7)
+
+    assert all(isinstance(c, ClosedItem) for c in closed)
+    # Sorted by closed_at descending (newest first).
+    assert [c.number for c in closed] == [20, 10]
+    assert closed[0].title == "newer"
+    assert closed[0].closed_at == "2026-05-09T10:00:00Z"
+
+
+def test_recently_closed_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_gh(monkeypatch, stdout="[]")
+    assert _provider().recently_closed(days=7) == []

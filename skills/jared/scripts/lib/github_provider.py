@@ -18,7 +18,6 @@ from .board import (
     OptionNotFound,
     _flatten_project_item_for_project,
     fetch_issue_body_rest,
-    fetch_recent_comments_batch,
     run_gh,
     run_gh_raw,
     run_graphql,
@@ -29,7 +28,7 @@ from .board import (
 from .board_provider import (
     BoardItem,
     Capability,
-    Comment,
+    ClosedItem,
     Edge,
     IssueRef,
     Milestone,
@@ -69,6 +68,19 @@ class FileBoardSetupError(Exception):
         self.issue_url = issue_url
         self.cause = cause
         super().__init__(str(cause))
+
+
+class IssueResolutionError(GhInvocationError):
+    """Failed to resolve an issue ref to its GitHub node-id (the `gh issue view
+    --json id` step that precedes a blocked-by mutation).
+
+    Subclasses GhInvocationError so any existing `except GhInvocationError`
+    still catches it, but lets the CLI distinguish a *resolution* failure from
+    a downstream *mutation* failure and restore the specific
+    "could not resolve issue node IDs" message (#321 item 5). The message
+    carries that GitHub-specific phrasing so the CLI can print it verbatim
+    without itself referencing node-ids.
+    """
 
 
 _OPEN_ITEMS_QUERY = """
@@ -291,27 +303,6 @@ class GitHubProjectsProvider:
         """Return the issue's Markdown body via REST (with ETag/conditional GET)."""
         return fetch_issue_body_rest(self.repo, ref)
 
-    def list_comments(self, ref: IssueRef) -> list[Comment]:
-        """Return the most recent comments for issue `ref`.
-
-        Mapping notes:
-        - body: node["body"]
-        - created_at: node["createdAt"]
-        - author: absent from fetch_recent_comments_batch query → "" (degraded field).
-          The upstream query is `comments(last: N) { nodes { body createdAt } }` — no
-          author node. Editing board.py to add author is out of scope for this task.
-        """
-        batch = fetch_recent_comments_batch(self.repo, [ref])
-        nodes = batch.get(ref, [])
-        return [
-            Comment(
-                body=str(node.get("body", "")),
-                author="",
-                created_at=str(node.get("createdAt", "")),
-            )
-            for node in nodes
-        ]
-
     def fetch_blocked_by_edges(self) -> list[Edge]:
         """Return all blocked-by edges for open issues in this repo.
 
@@ -469,31 +460,41 @@ class GitHubProjectsProvider:
         return item_id
 
     def _resolve_issue_node_id(self, issue_number: int) -> str:
-        """Return the GitHub node-id for `issue_number` (needed for blocked-by)."""
-        data = run_gh(
-            [
-                "issue",
-                "view",
-                str(issue_number),
-                "--repo",
-                self.repo,
-                "--json",
-                "id",
-            ]
-        )
+        """Return the GitHub node-id for `issue_number` (needed for blocked-by).
+
+        Raises IssueResolutionError (not a bare GhInvocationError) on lookup
+        failure so the CLI can distinguish this resolution step from the
+        downstream addBlockedBy/removeBlockedBy mutation and restore the
+        specific "could not resolve issue node IDs" message (#321 item 5).
+        """
+        try:
+            data = run_gh(
+                [
+                    "issue",
+                    "view",
+                    str(issue_number),
+                    "--repo",
+                    self.repo,
+                    "--json",
+                    "id",
+                ]
+            )
+        except GhInvocationError as e:
+            raise IssueResolutionError(f"could not resolve issue node IDs: {e}") from e
         return str(data["id"])
 
     # ------------------------------------------------------------------ #
     # WRITE methods (implemented in Task 4)                               #
     # ------------------------------------------------------------------ #
 
-    def recently_closed(self, *, days: int) -> list[dict[str, Any]]:
-        """Return issues closed in the last `days` days.
+    def recently_closed(self, *, days: int) -> list[ClosedItem]:
+        """Return issues closed in the last `days` days as neutral ClosedItems.
 
-        Uses `gh issue list --state closed --search "closed:>=DATE"` (same
-        query as the CLI's `_fetch_recently_closed`). Returns a list of
-        ``{"number", "title", "closedAt"}`` dicts, sorted by closedAt desc
-        (newest first). Empty list if none.
+        Uses `gh issue list --state closed --search "closed:>=DATE"`. The CLI's
+        `_fetch_recently_closed` is now a thin delegate to this method. Maps
+        gh's camelCase `closedAt` to ClosedItem.closed_at here — the GitHub key
+        never crosses the neutral boundary (#321 item 1). Sorted by closed_at
+        desc (newest first). Empty list if none.
 
         Raises GhInvocationError on silent-truncation at the 200-item cap.
         """
@@ -517,15 +518,51 @@ class GitHubProjectsProvider:
                 "number,title,closedAt",
             ]
         )
-        items: list[dict[str, Any]] = data if isinstance(data, list) else data.get("issues", [])
-        if len(items) == limit:
+        raw: list[dict[str, Any]] = data if isinstance(data, list) else data.get("issues", [])
+        if len(raw) == limit:
             raise GhInvocationError(
                 f"gh issue list --state closed returned exactly {limit} items "
                 f"in the last {days}d — likely truncated. Narrow the lookback "
                 f"window or paginate; do not trust this snapshot."
             )
-        items.sort(key=lambda c: c.get("closedAt") or "", reverse=True)
+        items = [
+            ClosedItem(
+                number=int(entry["number"]),
+                title=str(entry.get("title", "")),
+                closed_at=str(entry.get("closedAt") or ""),
+            )
+            for entry in raw
+        ]
+        items.sort(key=lambda c: c.closed_at, reverse=True)
         return items
+
+    def validate_fields(
+        self,
+        *,
+        priority: str,
+        status: str,
+        fields: list[tuple[str, str]] | None = None,
+    ) -> None:
+        """Pre-resolve Priority/Status/extra field+option IDs, raising
+        FieldNotFound/OptionNotFound on any miss — and returning nothing.
+
+        Resolved IDs stay private to the provider: the CLI learns only
+        pass/raise, never a field_id/option_id (that vocabulary was
+        deliberately removed from the CLI at the #314 fork-gate). The CLI calls
+        this at the very top of `jared file` so a bad --priority/--status/
+        --field fails fast (exit 1 via main()'s handler) BEFORE the read-only
+        milestone GET and the body PII scan run — restoring pre-#314 ordering
+        and the bad-field-beats-PII-body exit code (#321 item 4). file() also
+        calls it as its own fail-before-create fence (the two callers are
+        intentional — validating twice is cheap, both are pure dict lookups).
+        """
+        self._field_id("Priority")
+        self._option_id("Priority", priority)
+        self._field_id("Status")
+        self._option_id("Status", status)
+        for name, value in fields or []:
+            self._field_id(name)
+            self._option_id(name, value)
 
     def file(
         self,
@@ -562,13 +599,7 @@ class GitHubProjectsProvider:
         # Board.add_existing_to_board's "pre-resolve everything up front"
         # discipline). _add_existing re-resolves the same names — the duplication
         # is intentional: the pre-create check is the fail-before-create fence.
-        self._field_id("Priority")
-        self._option_id("Priority", priority)
-        self._field_id("Status")
-        self._option_id("Status", effective_status)
-        for name, value in fields or []:
-            self._field_id(name)
-            self._option_id(name, value)
+        self.validate_fields(priority=priority, status=effective_status, fields=fields)
 
         # Stage body in a temp file; gh issue create requires a file path.
         with tempfile.NamedTemporaryFile(
@@ -638,6 +669,9 @@ class GitHubProjectsProvider:
             priority=priority,
             labels=list(labels or []),
             milestone=milestone,
+            # Carry gh's actual create URL so the CLI can echo it verbatim
+            # instead of reconstructing one (diverges on GHE hosts — #321 item 3).
+            url=issue_url,
         )
 
     def add_to_board(
