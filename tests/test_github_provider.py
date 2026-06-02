@@ -358,6 +358,35 @@ def test_get_item_returns_board_item(monkeypatch: pytest.MonkeyPatch) -> None:
     assert item.title == ""
 
 
+def test_get_item_populates_provider_ref_with_node_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_item populates provider_ref with the project-item node-id."""
+    patch_gh(
+        monkeypatch,
+        stdout=json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issue": {
+                            "projectItems": {
+                                "nodes": [
+                                    {
+                                        "id": "PVTI_aaa",
+                                        "project": {"number": 7},
+                                        "fieldValues": {"nodes": []},
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+    )
+    item = _provider().get_item(42)
+    assert item is not None
+    assert item.provider_ref == "PVTI_aaa"
+
+
 def test_get_item_returns_none_when_not_on_board(monkeypatch: pytest.MonkeyPatch) -> None:
     """Issue not on the project board → None."""
     patch_gh(
@@ -1225,15 +1254,16 @@ def test_set_body_emits_issue_edit_body_file(
 def test_comment_emits_issue_comment_body_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """comment emits `gh issue comment <n> --repo <repo> --body-file <path>`.
+    """comment emits `gh issue comment <n> --repo <repo> --body-file <path>` and returns the URL.
 
     Oracle: mirrors _cmd_comment's gh invocation.
     """
+    url = "https://github.com/brockamer/findajob/issues/42#comment-1"
     calls = patch_gh_by_arg(
         monkeypatch,
-        {"issue comment": "https://github.com/brockamer/findajob/issues/42#comment-1"},
+        {"issue comment": url},
     )
-    _provider().comment(42, "A comment body")
+    result = _provider().comment(42, "A comment body")
 
     comment_calls = [c for c in calls if "issue" in c and "comment" in c]
     assert comment_calls, "expected gh issue comment call"
@@ -1241,6 +1271,8 @@ def test_comment_emits_issue_comment_body_file(
     assert "--body-file" in argv
     assert "42" in argv
     assert "brockamer/findajob" in " ".join(argv)
+    # comment() returns the URL string from gh
+    assert result == url
 
 
 # ------------------------------------------------------------------ #
