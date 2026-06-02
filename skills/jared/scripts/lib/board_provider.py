@@ -42,13 +42,11 @@ class BoardItem:
     # Opaque backend addressing token (GitHub project-item node-id, KanbanFlow
     # _id). Populated by get_item; the interface promises nothing about its format.
     provider_ref: str | None = None
-
-
-@dataclass
-class Comment:
-    body: str
-    author: str
-    created_at: str
+    # Opaque issue URL exactly as the backend's create call emitted it
+    # (gh issue create stdout). Populated by file(). Echoing it avoids
+    # reconstructing a github.com URL that diverges on GitHub Enterprise
+    # hosts (#321 item 3). The interface promises nothing about its format.
+    url: str | None = None
 
 
 @dataclass
@@ -65,17 +63,39 @@ class Milestone:
     due: str | None = None
 
 
+@dataclass
+class ClosedItem:
+    """A recently-closed issue, in neutral terms.
+
+    Replaces the raw `{number, title, closedAt}` dict that `recently_closed`
+    used to return — the GitHub-camelCase `closedAt` key was the one provider
+    internal leaking across this boundary (#321 item 1). `closed_at` is an
+    opaque timestamp string; the interface promises nothing about its format
+    beyond lexicographic sortability (callers slice/compare, never parse).
+    """
+
+    number: int
+    title: str
+    closed_at: str
+
+
 @runtime_checkable
 class BoardProvider(Protocol):
     # --- reads ---
     def get_item(self, ref: IssueRef) -> BoardItem | None: ...
     def list_open_items(self) -> list[BoardItem]: ...
     def get_body(self, ref: IssueRef) -> str: ...
-    def list_comments(self, ref: IssueRef) -> list[Comment]: ...
     def fetch_blocked_by_edges(self) -> list[Edge]: ...
-    def recently_closed(self, *, days: int) -> list[dict[str, object]]: ...
+    def recently_closed(self, *, days: int) -> list[ClosedItem]: ...
 
     # --- writes ---
+    def validate_fields(
+        self,
+        *,
+        priority: str,
+        status: str,
+        fields: list[tuple[str, str]] | None = None,
+    ) -> None: ...
     def file(
         self,
         *,

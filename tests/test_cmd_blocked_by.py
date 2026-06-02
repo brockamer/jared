@@ -78,3 +78,55 @@ def test_blocked_by_remove_edge(
     query_arg = next(a for a in gql if a.startswith("query="))
     assert "removeBlockedBy" in query_arg
     assert "addBlockedBy" not in query_arg
+
+
+def test_blocked_by_resolution_failure_reports_node_id_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A `gh issue view` (node-id resolution) failure reports the specific
+    'could not resolve issue node IDs' message, not the generic mutation
+    failure — restoring pre-#314 parity (#321 item 5)."""
+    board_md = write_minimal_board(tmp_path)
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        if "issue" in args and "view" in args:
+            return FakeGhResult(returncode=1, stderr="gh: issue not found")
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "blocked-by", "99", "42"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "could not resolve issue node IDs" in captured.err
+    # Must NOT be mislabeled as a mutation failure (the regression this fixes).
+    assert "addBlockedBy failed" not in captured.err
+
+
+def test_blocked_by_mutation_failure_reports_mutation_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When node-ids resolve but the addBlockedBy mutation fails, the error is
+    'addBlockedBy failed' — distinct from the resolution-failure message
+    (#321 item 5)."""
+    board_md = write_minimal_board(tmp_path)
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue" in args and "view" in args:
+            idx = args.index("view")
+            num = args[idx + 1]
+            return FakeGhResult(stdout=f'{{"id": "I_{num}"}}')
+        if "graphql" in joined:
+            return FakeGhResult(returncode=1, stderr="gh: mutation rejected")
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "blocked-by", "99", "42"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "addBlockedBy failed" in captured.err
+    assert "could not resolve issue node IDs" not in captured.err
