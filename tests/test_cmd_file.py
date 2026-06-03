@@ -167,6 +167,52 @@ def test_file_with_custom_status_and_extra_field(
     )
 
 
+def test_file_echoes_real_create_url_not_reconstructed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The `URL:` line echoes gh's actual create URL, not a reconstructed
+    `https://github.com/{repo}/issues/{n}` (#321 item 3).
+
+    Uses a GitHub Enterprise host in the create output: a reconstructed
+    github.com URL would carry neither the enterprise host nor issue #77.
+    """
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Body.")
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(args)
+        if "issue create" in joined:
+            return FakeGhResult(stdout="https://ghe.example.com/brockamer/findajob/issues/77\n")
+        if "item-add" in joined:
+            return FakeGhResult(stdout='{"id": "PVTI_new"}')
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Enterprise issue",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "High",
+            "--no-milestone",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "URL: https://ghe.example.com/brockamer/findajob/issues/77" in captured.out
+    # The reconstructed form (github.com host) must NOT appear on the URL line.
+    url_line = next(line for line in captured.out.splitlines() if line.startswith("URL:"))
+    assert "github.com" not in url_line
+
+
 def test_file_preserves_staged_body_on_create_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -764,6 +810,94 @@ def test_cmd_file_refuses_on_dirty_pre_flight_report(
     assert not any("issue" in c and "create" in c for c in calls), (
         f"redactor must short-circuit before gh; calls: {calls}"
     )
+
+
+def test_file_validates_fields_before_milestone_get(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bad --status fails fast (exit 1) before the read-only milestone GET
+    even runs — restoring pre-#314 ordering (#321 item 4).
+
+    --status is the reachable free-form field path (--priority is argparse
+    choices-constrained, rejected at parse time). The milestone passed IS valid,
+    so on the buggy ordering the milestone REST lookup fired first (and would
+    have been recorded) before the field was ever validated. The discriminating
+    assertion is therefore the *absence* of the milestone GET, not the exit
+    code (which is 1 either way)."""
+    board_md = _write_full_board(tmp_path)
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Body.")
+    calls = _routed_fake_with_milestones(monkeypatch, ["v1.0 — public install"])
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "T",
+            "--body-file",
+            str(body_file),
+            "--priority",
+            "Low",
+            "--status",
+            "Bogus",
+            "--milestone",
+            "v1.0 — public install",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 1, captured.err
+    assert not any("milestones" in " ".join(c) and "api" in " ".join(c) for c in calls), (
+        "field validation must precede the milestone REST GET (#321 item 4)"
+    )
+    assert not any("issue" in c and "create" in c for c in calls)
+
+
+def test_file_bad_field_beats_pii_body_with_exit_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bad --status exits 1 (field validation) even when the body would trip
+    the PII pre-flight scan — field validation runs first, restoring main's exit
+    code for the bad-field + dirty-body combo (#321 item 4).
+
+    Pre-fix, the PII scan ran before field validation, so this combo exited 2
+    and was reported as a redaction refusal rather than a bad field. (--status
+    is the reachable free-form path; --priority is argparse-constrained.)"""
+    board_md = _write_full_board(tmp_path)
+    leaky_phrase = "the deploy host is internal-foo-7.corp.example"
+    _git_init_with_claude_local(tmp_path, leaky_phrase + "\n")
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "T",
+            "--body",
+            f"While testing I noticed {leaky_phrase} stops responding under load.",
+            "--priority",
+            "Low",
+            "--status",
+            "Bogus",
+            "--no-milestone",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 1, captured.err
+    # The failure is the bad field, NOT the PII refusal.
+    assert "pre-flight redaction check failed" not in captured.err
+    assert not any("issue" in c and "create" in c for c in calls)
 
 
 def test_cmd_file_proceeds_on_clean_pre_flight_report(
