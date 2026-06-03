@@ -10,6 +10,7 @@ spec's Appendix B for the verified API surface.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -183,15 +184,41 @@ class KanbanFlowClient:
 
         raise KanbanFlowRateLimitError("request retries exhausted")
 
-    # quota helpers filled in Task 3 — minimal stubs so Task 1 tests pass
     def _budget_gate(self) -> None:
+        if self._daily_count >= self._daily_ceiling:
+            raise KanbanFlowRateLimitError(
+                f"daily request ceiling ({self._daily_ceiling}) reached; refusing to "
+                "risk a KanbanFlow token lock (5000/day)"
+            )
+        if (
+            self._remaining is not None
+            and self._remaining <= self._request_floor
+            and self._reset is not None
+        ):
+            wait = self._reset - _now()
+            if wait > 0:
+                _sleep(wait)
         self._daily_count += 1
 
     def _record_quota(self, headers: dict[str, str]) -> None:
-        return None
+        rem = headers.get("X-RateLimit-Remaining")
+        rst = headers.get("X-RateLimit-Reset")
+        if rem is not None:
+            with contextlib.suppress(ValueError):
+                self._remaining = int(rem)
+        if rst is not None:
+            with contextlib.suppress(ValueError):
+                self._reset = int(rst)
 
     def _retry_delay(self, headers: dict[str, str]) -> float:
-        return 0.0
+        rst = headers.get("X-RateLimit-Reset")
+        if rst is not None:
+            try:
+                wait = int(rst) - _now()
+                return float(min(max(wait, 0.0), 60.0))
+            except ValueError:
+                pass
+        return 1.0
 
     def _backoff(self, attempt: int) -> float:
-        return 0.0
+        return float(min(2**attempt, 30))

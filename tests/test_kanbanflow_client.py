@@ -5,12 +5,14 @@ from typing import cast
 
 import pytest
 
+import skills.jared.scripts.lib.kanbanflow_client as kf
 from skills.jared.scripts.lib.kanbanflow_client import (
     KanbanFlowAuthError,
     KanbanFlowClient,
     KanbanFlowError,
     KanbanFlowForbiddenError,
     KanbanFlowNotFoundError,
+    KanbanFlowRateLimitError,
     KanbanFlowServerError,
 )
 from tests.conftest import patch_kf
@@ -61,3 +63,40 @@ def test_from_env_raises_clear_error_when_unset(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
     with pytest.raises(KanbanFlowError, match="KANBANFLOW_API_TOKEN"):
         KanbanFlowClient.from_env()
+
+
+def test_proactive_gate_sleeps_until_reset_when_remaining_low(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(kf, "_sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+    monkeypatch.setattr(kf, "_raw_http", lambda m, u, h, d: (200, {}, b"{}"))
+    client = _client()
+    client._remaining = 5  # below the default floor of 50
+    client._reset = 1_000_030  # 30s in the future
+    client._request("GET", "/board")
+    assert sleeps == [30]
+
+
+def test_daily_ceiling_refuses_before_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(monkeypatch, body="{}")
+    client = KanbanFlowClient(token="t", daily_ceiling=2)
+    client._request("GET", "/board")
+    client._request("GET", "/board")
+    with pytest.raises(KanbanFlowRateLimitError, match="daily request ceiling"):
+        client._request("GET", "/board")
+
+
+def test_429_then_success_retries_off_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    seq = [
+        (429, {"X-RateLimit-Reset": "1000010"}, b'{"errors":[{"message":"slow down"}]}'),
+        (200, {}, b'{"ok": true}'),
+    ]
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+    sleeps: list[float] = []
+    monkeypatch.setattr(kf, "_sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(kf, "_raw_http", lambda m, u, h, d: seq.pop(0))
+    result = _client()._request("GET", "/board")
+    assert result == {"ok": True}
+    assert sleeps == [10]
