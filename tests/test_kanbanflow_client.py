@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from typing import cast
 
 import pytest
@@ -236,6 +237,7 @@ def test_list_tasks_follows_date_grouped_cursor(monkeypatch: pytest.MonkeyPatch)
     tasks = _client().list_tasks(column_id="C1")
     assert [t.id for t in tasks] == ["T1", "T2"]
     assert any("startTaskId=T2" in u for u in seen), "must page using nextTaskId -> startTaskId"
+    assert "startTaskId" not in seen[0]  # first request must not carry a cursor
 
 
 def test_get_task_returns_single(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -396,3 +398,60 @@ def test_get_relations_parses(monkeypatch: pytest.MonkeyPatch) -> None:
             related_task_board_id=None,
         )
     ]
+
+
+def test_backoff_curve_is_exponential_capped() -> None:
+    client = _client()
+    assert [client._backoff(n) for n in range(7)] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
+
+
+def test_urlerror_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    sleeps: list[float] = []
+    monkeypatch.setattr(kf, "_sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+
+    def fake(
+        method: str, url: str, headers: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.URLError("boom")
+        return (200, {}, b'{"ok": true}')
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    result = _client()._request("GET", "/board")
+    assert result == {"ok": True}
+    assert len(sleeps) == 1  # one backoff before the successful retry
+
+
+def test_429_exhaustion_raises_rate_limit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+    monkeypatch.setattr(kf, "_sleep", lambda _s: None)
+    _body = b'{"errors":[{"message":"slow"}]}'
+    monkeypatch.setattr(
+        kf,
+        "_raw_http",
+        lambda m, u, h, d: (429, {"X-RateLimit-Reset": "1000001"}, _body),
+    )
+    with pytest.raises(KanbanFlowRateLimitError, match="slow"):
+        _client()._request("GET", "/board")
+
+
+def test_create_task_serializes_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(
+        monkeypatch,
+        body=json.dumps({"_id": "T1", "name": "n", "columnId": "C1", "number": {"value": 7}}),
+    )
+    _client().create_task(
+        name="n", column_id="C1", number_value=7, labels=[KfLabel(name="Priority", pinned=True)]
+    )
+    sent = json.loads(cast(bytes, calls[0]["data"]))
+    assert sent["labels"] == [{"name": "Priority", "pinned": True}]
+
+
+def test_update_task_wraps_number_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body=json.dumps({"_id": "T1", "name": "n", "columnId": "C1"}))
+    _client().update_task("T1", number_value=9)
+    sent = json.loads(cast(bytes, calls[0]["data"]))
+    assert sent["number"] == {"value": 9}

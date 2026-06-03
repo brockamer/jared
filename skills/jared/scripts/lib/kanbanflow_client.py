@@ -297,6 +297,8 @@ class KanbanFlowClient:
         # quota state, updated from response headers
         self._remaining: int | None = None
         self._reset: int | None = None
+        # Best-effort, per-process counter (resets on restart) — guards against the
+        # 5000/day token lock; not a durable cross-restart guarantee.
         self._daily_count = 0
         self._cache: dict[str, object] = {}
 
