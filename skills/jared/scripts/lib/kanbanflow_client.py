@@ -520,6 +520,17 @@ class KanbanFlowClient:
         raw = self._request("POST", f"/tasks/{task_id}/comments", body=body)
         return str(raw.get("taskCommentId", ""))  # type: ignore[attr-defined]
 
+    def list_labels(self, task_id: str) -> list[KfLabel]:
+        raw = self._request("GET", f"/tasks/{task_id}/labels")
+        return [_parse_label(label) for label in raw]  # type: ignore[attr-defined]
+
+    def add_label(self, task_id: str, name: str, *, pinned: bool = False) -> None:
+        self._request("POST", f"/tasks/{task_id}/labels", body={"name": name, "pinned": pinned})
+
+    def remove_label(self, task_id: str, name: str) -> None:
+        encoded = urllib.parse.quote(name, safe="")
+        self._request("DELETE", f"/tasks/{task_id}/labels/by-name/{encoded}")
+
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
             raise KanbanFlowRateLimitError(
