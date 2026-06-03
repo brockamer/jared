@@ -352,3 +352,29 @@ def test_add_comment_backdates_with_created_timestamp(monkeypatch: pytest.Monkey
     sent = json.loads(cast(bytes, calls[0]["data"]))
     assert sent["createdTimestamp"] == "2025-01-01T00:00:00Z"
     assert sent["authorUserId"] == "U2"
+
+
+def test_list_labels_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps([{"name": "Priority", "pinned": True}, {"name": "X"}]),
+    )
+    labels = _client().list_labels("T1")
+    assert labels == [KfLabel(name="Priority", pinned=True), KfLabel(name="X", pinned=False)]
+
+
+def test_add_label_posts_name_and_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body=json.dumps({"insertIndex": 0}))
+    _client().add_label("T1", "blocked-by:42", pinned=False)
+    assert calls[0]["method"] == "POST"
+    assert str(calls[0]["url"]).endswith("/tasks/T1/labels")
+    assert json.loads(cast(bytes, calls[0]["data"])) == {"name": "blocked-by:42", "pinned": False}
+
+
+def test_remove_label_deletes_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body="{}")
+    _client().remove_label("T1", "blocked-by:42")
+    assert calls[0]["method"] == "DELETE"
+    assert str(calls[0]["url"]).endswith("/tasks/T1/labels/by-name/blocked-by%3A42"), (
+        "label name must be URL-encoded in the path"
+    )
