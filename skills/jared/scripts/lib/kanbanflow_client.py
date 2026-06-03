@@ -531,6 +531,10 @@ class KanbanFlowClient:
         encoded = urllib.parse.quote(name, safe="")
         self._request("DELETE", f"/tasks/{task_id}/labels/by-name/{encoded}")
 
+    def get_relations(self, task_id: str) -> list[KfRelation]:
+        raw = self._request("GET", f"/tasks/{task_id}/relations")
+        return [_parse_relation(r) for r in raw]  # type: ignore[attr-defined]
+
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
             raise KanbanFlowRateLimitError(

@@ -378,3 +378,21 @@ def test_remove_label_deletes_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     assert str(calls[0]["url"]).endswith("/tasks/T1/labels/by-name/blocked-by%3A42"), (
         "label name must be URL-encoded in the path"
     )
+
+
+def test_get_relations_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps(
+            [{"relationType": "dependsOn", "relatedTaskId": "T2", "relatedTaskName": "dep"}]
+        ),
+    )
+    rels = _client().get_relations("T1")
+    assert rels == [
+        KfRelation(
+            relation_type="dependsOn",
+            related_task_id="T2",
+            related_task_name="dep",
+            related_task_board_id=None,
+        )
+    ]
