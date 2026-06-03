@@ -14,8 +14,10 @@ from skills.jared.scripts.lib.kanbanflow_client import (
     KanbanFlowNotFoundError,
     KanbanFlowRateLimitError,
     KanbanFlowServerError,
+    KfComment,
     KfCustomFieldValue,
     KfLabel,
+    KfRelation,
     KfTask,
     _parse_task,
 )
@@ -274,3 +276,32 @@ def test_delete_task_issues_delete(monkeypatch: pytest.MonkeyPatch) -> None:
     _client().delete_task("T1")
     assert calls[0]["method"] == "DELETE"
     assert str(calls[0]["url"]).endswith("/tasks/T1")
+
+
+def test_get_task_custom_fields_parses_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps(
+            [
+                {"customFieldId": "F1", "value": {"text": "High"}},
+                {"customFieldId": "F2", "value": {"number": 12.5}},
+            ]
+        ),
+    )
+    values = _client().get_task_custom_fields("T1")
+    assert values[0] == KfCustomFieldValue(custom_field_id="F1", value="High")
+    assert values[1] == KfCustomFieldValue(custom_field_id="F2", value=12.5)
+
+
+def test_set_task_custom_field_text_posts_to_field_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body="{}")
+    _client().set_task_custom_field("T1", "F1", "High")
+    assert calls[0]["method"] == "POST"
+    assert str(calls[0]["url"]).endswith("/tasks/T1/custom-fields/F1")
+    assert json.loads(cast(bytes, calls[0]["data"])) == {"value": {"text": "High"}}
+
+
+def test_set_task_custom_field_number_uses_number_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body="{}")
+    _client().set_task_custom_field("T1", "F2", 12.5)
+    assert json.loads(cast(bytes, calls[0]["data"])) == {"value": {"number": 12.5}}
