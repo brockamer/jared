@@ -14,6 +14,10 @@ from skills.jared.scripts.lib.kanbanflow_client import (
     KanbanFlowNotFoundError,
     KanbanFlowRateLimitError,
     KanbanFlowServerError,
+    KfCustomFieldValue,
+    KfLabel,
+    KfTask,
+    _parse_task,
 )
 from tests.conftest import patch_kf
 
@@ -100,3 +104,38 @@ def test_429_then_success_retries_off_reset(monkeypatch: pytest.MonkeyPatch) -> 
     result = _client()._request("GET", "/board")
     assert result == {"ok": True}
     assert sleeps == [10]
+
+
+def test_parse_task_maps_all_fields() -> None:
+    raw = {
+        "_id": "T1",
+        "name": "Do thing",
+        "description": "body",
+        "color": "red",
+        "columnId": "C1",
+        "swimlaneId": "S1",
+        "position": 0,
+        "number": {"value": 42, "prefix": "BUG-"},
+        "responsibleUserId": "U1",
+        "collaborators": [{"userId": "U2"}, {"userId": "U3"}],
+        "labels": [{"name": "Priority", "pinned": True}],
+        "customFields": [{"customFieldId": "F1", "value": {"text": "High"}}],
+    }
+    task = _parse_task(raw)
+    assert isinstance(task, KfTask)
+    assert task.id == "T1"
+    assert task.number_value == 42
+    assert task.number_prefix == "BUG-"
+    assert task.column_id == "C1"
+    assert task.responsible_user_id == "U1"
+    assert task.collaborators == ["U2", "U3"]
+    assert task.labels == [KfLabel(name="Priority", pinned=True)]
+    assert task.custom_fields == [KfCustomFieldValue(custom_field_id="F1", value="High")]
+
+
+def test_parse_task_handles_missing_optional_arrays() -> None:
+    task = _parse_task({"_id": "T2", "name": "Bare", "columnId": "C1"})
+    assert task.number_value is None
+    assert task.labels == []
+    assert task.collaborators == []
+    assert task.custom_fields == []
