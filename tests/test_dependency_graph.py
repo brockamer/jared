@@ -1,14 +1,22 @@
-"""Tests for dependency-graph.py — #299 field-sourced Priority.
+"""Tests for dependency-graph.py.
 
-`dependency-graph.py` used to read priority from `priority:` labels, which
-jared doctrine strips, so `find_priority_inversions` could never fire on a
-doctrine-following board. #299 re-sources Priority from the project field
-(via `Board.open_items()`). These tests pin that behavior and its
-graceful-degradation paths.
+Two concerns:
 
-Board is injected into `fetch_field_priorities` so the test passes its own
-`Board` instance — sidestepping the dual-import-path gotcha (see the docstring
-atop conftest.py) entirely via duck typing.
+  #299 — field-sourced Priority. `dependency-graph.py` used to read priority
+  from `priority:` labels, which jared doctrine strips, so
+  `find_priority_inversions` could never fire on a doctrine-following board.
+  #299 re-sources Priority from the project field (via `Board.open_items()`).
+  Those tests pin that behavior and its graceful-degradation paths. Board is
+  injected into `fetch_field_priorities` so the test passes its own `Board`
+  instance — sidestepping the dual-import-path gotcha (see the docstring atop
+  conftest.py) entirely via duck typing.
+
+  #300 — graph-algorithm coverage. The 416-line script's topo-sort, critical
+  path, orphan detection, and section-ref parsing had zero tests despite
+  backing `/jared-groom` and `/jared-reshape`. The algorithm tests below
+  characterize current correct behavior on small hand-built graphs; they run
+  offline (orphan detection monkeypatches the one network call,
+  `fetch_issue_state`).
 """
 
 from __future__ import annotations
@@ -113,3 +121,78 @@ def test_fetch_field_priorities_degrades_on_missing_board_config(
 
     assert priorities == {}
     assert capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# #300 — graph-algorithm coverage (topo-sort, critical path, orphan, refs)
+# ---------------------------------------------------------------------------
+
+
+def test_topological_sort_orders_dependencies_before_dependents() -> None:
+    dep = import_dep()
+    # 1 depends on 2, 2 depends on 3 → dependencies must emit first: [3, 2, 1].
+    order, cycles = dep.topological_sort({1: {2}, 2: {3}})
+
+    assert cycles == []
+    assert order == [3, 2, 1]
+
+
+def test_topological_sort_detects_cycle() -> None:
+    dep = import_dep()
+    # 1 ↔ 2: no zero-in-degree node, so nothing emits and the stuck nodes
+    # surface as a cycle group.
+    order, cycles = dep.topological_sort({1: {2}, 2: {1}})
+
+    assert order == []
+    assert cycles == [[1, 2]]
+
+
+def test_critical_path_returns_longest_dependency_chain() -> None:
+    dep = import_dep()
+    # 1 → {2, 3}, 2 → 4: the longest chain is 1 → 2 → 4 (length 3), not 1 → 3.
+    chain = dep.critical_path({1: {2, 3}, 2: {4}, 3: set(), 4: set()})
+
+    assert chain == [1, 2, 4]
+
+
+def test_find_orphaned_flags_dependency_on_closed_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dep = import_dep()
+    # #1 depends on #2; #2 is outside the open set and CLOSED → orphaned edge.
+    monkeypatch.setattr(dep, "fetch_issue_state", lambda repo, n: "CLOSED")
+
+    orphaned = dep.find_orphaned({1: {2}}, "owner/repo", {1})
+
+    assert orphaned == [(1, 2)]
+
+
+def test_find_orphaned_ignores_open_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dep = import_dep()
+    # #2 is still OPEN → not an orphan.
+    monkeypatch.setattr(dep, "fetch_issue_state", lambda repo, n: "OPEN")
+
+    orphaned = dep.find_orphaned({1: {2}}, "owner/repo", {1})
+
+    assert orphaned == []
+
+
+def test_parse_section_refs_extracts_refs_under_heading() -> None:
+    dep = import_dep()
+    body = (
+        "Summary line.\n\n"
+        "## Depends on\n"
+        "- #12 — the client\n"
+        "- #34\n\n"
+        "## Other\n"
+        "- #99 should be ignored\n"
+    )
+    # Refs are scoped to the section: #99 under a later heading is excluded.
+    assert dep.parse_section_refs(body, "Depends on") == [12, 34]
+
+
+def test_parse_section_refs_returns_empty_when_section_absent() -> None:
+    dep = import_dep()
+    assert dep.parse_section_refs("no relevant section here, has #5", "Depends on") == []
