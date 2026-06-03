@@ -464,6 +464,7 @@ class KanbanFlowClient:
         *,
         name: str | None = None,
         column_id: str | None = None,
+        swimlane_id: str | None = None,
         number_value: int | None = None,
         description: str | None = None,
         color: str | None = None,
@@ -474,6 +475,8 @@ class KanbanFlowClient:
             body["name"] = name
         if column_id is not None:
             body["columnId"] = column_id
+        if swimlane_id is not None:
+            body["swimlaneId"] = swimlane_id
         if number_value is not None:
             body["number"] = {"value": number_value}
         if description is not None:

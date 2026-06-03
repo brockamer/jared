@@ -515,3 +515,11 @@ def test_500_then_success_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _client()._request("GET", "/board")
     assert result == {"ok": True}
     assert len(sleeps) == 1  # one _backoff sleep before the successful retry
+
+
+def test_update_task_sends_swimlane_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, status=200, body=json.dumps({"_id": "T1", "name": "x"}))
+    _client().update_task("T1", swimlane_id="SW2")
+    # The POST body must carry swimlaneId.
+    sent = json.loads(cast(bytes, calls[-1]["data"]))
+    assert sent["swimlaneId"] == "SW2"
