@@ -111,6 +111,22 @@ def import_stage() -> ModuleType:
     return mod
 
 
+def import_dep() -> ModuleType:
+    """Load `dependency-graph.py` as a module. Same SourceFileLoader trick as the others.
+
+    The hyphen in the filename blocks a normal `import`; SourceFileLoader lets
+    tests exercise the graph helpers (and `fetch_field_priorities`) in-process
+    so monkeypatches on the shared `subprocess`/`Board` seam apply.
+    """
+    path = SKILL_SCRIPTS / "dependency-graph.py"
+    loader = SourceFileLoader("dependency_graph", str(path))
+    spec = importlib.util.spec_from_loader("dependency_graph", loader)
+    assert spec is not None
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
 def write_minimal_board(tmp_path: Path) -> Path:
     """Write a minimal valid docs/project-board.md into tmp_path/docs/.
 

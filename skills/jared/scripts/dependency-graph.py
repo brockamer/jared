@@ -34,6 +34,8 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    Board,
+    BoardConfigError,
     GhInvocationError,
 )
 from lib.board import (
@@ -83,6 +85,58 @@ def fetch_issue_state(repo: str, number: int) -> str:
     return cast(str, state)
 
 
+def fetch_field_priorities(repo: str, *, board: Board | None = None) -> dict[int, str]:
+    """Map open-issue number -> project-field Priority (e.g. "High").
+
+    Priority is a project **field** under jared doctrine; the `priority:` labels
+    this script used to read are stripped as legacy (`sweep.py`
+    `check_legacy_priority_labels`), so a label-based read always came back
+    empty on a doctrine board and `find_priority_inversions` could never fire
+    (#299). This sources Priority the way the rest of the CLI does — through the
+    parsed board snapshot.
+
+    Degrades to an empty map — priority check disabled, but the graph / cycle /
+    critical-path / orphaned analysis still runs — rather than crashing when:
+      - no board config doc is present (`BoardConfigError`),
+      - the board doc's repo != `repo` (`Board` reads its repo from the doc, not
+        from `--repo`; a join on mismatched issue numbers would manufacture
+        phantom inversions), or
+      - the open-items GraphQL call fails or overflows its 100-issue cap
+        (`GhInvocationError`).
+    """
+    if board is None:
+        try:
+            board = Board.from_default()
+        except BoardConfigError as e:
+            print(
+                f"dependency-graph: no board config ({e}); priority check disabled",
+                file=sys.stderr,
+            )
+            return {}
+    if board.repo != repo:
+        print(
+            f"dependency-graph: board doc repo {board.repo!r} != --repo {repo!r}; "
+            "priority check disabled",
+            file=sys.stderr,
+        )
+        return {}
+    try:
+        items = board.open_items()
+    except GhInvocationError as e:
+        print(
+            f"dependency-graph: open_items failed ({e}); priority check disabled",
+            file=sys.stderr,
+        )
+        return {}
+    priorities: dict[int, str] = {}
+    for item in items:
+        number = item.get("content", {}).get("number")
+        priority = item.get("priority")
+        if isinstance(number, int) and priority:
+            priorities[number] = priority
+    return priorities
+
+
 def fetch_all_native_dependencies(repo: str) -> dict[int, list[int]] | None:
     """Fetch native blockedBy edges for ALL open issues in one paginated call.
 
@@ -122,14 +176,6 @@ def parse_section_refs(body: str, section: str) -> list[int]:
 
 def body_dependencies(issue: dict[str, Any]) -> list[int]:
     return parse_section_refs(issue.get("body", "") or "", "Depends on")
-
-
-def issue_priority(issue: dict[str, Any]) -> str | None:
-    for label in issue.get("labels", []):
-        name: str = label.get("name", "").lower()
-        if name.startswith("priority:"):
-            return name.split(":", 1)[1].strip()
-    return None
 
 
 # ---------- Graph operations ----------
@@ -350,7 +396,6 @@ def main() -> int:
 
     # Build graph: N → set of issues N depends on
     graph: dict[int, set[int]] = defaultdict(set)
-    priorities: dict[int, str] = {}
 
     for issue in issues:
         n = issue["number"]
@@ -375,16 +420,16 @@ def main() -> int:
         # native == [] means "native says this issue has no deps" — don't
         # second-guess it with stale body text.
 
-        # Priority from label
-        p = issue_priority(issue)
-        if p:
-            priorities[n] = p
-
     if not graph:
         print("No dependencies found.", file=sys.stderr)
         return 0
 
     titles = {n: issues_by_number[n]["title"] for n in issues_by_number}
+
+    # Priority from the project field, not `priority:` labels (doctrine strips
+    # those, so the old label read was always empty — #299). Degrades to {} if
+    # the board can't be read; the rest of the analysis still runs.
+    priorities = fetch_field_priorities(args.repo)
 
     # Analyze
     topo, cycles = topological_sort(dict(graph))
