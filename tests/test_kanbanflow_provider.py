@@ -44,3 +44,50 @@ def test_provider_satisfies_protocol(tmp_path: Path) -> None:
 def test_capabilities_is_empty_frozenset(tmp_path: Path) -> None:
     provider, _ = _provider(tmp_path)
     assert provider.capabilities() == frozenset()
+
+
+def test_get_item_maps_task_to_boarditem(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    task = client.create_task(
+        name="Do the thing",
+        column_id="col-inprog",
+        number_value=42,
+        swimlane_id="sw-v1",
+        description="## Summary\nbody",
+    )
+    client.set_task_custom_field(task.id, "cf-priority", "High")
+    client.add_label(task.id, "session-2")
+    client.add_label(task.id, "blocked-by:7")
+    provider._index.put(42, task.id)
+
+    item = provider.get_item(42)
+    assert item is not None
+    assert item.number == 42
+    assert item.title == "Do the thing"
+    assert item.status == "In Progress"
+    assert item.priority == "High"
+    assert item.milestone == "v1.0"
+    assert item.body == "## Summary\nbody"
+    assert item.labels == ["session-2"]  # blocked-by markers stripped
+    assert item.blocked_by == [7]
+    assert item.provider_ref == task.id
+
+
+def test_get_item_missing_returns_none(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    assert provider.get_item(999) is None
+
+
+def test_list_open_items_excludes_done(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.create_task(name="open", column_id="col-upnext", number_value=1)
+    client.create_task(name="closed", column_id="col-done", number_value=2)
+    items = provider.list_open_items()
+    assert sorted(i.title for i in items) == ["open"]
+
+
+def test_get_body_returns_description(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    t = client.create_task(name="x", column_id="col-backlog", number_value=5, description="hello")
+    provider._index.put(5, t.id)
+    assert provider.get_body(5) == "hello"

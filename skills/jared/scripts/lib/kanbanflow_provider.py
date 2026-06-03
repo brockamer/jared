@@ -16,7 +16,7 @@ from typing import Protocol
 
 from .board import FieldNotFound, ItemNotFound, OptionNotFound
 from .board_provider import BoardItem, Capability, IssueRef
-from .kanbanflow_client import KfBoard, KfCustomFieldDef, KfLabel, KfTask
+from .kanbanflow_client import KanbanFlowNotFoundError, KfBoard, KfCustomFieldDef, KfLabel, KfTask
 from .kf_number_index import KfNumberIndex
 
 # NOTE: later tasks add imports as they first use them — KanbanFlowNotFoundError
@@ -205,3 +205,26 @@ class KanbanFlowProvider:
     def _set_custom_field(self, field_name: str, value: str, task_id: str) -> None:
         definition = self._check_option(field_name, value)
         self._client.set_task_custom_field(task_id, definition.id, value)
+
+    # --- reads ---
+    def get_item(self, ref: IssueRef) -> BoardItem | None:
+        task_id = self._index.get(ref)
+        if task_id is None:
+            self._reseed_index()
+            task_id = self._index.get(ref)
+        if task_id is None:
+            return None
+        try:
+            task = self._client.get_task(task_id)
+        except KanbanFlowNotFoundError:
+            return None
+        return self._item_from_task(task)
+
+    def list_open_items(self) -> list[BoardItem]:
+        done_id = self._column_id_by_name.get("Done")
+        return [
+            self._item_from_task(t) for t in self._client.iter_all_tasks() if t.column_id != done_id
+        ]
+
+    def get_body(self, ref: IssueRef) -> str:
+        return self._client.get_task(self._resolve_id(ref)).description
