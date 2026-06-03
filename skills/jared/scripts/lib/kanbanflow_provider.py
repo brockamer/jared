@@ -334,3 +334,15 @@ class KanbanFlowProvider:
         if comment:
             self._client.add_comment(task_id, comment)
         self._client.update_task(task_id, column_id=self._column_id("Done"))
+
+    def add_label(self, ref: IssueRef, name: str) -> None:
+        self._client.add_label(self._resolve_id(ref), name)
+
+    def remove_label(self, ref: IssueRef, name: str) -> None:
+        self._client.remove_label(self._resolve_id(ref), name)
+
+    def add_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
+        self._client.add_label(self._resolve_id(ref), f"{_BLOCKED_BY_PREFIX}{blocker}")
+
+    def remove_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
+        self._client.remove_label(self._resolve_id(ref), f"{_BLOCKED_BY_PREFIX}{blocker}")
