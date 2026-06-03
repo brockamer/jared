@@ -298,3 +298,21 @@ class KanbanFlowProvider:
             raise
         self._index.put(number, task.id)
         return self._item_from_task(self._client.get_task(task.id))
+
+    def add_to_board(
+        self,
+        ref: IssueRef,
+        *,
+        priority: str,
+        status: str,
+        labels: list[str] | None = None,
+        fields: list[tuple[str, str]] | None = None,
+    ) -> None:
+        task_id = self._resolve_id(ref)
+        self.validate_fields(priority=priority, status=status, fields=fields)
+        self._client.update_task(task_id, column_id=self._column_id(status))
+        self._set_custom_field("Priority", priority, task_id)
+        for name, value in fields or []:
+            self._set_custom_field(name, value, task_id)
+        for name in labels or []:
+            self._client.add_label(task_id, name)

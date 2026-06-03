@@ -168,3 +168,22 @@ def test_file_rolls_back_orphan_on_field_failure(tmp_path: Path) -> None:
         provider.file(title="doomed", body="", priority="High", status="Backlog")
     assert client.tasks == {}  # orphan deleted
     assert provider._index.get(1) is None  # not recorded
+
+
+def test_add_to_board_applies_status_priority_fields_labels(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    t = client.create_task(name="bare", column_id="col-backlog", number_value=8)
+    provider._index.put(8, t.id)
+    provider.add_to_board(
+        8,
+        priority="Medium",
+        status="Up Next",
+        labels=["session-2"],
+        fields=[("Work Stream", "beta")],
+    )
+    item = provider.get_item(8)
+    assert item is not None
+    assert item.status == "Up Next"
+    assert item.priority == "Medium"
+    assert item.fields == {"Work Stream": "beta"}
+    assert "session-2" in item.labels
