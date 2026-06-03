@@ -390,3 +390,38 @@ def main_repo(tmp_path: Path) -> Path:
     git_cmd(repo, "add", "README.md")
     git_cmd(repo, "commit", "-m", "initial")
     return repo
+
+
+# ---------------------------------------------------------------------------
+# KanbanFlow transport seam helpers
+# ---------------------------------------------------------------------------
+
+
+def patch_kf(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status: int = 200,
+    headers: dict[str, str] | None = None,
+    body: str = "{}",
+) -> list[dict[str, object]]:
+    """Patch the KanbanFlow transport seam with a single canned response.
+
+    Returns a list of recorded calls; each is a dict with method/url/headers/data.
+    Also no-ops _sleep so retry/backoff tests never wait, and pins _now to a
+    fixed epoch so budget-gate math is deterministic.
+    """
+    import skills.jared.scripts.lib.kanbanflow_client as kf
+
+    calls: list[dict[str, object]] = []
+
+    def fake(
+        method: str, url: str, hdrs: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        calls.append({"method": method, "url": url, "headers": hdrs, "data": data})
+        b = body.encode() if isinstance(body, str) else body
+        return status, headers or {}, b
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    monkeypatch.setattr(kf, "_sleep", lambda _s: None)
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+    return calls
