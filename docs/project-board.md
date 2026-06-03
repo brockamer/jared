@@ -95,18 +95,18 @@ Conventions:
 - **A one-sentence deliverable is required.** Put it in the milestone description.
   If you can't write the sentence that proves the milestone is done, it's a bag of
   issues, not a phase.
-- **Dates are optional.** A hard due date on a steady-state phase manufactures false
-  urgency. Add a soft target only if you want the Roadmap view to render a timeline.
+- **Carry a compressed soft target date.** Set a soft due date aligned to the repo's
+  actual cadence — this board ships fast, so calendar-conservative dates are themselves
+  drift. The date is a target, not a contract: it drives the Roadmap view and signals
+  intended sequencing. A genuinely externally-paced phase is the exception — flag it
+  rather than padding the date.
 
-**Surfacing the phase.** Group a **Table** or **Board** view by Milestone (view tab
-dropdown → Group by → Milestone) to see the active phase's items under one header.
-This is the dateless-compatible roadmap surface and matches the conventions above.
-
-Do **not** reach for GitHub's **Roadmap** view layout here: it is a date-driven
-Gantt timeline that plots bars only from date fields or a milestone *with a due date*.
-Because this board's milestones are intentionally dateless, a Roadmap view renders an
-empty timeline. Roadmap is the right layout only if you choose to add per-item target
-dates — which reintroduces the date-pinning the conventions above deliberately avoid.
+**Surfacing the phase.** Because milestones carry soft target dates, GitHub's
+**Roadmap** view layout renders a credible near-term timeline — it plots bars from the
+milestone due dates. For the at-a-glance checklist, group a **Table** or **Board** view
+by Milestone (view tab dropdown → Group by → Milestone) to see the active phase's items
+under one header. The Roadmap is the timeline; the grouped view is the checklist — both
+are valid surfaces.
 
 ## Labels
 
