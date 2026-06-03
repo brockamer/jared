@@ -11,6 +11,7 @@ spec's Appendix B for the verified API surface.
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.parse
@@ -117,6 +118,17 @@ class KanbanFlowClient:
         self._remaining: int | None = None
         self._reset: int | None = None
         self._daily_count = 0
+
+    @classmethod
+    def from_env(cls, **kwargs: object) -> KanbanFlowClient:
+        token = os.environ.get("KANBANFLOW_API_TOKEN")
+        if not token:
+            raise KanbanFlowError(
+                "KANBANFLOW_API_TOKEN is not set. Create an API token in a premium "
+                "KanbanFlow board (Settings -> API & Webhooks) and export it as "
+                "KANBANFLOW_API_TOKEN."
+            )
+        return cls(token, **kwargs)  # type: ignore[arg-type]
 
     def _build_url(self, path: str, params: dict[str, object] | None) -> str:
         url = f"{self._base_url}/{path.lstrip('/')}"
