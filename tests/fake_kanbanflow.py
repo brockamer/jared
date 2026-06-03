@@ -68,9 +68,6 @@ class FakeKanbanFlowClient:
     def list_custom_field_defs(self) -> list[KfCustomFieldDef]:
         return self.field_defs
 
-    def list_tasks(self, *, column_id: str | None = None, **_: object) -> list[KfTask]:
-        return [t for t in self.tasks.values() if column_id is None or t.column_id == column_id]
-
     def iter_all_tasks(self) -> list[KfTask]:
         return list(self.tasks.values())
 
@@ -134,9 +131,6 @@ class FakeKanbanFlowClient:
 
     def delete_task(self, task_id: str) -> None:
         self.tasks.pop(task_id, None)
-
-    def get_task_custom_fields(self, task_id: str) -> list[KfCustomFieldValue]:
-        return self.get_task(task_id).custom_fields
 
     def set_task_custom_field(self, task_id: str, custom_field_id: str, value: str | float) -> None:
         if self.fail_set_custom_field:
