@@ -125,3 +125,46 @@ def test_validate_fields_raises_on_bad_priority_option(tmp_path: Path) -> None:
     provider, _ = _provider(tmp_path)
     with pytest.raises(OptionNotFound):
         provider.validate_fields(priority="Critical", status="Backlog")
+
+
+def test_file_creates_task_with_status_priority_and_indexes(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    item = provider.file(
+        title="New work",
+        body="## Summary\nx",
+        priority="High",
+        status="Backlog",
+        labels=["session-2"],
+        milestone="v1.0",
+        fields=[("Work Stream", "alpha")],
+    )
+    assert item.number == 1  # first allocation
+    assert item.status == "Backlog"
+    assert item.priority == "High"
+    assert item.milestone == "v1.0"
+    assert item.fields == {"Work Stream": "alpha"}
+    assert "session-2" in item.labels
+    assert provider._index.get(1) == item.provider_ref
+
+
+def test_file_allocates_sequential_numbers(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    a = provider.file(title="a", body="", priority="Low", status="Backlog")
+    b = provider.file(title="b", body="", priority="Low", status="Backlog")
+    assert (a.number, b.number) == (1, 2)
+
+
+def test_file_seeds_next_number_from_existing_tasks(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.create_task(name="old", column_id="col-backlog", number_value=50)  # pre-existing
+    item = provider.file(title="new", body="", priority="Low", status="Backlog")
+    assert item.number == 51  # max existing + 1, via scan-on-seed
+
+
+def test_file_rolls_back_orphan_on_field_failure(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.fail_set_custom_field = True
+    with pytest.raises(RuntimeError):
+        provider.file(title="doomed", body="", priority="High", status="Backlog")
+    assert client.tasks == {}  # orphan deleted
+    assert provider._index.get(1) is None  # not recorded

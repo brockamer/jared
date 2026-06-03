@@ -258,3 +258,43 @@ class KanbanFlowProvider:
         self._check_option("Priority", priority)
         for name, value in fields or []:
             self._check_option(name, value)
+
+    def _next_number(self) -> int:
+        self._ensure_seeded()
+        return self._index.max_number() + 1
+
+    def file(
+        self,
+        *,
+        title: str,
+        body: str,
+        priority: str,
+        status: str,
+        labels: list[str] | None = None,
+        milestone: str | None = None,
+        fields: list[tuple[str, str]] | None = None,
+    ) -> BoardItem:
+        effective_status = status or "Backlog"
+        self.validate_fields(priority=priority, status=effective_status, fields=fields)
+        column_id = self._column_id(effective_status)
+        swimlane_id = self._swimlane_id(milestone) if milestone else None
+        number = self._next_number()
+        kf_labels = [KfLabel(name=n) for n in (labels or [])]
+        task = self._client.create_task(
+            name=title,
+            column_id=column_id,
+            number_value=number,
+            swimlane_id=swimlane_id,
+            description=body,
+            labels=kf_labels or None,
+        )
+        try:
+            self._set_custom_field("Priority", priority, task.id)
+            for name, value in fields or []:
+                self._set_custom_field(name, value, task.id)
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._client.delete_task(task.id)
+            raise
+        self._index.put(number, task.id)
+        return self._item_from_task(self._client.get_task(task.id))
