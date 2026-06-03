@@ -47,3 +47,17 @@ def test_request_maps_status_to_typed_exception_with_message(
     patch_kf(monkeypatch, status=status, body=json.dumps({"errors": [{"message": "boom"}]}))
     with pytest.raises(exc, match="boom"):
         _client()._request("GET", "/board")
+
+
+def test_from_env_reads_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KANBANFLOW_API_TOKEN", "envtok")
+    client = KanbanFlowClient.from_env()
+    calls = patch_kf(monkeypatch, body="{}")
+    client._request("GET", "/board")
+    assert cast(dict[str, str], calls[0]["headers"])["Authorization"] == "Bearer envtok"
+
+
+def test_from_env_raises_clear_error_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
+    with pytest.raises(KanbanFlowError, match="KANBANFLOW_API_TOKEN"):
+        KanbanFlowClient.from_env()
