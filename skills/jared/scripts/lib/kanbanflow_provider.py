@@ -222,8 +222,15 @@ class KanbanFlowProvider:
 
     def list_open_items(self) -> list[BoardItem]:
         done_id = self._column_id_by_name.get("Done")
+        # Skip un-numbered tasks (e.g. created in the KF UI without a jared
+        # number): they have no stable #N handle, so they're already invisible
+        # to ref-resolution and edge-building (_reseed_index,
+        # fetch_blocked_by_edges). Surfacing them here would manufacture a bogus
+        # #0 and collapse distinct tasks to the same ref.
         return [
-            self._item_from_task(t) for t in self._client.iter_all_tasks() if t.column_id != done_id
+            self._item_from_task(t)
+            for t in self._client.iter_all_tasks()
+            if t.column_id != done_id and t.number_value is not None
         ]
 
     def get_body(self, ref: IssueRef) -> str:
@@ -318,6 +325,14 @@ class KanbanFlowProvider:
             self._client.add_label(task_id, name)
 
     def set_field(self, ref: IssueRef, field_name: str, value: str) -> None:
+        # Status is a structural column on KanbanFlow, not a custom field. The
+        # CLI drives Status changes through set_field (`jared move` -> _cmd_set
+        # -> set_field, and `jared set N Status`), mirroring the GitHub provider
+        # where move() is itself set_field("Status"). Route Status to the column
+        # move so both CLI paths work on this backend.
+        if field_name == "Status":
+            self.move(ref, value)
+            return
         self._set_custom_field(field_name, value, self._resolve_id(ref))
 
     def move(self, ref: IssueRef, status: str) -> None:

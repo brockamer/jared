@@ -272,3 +272,35 @@ def test_list_milestones_from_swimlanes_dateless(tmp_path: Path) -> None:
     assert "v1.0" in names
     assert names["v1.0"].state is None and names["v1.0"].due is None
     assert names["v1.0"].description == "First release"
+
+
+def test_set_field_status_routes_to_move(tmp_path: Path) -> None:
+    # Regression: the CLI drives Status changes through set_field("Status")
+    # (jared move -> _cmd_set -> set_field, and `jared set N Status`). On
+    # KanbanFlow, Status is a structural column, not a custom field, so
+    # set_field must route it to a move instead of raising FieldNotFound.
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.set_field(n, "Status", "In Progress")
+    assert provider.get_item(n).status == "In Progress"  # type: ignore[union-attr]
+
+
+def test_list_open_items_skips_unnumbered_tasks(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.create_task(name="numbered", column_id="col-upnext", number_value=1)
+    ui_made = client.create_task(name="ui-made", column_id="col-upnext", number_value=2)
+    ui_made.number_value = None  # a task created in the KF UI without a jared number
+    items = provider.list_open_items()
+    assert [i.title for i in items] == ["numbered"]
+    assert all(i.number != 0 for i in items)
+
+
+def test_get_item_reseeds_index_on_cold_miss(tmp_path: Path) -> None:
+    # Task exists on the board but the index is cold (never seeded). get_item
+    # must reseed via a scan, find it, and leave the index populated.
+    provider, client = _provider(tmp_path)
+    client.create_task(name="preexisting", column_id="col-upnext", number_value=7)
+    assert provider._index.get(7) is None
+    item = provider.get_item(7)
+    assert item is not None and item.number == 7
+    assert provider._index.get(7) is not None
