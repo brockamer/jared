@@ -17,6 +17,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
+from typing import Any
 
 # --------------------------------------------------------------------------- #
 # Module-level seams (the only impure functions; monkeypatched in tests)      #
@@ -96,6 +98,183 @@ def _parse_error(body: bytes) -> str:
     except (ValueError, AttributeError):
         pass
     return body.decode(errors="replace") or "unknown error"
+
+
+# --------------------------------------------------------------------------- #
+# KanbanFlow-internal dataclasses (carry KF _ids; no semantic mapping)        #
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class KfColumn:
+    unique_id: str
+    name: str
+    description: str = ""
+
+
+@dataclass
+class KfSwimlane:
+    unique_id: str
+    name: str
+    description: str = ""
+
+
+@dataclass
+class KfBoard:
+    id: str
+    name: str
+    columns: list[KfColumn] = field(default_factory=list)
+    swimlanes: list[KfSwimlane] = field(default_factory=list)
+
+
+@dataclass
+class KfCustomFieldDef:
+    id: str
+    name: str
+    field_type: str
+    dropdown_options: list[str] = field(default_factory=list)
+    number_prefix: str | None = None
+
+
+@dataclass
+class KfLabel:
+    name: str
+    pinned: bool = False
+
+
+@dataclass
+class KfCustomFieldValue:
+    custom_field_id: str
+    value: str | float
+
+
+@dataclass
+class KfTask:
+    id: str
+    name: str
+    description: str = ""
+    color: str | None = None
+    column_id: str | None = None
+    swimlane_id: str | None = None
+    position: int | None = None
+    number_value: int | None = None
+    number_prefix: str | None = None
+    responsible_user_id: str | None = None
+    collaborators: list[str] = field(default_factory=list)
+    labels: list[KfLabel] = field(default_factory=list)
+    custom_fields: list[KfCustomFieldValue] = field(default_factory=list)
+
+
+@dataclass
+class KfComment:
+    id: str
+    text: str
+    created_timestamp: str
+    author_user_id: str = ""
+
+
+@dataclass
+class KfRelation:
+    relation_type: str
+    related_task_id: str
+    related_task_name: str = ""
+    related_task_board_id: str | None = None
+
+
+@dataclass
+class KfUser:
+    id: str
+    name: str = ""
+
+
+def _parse_label(raw: dict[str, Any]) -> KfLabel:
+    return KfLabel(name=str(raw["name"]), pinned=bool(raw.get("pinned", False)))
+
+
+def _parse_custom_field_value(raw: dict[str, Any]) -> KfCustomFieldValue:
+    value_obj: dict[str, Any] = raw.get("value") or {}
+    raw_value = value_obj.get("text", value_obj.get("number"))
+    value: str | float = raw_value if raw_value is not None else ""
+    return KfCustomFieldValue(custom_field_id=str(raw["customFieldId"]), value=value)
+
+
+def _parse_task(raw: dict[str, Any]) -> KfTask:
+    number: dict[str, Any] = raw.get("number") or {}
+    return KfTask(
+        id=str(raw["_id"]),
+        name=str(raw.get("name", "")),
+        description=str(raw.get("description", "")),
+        color=str(raw["color"]) if raw.get("color") is not None else None,
+        column_id=str(raw["columnId"]) if raw.get("columnId") is not None else None,
+        swimlane_id=str(raw["swimlaneId"]) if raw.get("swimlaneId") is not None else None,
+        position=int(raw["position"]) if raw.get("position") is not None else None,
+        number_value=int(number["value"]) if number.get("value") is not None else None,
+        number_prefix=str(number["prefix"]) if number.get("prefix") is not None else None,
+        responsible_user_id=(
+            str(raw["responsibleUserId"]) if raw.get("responsibleUserId") is not None else None
+        ),
+        collaborators=[str(c["userId"]) for c in raw.get("collaborators", [])],
+        labels=[_parse_label(label) for label in raw.get("labels", [])],
+        custom_fields=[_parse_custom_field_value(cf) for cf in raw.get("customFields", [])],
+    )
+
+
+def _parse_board(raw: dict[str, Any]) -> KfBoard:
+    return KfBoard(
+        id=str(raw["_id"]),
+        name=str(raw.get("name", "")),
+        columns=[
+            KfColumn(
+                unique_id=str(c["uniqueId"]),
+                name=str(c.get("name", "")),
+                description=str(c.get("description", "")),
+            )
+            for c in raw.get("columns", [])
+        ],
+        swimlanes=[
+            KfSwimlane(
+                unique_id=str(s["uniqueId"]),
+                name=str(s.get("name", "")),
+                description=str(s.get("description", "")),
+            )
+            for s in raw.get("swimlanes", [])
+        ],
+    )
+
+
+def _parse_custom_field_def(raw: dict[str, Any]) -> KfCustomFieldDef:
+    ns: dict[str, Any] = raw.get("numberSettings") or {}
+    return KfCustomFieldDef(
+        id=str(raw["_id"]),
+        name=str(raw.get("name", "")),
+        field_type=str(raw.get("fieldType", "")),
+        dropdown_options=[str(o["text"]) for o in raw.get("dropdownOptions", [])],
+        number_prefix=str(ns["prefix"]) if ns.get("prefix") is not None else None,
+    )
+
+
+def _parse_comment(raw: dict[str, Any]) -> KfComment:
+    return KfComment(
+        id=str(raw["_id"]),
+        text=str(raw.get("text", "")),
+        created_timestamp=str(raw.get("createdTimestamp", "")),
+        author_user_id=str(raw.get("authorUserId", "")),
+    )
+
+
+def _parse_relation(raw: dict[str, Any]) -> KfRelation:
+    return KfRelation(
+        relation_type=str(raw.get("relationType", "")),
+        related_task_id=str(raw.get("relatedTaskId", "")),
+        related_task_name=str(raw.get("relatedTaskName", "")),
+        related_task_board_id=(
+            str(raw["relatedTaskBoardId"]) if raw.get("relatedTaskBoardId") is not None else None
+        ),
+    )
+
+
+def _parse_user(raw: dict[str, Any]) -> KfUser:
+    return KfUser(id=str(raw["_id"]), name=str(raw.get("name", "")))
 
 
 class KanbanFlowClient:
