@@ -316,3 +316,21 @@ class KanbanFlowProvider:
             self._set_custom_field(name, value, task_id)
         for name in labels or []:
             self._client.add_label(task_id, name)
+
+    def set_field(self, ref: IssueRef, field_name: str, value: str) -> None:
+        self._set_custom_field(field_name, value, self._resolve_id(ref))
+
+    def move(self, ref: IssueRef, status: str) -> None:
+        self._client.update_task(self._resolve_id(ref), column_id=self._column_id(status))
+
+    def set_body(self, ref: IssueRef, text: str) -> None:
+        self._client.update_task(self._resolve_id(ref), description=text)
+
+    def comment(self, ref: IssueRef, body: str) -> str:
+        return self._client.add_comment(self._resolve_id(ref), body)
+
+    def close(self, ref: IssueRef, *, comment: str | None = None) -> None:
+        task_id = self._resolve_id(ref)
+        if comment:
+            self._client.add_comment(task_id, comment)
+        self._client.update_task(task_id, column_id=self._column_id("Done"))
