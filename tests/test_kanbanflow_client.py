@@ -241,3 +241,36 @@ def test_get_task_returns_single(monkeypatch: pytest.MonkeyPatch) -> None:
     task = _client().get_task("T9")
     assert task.id == "T9"
     assert task.name == "solo"
+
+
+def test_create_task_always_sends_explicit_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(
+        monkeypatch,
+        body=json.dumps({"_id": "T1", "name": "n", "columnId": "C1", "number": {"value": 7}}),
+    )
+    task = _client().create_task(name="n", column_id="C1", number_value=7)
+    sent = json.loads(cast(bytes, calls[0]["data"]))
+    assert sent["number"] == {"value": 7}, "create_task must always send number.value explicitly"
+    assert calls[0]["method"] == "POST"
+    assert task.number_value == 7
+
+
+def test_update_task_uses_post_and_includes_only_given_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = patch_kf(
+        monkeypatch,
+        body=json.dumps({"_id": "T1", "name": "renamed", "columnId": "C2"}),
+    )
+    _client().update_task("T1", name="renamed", column_id="C2")
+    assert calls[0]["method"] == "POST"
+    assert str(calls[0]["url"]).endswith("/tasks/T1")
+    sent = json.loads(cast(bytes, calls[0]["data"]))
+    assert sent == {"name": "renamed", "columnId": "C2"}
+
+
+def test_delete_task_issues_delete(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body="")
+    _client().delete_task("T1")
+    assert calls[0]["method"] == "DELETE"
+    assert str(calls[0]["url"]).endswith("/tasks/T1")

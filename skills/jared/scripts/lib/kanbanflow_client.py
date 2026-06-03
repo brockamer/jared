@@ -426,6 +426,66 @@ class KanbanFlowClient:
         raw = self._request("GET", f"/tasks/{task_id}")
         return _parse_task(raw)  # type: ignore[arg-type]
 
+    def create_task(
+        self,
+        *,
+        name: str,
+        column_id: str,
+        number_value: int,
+        swimlane_id: str | None = None,
+        description: str | None = None,
+        color: str | None = None,
+        responsible_user_id: str | None = None,
+        labels: list[KfLabel] | None = None,
+    ) -> KfTask:
+        body: dict[str, object] = {
+            "name": name,
+            "columnId": column_id,
+            "number": {"value": number_value},
+        }
+        if swimlane_id is not None:
+            body["swimlaneId"] = swimlane_id
+        if description is not None:
+            body["description"] = description
+        if color is not None:
+            body["color"] = color
+        if responsible_user_id is not None:
+            body["responsibleUserId"] = responsible_user_id
+        if labels:
+            body["labels"] = [{"name": label.name, "pinned": label.pinned} for label in labels]
+        raw = self._request("POST", "/tasks", body=body)
+        return _parse_task(raw)  # type: ignore[arg-type]
+
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        name: str | None = None,
+        column_id: str | None = None,
+        number_value: int | None = None,
+        description: str | None = None,
+        color: str | None = None,
+        responsible_user_id: str | None = None,
+    ) -> KfTask:
+        body: dict[str, object] = {}
+        if name is not None:
+            body["name"] = name
+        if column_id is not None:
+            body["columnId"] = column_id
+        if number_value is not None:
+            body["number"] = {"value": number_value}
+        if description is not None:
+            body["description"] = description
+        if color is not None:
+            body["color"] = color
+        if responsible_user_id is not None:
+            body["responsibleUserId"] = responsible_user_id
+        raw = self._request("POST", f"/tasks/{task_id}", body=body)
+        return _parse_task(raw)  # type: ignore[arg-type]
+
+    def delete_task(self, task_id: str) -> None:
+        self._request("DELETE", f"/tasks/{task_id}")
+
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
             raise KanbanFlowRateLimitError(
