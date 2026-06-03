@@ -138,6 +138,21 @@ If every `_cmd_*` rewrites to call only `BoardProvider` semantic methods with **
 
 Frozen from the 2026-06-02 API + product research. These shape the interface so Phase 3 doesn't force a redesign. Source: <https://kanbanflow.com/api-docs> and sub-pages.
 
+> **Corrected 2026-06-02 (Phase-2 wire verification — see
+> `2026-06-02-kanbanflow-rest-client-design.md` § "Corrections to Appendix A"):**
+> (1) KanbanFlow **does** auto-assign `number` when the field is omitted on a
+> numbering-enabled board — so jared must *always* send an explicit `number.value`
+> ("KF does not auto-increment" below is wrong; "no get-by-number endpoint" is confirmed).
+> (2) Labels are objects `{name, pinned}` via per-task endpoints (case-sensitive),
+> not a bare free-text string array.
+> (3) Custom-field values **cannot** be set inline on task create — they need a
+> separate per-field `POST /tasks/<id>/custom-fields/<id>` (so an "atomic file" is ≥2 calls).
+> (4) Board structure (columns/swimlanes) is **read-only** via the API — it must pre-exist
+> in the KanbanFlow UI (a Phase-4 `init` prerequisite).
+> (5) Task update is `POST` (not PUT); validation errors surface as `403`; a custom-field
+> *definition* is keyed `_id` while a task *value* references `customFieldId`; dropdown
+> options have no id (option `text` is the key). Auth is confirmed **Bearer** (not Basic).
+
 ### Concept mapping
 
 | jared concept | KanbanFlow representation |

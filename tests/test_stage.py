@@ -170,14 +170,7 @@ class TestIsPullable:
         unwrapped template body through — `- Criterion N` placeholders still
         fail."""
         stage = import_stage()
-        item = {
-            "body": (
-                "Real summary.\n\n"
-                "## Acceptance criteria\n"
-                "- Criterion 1\n"
-                "- Criterion 2\n"
-            )
-        }
+        item = {"body": ("Real summary.\n\n## Acceptance criteria\n- Criterion 1\n- Criterion 2\n")}
         assert stage.is_pullable(item) is False
 
     def test_unwrapped_prose_only_is_not_pullable(self) -> None:
