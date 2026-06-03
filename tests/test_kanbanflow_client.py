@@ -305,3 +305,50 @@ def test_set_task_custom_field_number_uses_number_key(monkeypatch: pytest.Monkey
     calls = patch_kf(monkeypatch, body="{}")
     _client().set_task_custom_field("T1", "F2", 12.5)
     assert json.loads(cast(bytes, calls[0]["data"])) == {"value": {"number": 12.5}}
+
+
+def test_list_comments_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps(
+            [
+                {
+                    "_id": "C1",
+                    "text": "hi",
+                    "createdTimestamp": "2026-01-01T00:00:00Z",
+                    "authorUserId": "U1",
+                }
+            ]
+        ),
+    )
+    comments = _client().list_comments("T1")
+    assert comments == [
+        KfComment(
+            id="C1",
+            text="hi",
+            created_timestamp="2026-01-01T00:00:00Z",
+            author_user_id="U1",
+        )
+    ]
+
+
+def test_add_comment_posts_text_and_returns_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body=json.dumps({"taskCommentId": "C9"}))
+    cid = _client().add_comment("T1", "a note")
+    assert cid == "C9"
+    assert calls[0]["method"] == "POST"
+    assert str(calls[0]["url"]).endswith("/tasks/T1/comments")
+    assert json.loads(cast(bytes, calls[0]["data"])) == {"text": "a note"}
+
+
+def test_add_comment_backdates_with_created_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body=json.dumps({"taskCommentId": "C9"}))
+    _client().add_comment(
+        "T1",
+        "old note",
+        created_timestamp="2025-01-01T00:00:00Z",
+        author_user_id="U2",
+    )
+    sent = json.loads(cast(bytes, calls[0]["data"]))
+    assert sent["createdTimestamp"] == "2025-01-01T00:00:00Z"
+    assert sent["authorUserId"] == "U2"

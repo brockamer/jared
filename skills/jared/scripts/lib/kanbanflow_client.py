@@ -500,6 +500,26 @@ class KanbanFlowClient:
             body={"value": {key: value}},
         )
 
+    def list_comments(self, task_id: str) -> list[KfComment]:
+        raw = self._request("GET", f"/tasks/{task_id}/comments")
+        return [_parse_comment(c) for c in raw]  # type: ignore[attr-defined]
+
+    def add_comment(
+        self,
+        task_id: str,
+        text: str,
+        *,
+        created_timestamp: str | None = None,
+        author_user_id: str | None = None,
+    ) -> str:
+        body: dict[str, object] = {"text": text}
+        if created_timestamp is not None:
+            body["createdTimestamp"] = created_timestamp
+        if author_user_id is not None:
+            body["authorUserId"] = author_user_id
+        raw = self._request("POST", f"/tasks/{task_id}/comments", body=body)
+        return str(raw.get("taskCommentId", ""))  # type: ignore[attr-defined]
+
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
             raise KanbanFlowRateLimitError(
