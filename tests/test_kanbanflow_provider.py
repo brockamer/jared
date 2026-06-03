@@ -91,3 +91,19 @@ def test_get_body_returns_description(tmp_path: Path) -> None:
     t = client.create_task(name="x", column_id="col-backlog", number_value=5, description="hello")
     provider._index.put(5, t.id)
     assert provider.get_body(5) == "hello"
+
+
+def test_fetch_blocked_by_edges_parses_labels(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    a = client.create_task(name="a", column_id="col-upnext", number_value=10)
+    client.add_label(a.id, "blocked-by:3")
+    client.add_label(a.id, "blocked-by:4")
+    client.create_task(name="b", column_id="col-upnext", number_value=11)  # no blockers
+    edges = provider.fetch_blocked_by_edges()
+    assert sorted((e.dependent, e.blocker) for e in edges) == [(10, 3), (10, 4)]
+
+
+def test_recently_closed_is_empty_degraded(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.create_task(name="done", column_id="col-done", number_value=1)
+    assert provider.recently_closed(days=7) == []

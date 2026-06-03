@@ -15,7 +15,7 @@ import contextlib
 from typing import Protocol
 
 from .board import FieldNotFound, ItemNotFound, OptionNotFound
-from .board_provider import BoardItem, Capability, IssueRef
+from .board_provider import BoardItem, Capability, ClosedItem, Edge, IssueRef
 from .kanbanflow_client import KanbanFlowNotFoundError, KfBoard, KfCustomFieldDef, KfLabel, KfTask
 from .kf_number_index import KfNumberIndex
 
@@ -228,3 +228,18 @@ class KanbanFlowProvider:
 
     def get_body(self, ref: IssueRef) -> str:
         return self._client.get_task(self._resolve_id(ref)).description
+
+    def fetch_blocked_by_edges(self) -> list[Edge]:
+        edges: list[Edge] = []
+        for task in self._client.iter_all_tasks():
+            if task.number_value is None:
+                continue
+            for blocker in self._parse_blocked_by([label.name for label in task.labels]):
+                edges.append(Edge(dependent=task.number_value, blocker=blocker))
+        return edges
+
+    def recently_closed(self, *, days: int) -> list[ClosedItem]:
+        # KanbanFlow exposes no reliable moved-to-Done timestamp
+        # (VELOCITY_TIMESTAMPS omitted). Degrade to empty; Phase 6 gates callers
+        # on the capability.
+        return []
