@@ -231,3 +231,23 @@ def test_close_comments_then_moves_to_done(tmp_path: Path) -> None:
     assert provider.get_item(n).status == "Done"  # type: ignore[union-attr]
     task_id = provider._index.get(n)
     assert client.list_comments(task_id)[-1].text == "closing"  # type: ignore[arg-type]
+
+
+def test_add_remove_label(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.add_label(n, "session-2")
+    assert "session-2" in provider.get_item(n).labels  # type: ignore[union-attr]
+    provider.remove_label(n, "session-2")
+    assert "session-2" not in provider.get_item(n).labels  # type: ignore[union-attr]
+
+
+def test_add_remove_blocked_by_uses_label_marker(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    n = _filed(provider)
+    provider.add_blocked_by(n, 99)
+    task_id = provider._index.get(n)
+    assert any(label.name == "blocked-by:99" for label in client.list_labels(task_id))  # type: ignore[arg-type]
+    assert provider.get_item(n).blocked_by == [99]  # type: ignore[union-attr]
+    provider.remove_blocked_by(n, 99)
+    assert provider.get_item(n).blocked_by == []  # type: ignore[union-attr]
