@@ -1,4 +1,12 @@
+---
+**Shipped in #315 on 2026-06-03. Final decisions captured in issue body.**
+---
+
 # KanbanFlow REST client (#315, Phase 2) Implementation Plan
+
+## Issue
+
+- #315
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
