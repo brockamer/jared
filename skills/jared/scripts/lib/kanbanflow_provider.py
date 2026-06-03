@@ -243,3 +243,18 @@ class KanbanFlowProvider:
         # (VELOCITY_TIMESTAMPS omitted). Degrade to empty; Phase 6 gates callers
         # on the capability.
         return []
+
+    # --- writes ---
+    def validate_fields(
+        self,
+        *,
+        priority: str,
+        status: str,
+        fields: list[tuple[str, str]] | None = None,
+    ) -> None:
+        """Fail-before-mutate fence: resolve Status column + Priority option +
+        extra field options, raising FieldNotFound/OptionNotFound on any miss."""
+        self._column_id(status)
+        self._check_option("Priority", priority)
+        for name, value in fields or []:
+            self._check_option(name, value)

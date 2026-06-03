@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from skills.jared.scripts.lib.board import FieldNotFound, OptionNotFound
 from skills.jared.scripts.lib.board_provider import BoardProvider
 from skills.jared.scripts.lib.kanbanflow_provider import KanbanFlowProvider
 from skills.jared.scripts.lib.kf_number_index import KfNumberIndex
@@ -107,3 +108,20 @@ def test_recently_closed_is_empty_degraded(tmp_path: Path) -> None:
     provider, client = _provider(tmp_path)
     client.create_task(name="done", column_id="col-done", number_value=1)
     assert provider.recently_closed(days=7) == []
+
+
+def test_validate_fields_passes_for_valid(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    provider.validate_fields(priority="High", status="Backlog", fields=[("Work Stream", "alpha")])
+
+
+def test_validate_fields_raises_on_bad_status(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    with pytest.raises(FieldNotFound):
+        provider.validate_fields(priority="High", status="Nonexistent")
+
+
+def test_validate_fields_raises_on_bad_priority_option(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    with pytest.raises(OptionNotFound):
+        provider.validate_fields(priority="Critical", status="Backlog")
