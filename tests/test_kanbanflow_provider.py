@@ -36,7 +36,6 @@ def test_fake_get_missing_raises() -> None:
         client.get_task("nope")
 
 
-@pytest.mark.skip(reason="enable in Task 12 once all BoardProvider methods exist")
 def test_provider_satisfies_protocol(tmp_path: Path) -> None:
     provider, _ = _provider(tmp_path)
     assert isinstance(provider, BoardProvider)
@@ -251,3 +250,25 @@ def test_add_remove_blocked_by_uses_label_marker(tmp_path: Path) -> None:
     assert provider.get_item(n).blocked_by == [99]  # type: ignore[union-attr]
     provider.remove_blocked_by(n, 99)
     assert provider.get_item(n).blocked_by == []  # type: ignore[union-attr]
+
+
+def test_set_milestone_moves_swimlane(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.set_milestone(n, "v1.0")
+    assert provider.get_item(n).milestone == "v1.0"  # type: ignore[union-attr]
+
+
+def test_set_milestone_bad_name_raises(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    with pytest.raises(FieldNotFound):
+        provider.set_milestone(n, "nonexistent")
+
+
+def test_list_milestones_from_swimlanes_dateless(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    names = {m.name: m for m in provider.list_milestones()}
+    assert "v1.0" in names
+    assert names["v1.0"].state is None and names["v1.0"].due is None
+    assert names["v1.0"].description == "First release"

@@ -15,7 +15,7 @@ import contextlib
 from typing import Protocol
 
 from .board import FieldNotFound, ItemNotFound, OptionNotFound
-from .board_provider import BoardItem, Capability, ClosedItem, Edge, IssueRef
+from .board_provider import BoardItem, Capability, ClosedItem, Edge, IssueRef, Milestone
 from .kanbanflow_client import KanbanFlowNotFoundError, KfBoard, KfCustomFieldDef, KfLabel, KfTask
 from .kf_number_index import KfNumberIndex
 
@@ -346,3 +346,12 @@ class KanbanFlowProvider:
 
     def remove_blocked_by(self, ref: IssueRef, blocker: IssueRef) -> None:
         self._client.remove_label(self._resolve_id(ref), f"{_BLOCKED_BY_PREFIX}{blocker}")
+
+    def set_milestone(self, ref: IssueRef, name: str) -> None:
+        self._client.update_task(self._resolve_id(ref), swimlane_id=self._swimlane_id(name))
+
+    def list_milestones(self) -> list[Milestone]:
+        return [
+            Milestone(name=s.name, description=s.description, state=None, due=None)
+            for s in self._board.swimlanes
+        ]
