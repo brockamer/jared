@@ -490,10 +490,10 @@ class KanbanFlowClient:
         raw = self._request("GET", f"/tasks/{task_id}/custom-fields")
         return [_parse_custom_field_value(cf) for cf in raw]  # type: ignore[attr-defined]
 
-    def set_task_custom_field(
-        self, task_id: str, custom_field_id: str, value: str | float
-    ) -> None:
-        key = "number" if isinstance(value, (int, float)) and not isinstance(value, bool) else "text"
+    def set_task_custom_field(self, task_id: str, custom_field_id: str, value: str | float) -> None:
+        key = (
+            "number" if isinstance(value, (int, float)) and not isinstance(value, bool) else "text"
+        )
         self._request(
             "POST",
             f"/tasks/{task_id}/custom-fields/{custom_field_id}",
