@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from . import cache
+from .board_provider import BoardProvider
 
 if TYPE_CHECKING:
-    from .github_provider import GitHubProjectsProvider
     from .ties import OpenIssueForTies
 
 
@@ -82,7 +82,7 @@ class Board:
     # `- backend: <x>` bullet under `## Jared config` in project-board.md.
     backend: str = "github"
     # Cached provider instance, lazily populated by the `provider` property.
-    _provider: GitHubProjectsProvider | None = field(default=None, repr=False)
+    _provider: BoardProvider | None = field(default=None, repr=False)
 
     @classmethod
     def find_default_path(cls, project_root: Path | None = None) -> Path | None:
@@ -391,29 +391,37 @@ class Board:
         return frozenset(w for w in words if w)
 
     @property
-    def provider(self) -> GitHubProjectsProvider:
-        """Return the configured backend provider, lazily constructed.
-
-        Only 'github' is implemented; any other `backend` value raises
-        BoardConfigError so callers get an actionable message rather than
-        an AttributeError deep in provider code.
-        """
-        if self.backend != "github":
+    def provider(self) -> BoardProvider:
+        """Return the configured backend provider, lazily constructed."""
+        if self.backend not in ("github", "kanbanflow"):
             raise BoardConfigError(
-                f"backend '{self.backend}' has no provider yet (Phase 3+). "
-                "Only 'github' is implemented."
+                f"backend '{self.backend}' has no provider (Phase 3+). "
+                "Supported: 'github', 'kanbanflow'."
             )
         if self._provider is None:
-            from .github_provider import GitHubProjectsProvider
+            if self.backend == "github":
+                from .github_provider import GitHubProjectsProvider
 
-            self._provider = GitHubProjectsProvider(
-                project_number=self.project_number,
-                project_id=self.project_id,
-                owner=self.owner,
-                repo=self.repo,
-                field_ids=self._field_ids,
-                field_options=self._field_options,
-            )
+                self._provider = GitHubProjectsProvider(
+                    project_number=self.project_number,
+                    project_id=self.project_id,
+                    owner=self.owner,
+                    repo=self.repo,
+                    field_ids=self._field_ids,
+                    field_options=self._field_options,
+                )
+            else:  # kanbanflow
+                from .kanbanflow_client import KanbanFlowClient
+                from .kanbanflow_provider import KanbanFlowProvider
+                from .kf_number_index import KfNumberIndex
+
+                client = KanbanFlowClient.from_env()
+                kf_board = client.get_board()
+                field_defs = client.list_custom_field_defs()
+                index = KfNumberIndex.for_board(kf_board.id)
+                self._provider = KanbanFlowProvider(
+                    client=client, board=kf_board, field_defs=field_defs, index=index
+                )
         return self._provider
 
     def run_gh(

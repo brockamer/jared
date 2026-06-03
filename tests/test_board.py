@@ -1543,12 +1543,48 @@ def test_board_provider_github_default(tmp_path: Path) -> None:
 
 
 def test_board_provider_unknown_backend_raises(tmp_path: Path) -> None:
-    """Board parsed from a doc with `- backend: kanbanflow` raises BoardConfigError
-    when .provider is accessed (Phase 3+ backends not yet implemented).
+    """An unrecognized backend value raises BoardConfigError on .provider access.
 
-    This also exercises the parse wiring: jared_config.get('backend') flows
-    through _parse into Board.backend for non-default values."""
+    Also exercises the parse wiring: jared_config.get('backend') flows through
+    _parse into Board.backend for non-default values."""
     from skills.jared.scripts.lib.board import Board, BoardConfigError
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ## Jared config
+        - backend: trello
+        """)
+    )
+
+    board = Board.from_path(board_md)
+    assert board.backend == "trello"
+    with pytest.raises(BoardConfigError, match="trello"):
+        _ = board.provider
+
+
+def test_board_provider_returns_kanbanflow_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """backend: kanbanflow constructs a KanbanFlowProvider (not a raise)."""
+    from skills.jared.scripts.lib.board import Board
+    from skills.jared.scripts.lib.kanbanflow_provider import KanbanFlowProvider
+    from tests.fake_kanbanflow import FakeKanbanFlowClient
+
+    # Avoid real network: from_env returns a fake client.
+    fake = FakeKanbanFlowClient()
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.kanbanflow_client.KanbanFlowClient.from_env",
+        classmethod(lambda cls, **kw: fake),
+    )
+    monkeypatch.setenv("JARED_CACHE_DIR", str(tmp_path))
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
@@ -1564,8 +1600,5 @@ def test_board_provider_unknown_backend_raises(tmp_path: Path) -> None:
         - backend: kanbanflow
         """)
     )
-
     board = Board.from_path(board_md)
-    assert board.backend == "kanbanflow"
-    with pytest.raises(BoardConfigError, match="kanbanflow"):
-        _ = board.provider
+    assert isinstance(board.provider, KanbanFlowProvider)
