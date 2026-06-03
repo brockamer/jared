@@ -31,7 +31,7 @@ This is the keystone of the epic — every later phase depends on it. Phase 4 (#
 ```python
 KanbanFlowProvider(
     *,
-    client: KanbanFlowClient,
+    client: KanbanFlowClientLike,         # structural Protocol — see below
     board: KfBoard,                       # columns + swimlanes (read-only structure)
     field_defs: list[KfCustomFieldDef],   # custom-field definitions (Priority, Work Stream, …)
     index: KfNumberIndex,                 # number ↔ _id store (below)
@@ -40,7 +40,7 @@ KanbanFlowProvider(
 
 `Board.provider` gains a `kanbanflow` branch: build the client via `from_env()`, call `get_board()` + `list_custom_field_defs()` once to resolve structure, construct the index, and cache the provider (same lazy-singleton shape as the GitHub branch).
 
-DI is deliberate: it makes the unit-test seam a **faked in-memory client** (see § "Testing") rather than HTTP-level patching, and keeps the provider's logic — pure mapping — testable in isolation.
+DI is deliberate: it makes the unit-test seam a **faked in-memory client** (see § "Testing") rather than HTTP-level patching, and keeps the provider's logic — pure mapping — testable in isolation. The `client` parameter is typed against `KanbanFlowClientLike` — a **consumer-owned `typing.Protocol`** (defined in `kanbanflow_provider.py`) declaring only the ~11 client methods the provider calls. Both the production `KanbanFlowClient` and the in-memory test fake satisfy it structurally, so the fake injection type-checks under `mypy --strict` without any nominal base class. (Interface segregation: the provider depends on the narrow surface it uses, not the whole client.)
 
 ### Name → internal-ID resolution (resolved once, cached in-process)
 
