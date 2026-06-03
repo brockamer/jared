@@ -382,6 +382,50 @@ class KanbanFlowClient:
         raw = self._cached_get("users", "/users")
         return [_parse_user(u) for u in raw]  # type: ignore[attr-defined]
 
+    def list_tasks(
+        self,
+        *,
+        column_id: str | None = None,
+        column_name: str | None = None,
+        swimlane_id: str | None = None,
+        limit: int | None = None,
+        start_task_id: str | None = None,
+        order: str | None = None,
+    ) -> list[KfTask]:
+        params: dict[str, object] = {
+            "columnId": column_id,
+            "columnName": column_name,
+            "swimlaneId": swimlane_id,
+            "limit": limit,
+            "order": order,
+        }
+        tasks: list[KfTask] = []
+        cursor = start_task_id
+        while True:
+            params["startTaskId"] = cursor
+            groups: Any = self._request("GET", "/tasks", params=params)
+            next_cursor: str | None = None
+            for group in groups or []:
+                for raw in group.get("tasks", []):
+                    tasks.append(_parse_task(raw))
+                if group.get("tasksLimited") and group.get("nextTaskId"):
+                    next_cursor = group["nextTaskId"]
+            if not next_cursor:
+                break
+            cursor = next_cursor
+        return tasks
+
+    def iter_all_tasks(self) -> list[KfTask]:
+        board = self.get_board()
+        tasks: list[KfTask] = []
+        for column in board.columns:
+            tasks.extend(self.list_tasks(column_id=column.unique_id))
+        return tasks
+
+    def get_task(self, task_id: str) -> KfTask:
+        raw = self._request("GET", f"/tasks/{task_id}")
+        return _parse_task(raw)  # type: ignore[arg-type]
+
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
             raise KanbanFlowRateLimitError(

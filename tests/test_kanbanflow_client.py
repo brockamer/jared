@@ -176,3 +176,68 @@ def test_jared_no_cache_bypasses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     client.get_board()
     board_calls = [c for c in calls if str(c["url"]).endswith("/board")]
     assert len(board_calls) == 2, "JARED_NO_CACHE=1 must defeat caching"
+
+
+def test_list_tasks_unwraps_column_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps(
+            [
+                {
+                    "columnId": "C1",
+                    "columnName": "To-do",
+                    "tasksLimited": False,
+                    "tasks": [
+                        {"_id": "T1", "name": "a", "columnId": "C1"},
+                        {"_id": "T2", "name": "b", "columnId": "C1"},
+                    ],
+                }
+            ]
+        ),
+    )
+    tasks = _client().list_tasks(column_id="C1")
+    assert [t.id for t in tasks] == ["T1", "T2"]
+
+
+def test_list_tasks_follows_date_grouped_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    page1 = json.dumps(
+        [
+            {
+                "columnId": "C1",
+                "tasksLimited": True,
+                "nextTaskId": "T2",
+                "tasks": [{"_id": "T1", "name": "a", "columnId": "C1"}],
+            }
+        ]
+    )
+    page2 = json.dumps(
+        [
+            {
+                "columnId": "C1",
+                "tasksLimited": False,
+                "tasks": [{"_id": "T2", "name": "b", "columnId": "C1"}],
+            }
+        ]
+    )
+    pages = [page1.encode(), page2.encode()]
+    monkeypatch.setattr(kf, "_sleep", lambda _s: None)
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+    seen: list[str] = []
+
+    def fake(
+        method: str, url: str, headers: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        seen.append(url)
+        return 200, {}, pages.pop(0)
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    tasks = _client().list_tasks(column_id="C1")
+    assert [t.id for t in tasks] == ["T1", "T2"]
+    assert any("startTaskId=T2" in u for u in seen), "must page using nextTaskId -> startTaskId"
+
+
+def test_get_task_returns_single(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(monkeypatch, body=json.dumps({"_id": "T9", "name": "solo", "columnId": "C1"}))
+    task = _client().get_task("T9")
+    assert task.id == "T9"
+    assert task.name == "solo"
