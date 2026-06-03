@@ -549,6 +549,8 @@ class KanbanFlowClient:
             and self._reset is not None
         ):
             wait = self._reset - _now()
+            # Intentionally uncapped (unlike the 60s-capped 429 path): when remaining
+            # is exhausted we wait out the full window rather than risk the daily lock.
             if wait > 0:
                 _sleep(wait)
         self._daily_count += 1

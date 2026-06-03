@@ -16,10 +16,12 @@ from skills.jared.scripts.lib.kanbanflow_client import (
     KanbanFlowRateLimitError,
     KanbanFlowServerError,
     KfComment,
+    KfCustomFieldDef,
     KfCustomFieldValue,
     KfLabel,
     KfRelation,
     KfTask,
+    _parse_custom_field_def,
     _parse_task,
 )
 from tests.conftest import patch_kf
@@ -455,3 +457,61 @@ def test_update_task_wraps_number_value(monkeypatch: pytest.MonkeyPatch) -> None
     _client().update_task("T1", number_value=9)
     sent = json.loads(cast(bytes, calls[0]["data"]))
     assert sent["number"] == {"value": 9}
+
+
+def test_parse_custom_field_def_dropdown_and_number() -> None:
+    dd = _parse_custom_field_def(
+        {
+            "_id": "F1",
+            "name": "Priority",
+            "fieldType": "dropdown",
+            "dropdownOptions": [{"text": "High"}, {"text": "Low"}],
+        }
+    )
+    assert dd == KfCustomFieldDef(
+        id="F1",
+        name="Priority",
+        field_type="dropdown",
+        dropdown_options=["High", "Low"],
+        number_prefix=None,
+    )
+    num = _parse_custom_field_def(
+        {"_id": "F2", "name": "Budget", "fieldType": "number", "numberSettings": {"prefix": "$"}}
+    )
+    assert num.field_type == "number"
+    assert num.number_prefix == "$"
+    assert num.dropdown_options == []
+
+
+def test_list_custom_field_defs_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps(
+            [
+                {
+                    "_id": "F1",
+                    "name": "Priority",
+                    "fieldType": "dropdown",
+                    "dropdownOptions": [{"text": "High"}],
+                }
+            ]
+        ),
+    )
+    defs = _client().list_custom_field_defs()
+    assert len(defs) == 1
+    assert defs[0].field_type == "dropdown"
+    assert defs[0].dropdown_options == ["High"]
+
+
+def test_500_then_success_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    seq: list[tuple[int, dict[str, str], bytes]] = [
+        (500, {}, b'{"errors":[{"message":"oops"}]}'),
+        (200, {}, b'{"ok": true}'),
+    ]
+    sleeps: list[float] = []
+    monkeypatch.setattr(kf, "_sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
+    monkeypatch.setattr(kf, "_raw_http", lambda m, u, h, d: seq.pop(0))
+    result = _client()._request("GET", "/board")
+    assert result == {"ok": True}
+    assert len(sleeps) == 1  # one _backoff sleep before the successful retry

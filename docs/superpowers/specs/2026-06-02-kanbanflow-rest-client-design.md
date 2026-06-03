@@ -120,7 +120,7 @@ The unit suite is **offline by construction**, mirroring `tests/test_github_prov
 - `from_env()` raises a clear typed error when `KANBANFLOW_API_TOKEN` is unset; every request carries `Authorization: Bearer <token>`.
 - A proactive budget gate honors `X-RateLimit-Remaining`/`X-RateLimit-Reset` and refuses before the 5000/day ceiling; reactive `429` backoff retries off `X-RateLimit-Reset`; all sleeps are injectable.
 - A typed exception exists for each documented status (`401/403/404/429/500`), each parsing `{"errors":[{"message"}]}`.
-- `create_task` and `update_task` always send an explicit `number.value`; dropdown custom-field values are written by option **text**; labels go through the per-task `{name, pinned}` endpoints; relations are read-only.
+- `create_task` always sends an explicit `number.value` (the auto-assign guard); `update_task` sends `number` only when `number_value` is provided (partial POST); dropdown custom-field values are written by option **text**; labels go through the per-task `{name, pinned}` endpoints; relations are read-only.
 - Static reads (`/board`, `/custom-fields`, `/users`) are cached per-process with a `JARED_NO_CACHE` bypass.
 - Offline unit tests cover all of the above (monkeypatched `_raw_http`, patched `_sleep`, zero network); `pytest -m 'not integration'`, `ruff check .`, `ruff format .`, and `mypy --strict` are all clean.
 - **Non-goals respected:** no `KanbanFlowProvider`, no semantic mapping, no `number ↔ _id` index, no CLI/init wiring, no subtasks wrapper.
