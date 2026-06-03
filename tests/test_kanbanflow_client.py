@@ -139,3 +139,40 @@ def test_parse_task_handles_missing_optional_arrays() -> None:
     assert task.labels == []
     assert task.collaborators == []
     assert task.custom_fields == []
+
+
+def test_get_board_parses_structure(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_kf(
+        monkeypatch,
+        body=json.dumps(
+            {
+                "_id": "B1",
+                "name": "Board",
+                "columns": [{"uniqueId": "C1", "name": "To-do"}],
+                "swimlanes": [{"uniqueId": "S1", "name": "Team A", "description": "d"}],
+            }
+        ),
+    )
+    board = _client().get_board()
+    assert board.id == "B1"
+    assert board.columns[0].unique_id == "C1"
+    assert board.swimlanes[0].description == "d"
+
+
+def test_get_board_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(monkeypatch, body=json.dumps({"_id": "B1", "name": "B"}))
+    client = _client()
+    client.get_board()
+    client.get_board()
+    board_calls = [c for c in calls if str(c["url"]).endswith("/board")]
+    assert len(board_calls) == 1, "second get_board must hit the per-process cache"
+
+
+def test_jared_no_cache_bypasses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
+    calls = patch_kf(monkeypatch, body=json.dumps({"_id": "B1", "name": "B"}))
+    client = _client()
+    client.get_board()
+    client.get_board()
+    board_calls = [c for c in calls if str(c["url"]).endswith("/board")]
+    assert len(board_calls) == 2, "JARED_NO_CACHE=1 must defeat caching"

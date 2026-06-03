@@ -298,6 +298,7 @@ class KanbanFlowClient:
         self._remaining: int | None = None
         self._reset: int | None = None
         self._daily_count = 0
+        self._cache: dict[str, object] = {}
 
     @classmethod
     def from_env(cls, **kwargs: object) -> KanbanFlowClient:
@@ -362,6 +363,24 @@ class KanbanFlowClient:
             raise _EXCEPTION_FOR_STATUS.get(status, KanbanFlowError)(message)
 
         raise KanbanFlowRateLimitError("request retries exhausted")
+
+    def _cached_get(self, key: str, path: str) -> object:
+        if os.environ.get("JARED_NO_CACHE") != "1" and key in self._cache:
+            return self._cache[key]
+        raw = self._request("GET", path)
+        self._cache[key] = raw
+        return raw
+
+    def get_board(self) -> KfBoard:
+        return _parse_board(self._cached_get("board", "/board"))  # type: ignore[arg-type]
+
+    def list_custom_field_defs(self) -> list[KfCustomFieldDef]:
+        raw = self._cached_get("custom-fields", "/custom-fields")
+        return [_parse_custom_field_def(d) for d in raw]  # type: ignore[attr-defined]
+
+    def list_users(self) -> list[KfUser]:
+        raw = self._cached_get("users", "/users")
+        return [_parse_user(u) for u in raw]  # type: ignore[attr-defined]
 
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
