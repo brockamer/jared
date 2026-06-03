@@ -1,0 +1,207 @@
+# skills/jared/scripts/lib/kanbanflow_provider.py
+"""KanbanFlowProvider — BoardProvider over the KanbanFlow REST client (#316).
+
+All KanbanFlow ids (_id, columnId, swimlaneId, customFieldId) stay private here;
+the interface speaks only IssueRef (#N) and the neutral dataclasses. #N is
+resolved to the internal task _id via KfNumberIndex (no get-by-number endpoint).
+
+Capability set is reduced: KanbanFlow supports only the core board loop. See the
+design spec for the per-capability rationale.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from typing import Protocol
+
+from .board import FieldNotFound, ItemNotFound, OptionNotFound
+from .board_provider import BoardItem, Capability, IssueRef
+from .kanbanflow_client import KfBoard, KfCustomFieldDef, KfLabel, KfTask
+from .kf_number_index import KfNumberIndex
+
+# NOTE: later tasks add imports as they first use them — KanbanFlowNotFoundError
+# (Task 5), Edge + ClosedItem (Task 6), Milestone (Task 12). Each task keeps its
+# own ruff/mypy gate green; do not front-load these here (they would be unused
+# until their task and trip ruff F401).
+
+_BLOCKED_BY_PREFIX = "blocked-by:"
+
+# KanbanFlow advertises the full Capability set MINUS these. The remainder is
+# empty: KF supports only the core board loop. See the design spec.
+_OMITTED_CAPABILITIES = frozenset(
+    {
+        Capability.NATIVE_DEPENDENCIES,
+        Capability.MILESTONE_STATE,
+        Capability.VELOCITY_TIMESTAMPS,
+        Capability.MARKDOWN_BODY,
+        Capability.CLOSED_STATE,
+        Capability.MCP_TIER,
+        Capability.SUB_ISSUES,
+    }
+)
+
+
+class KanbanFlowClientLike(Protocol):
+    """The exact KanbanFlowClient surface KanbanFlowProvider depends on.
+
+    A consumer-owned structural interface (interface segregation): the real
+    KanbanFlowClient and the test FakeKanbanFlowClient both satisfy it without a
+    nominal base class, so the provider type-checks under `mypy --strict` whether
+    constructed with the production client or the in-memory fake. Declares only
+    the ~11 methods the provider actually calls.
+    """
+
+    def get_board(self) -> KfBoard: ...
+    def list_custom_field_defs(self) -> list[KfCustomFieldDef]: ...
+    def iter_all_tasks(self) -> list[KfTask]: ...
+    def get_task(self, task_id: str) -> KfTask: ...
+    def create_task(
+        self,
+        *,
+        name: str,
+        column_id: str,
+        number_value: int,
+        swimlane_id: str | None = None,
+        description: str | None = None,
+        color: str | None = None,
+        responsible_user_id: str | None = None,
+        labels: list[KfLabel] | None = None,
+    ) -> KfTask: ...
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        name: str | None = None,
+        column_id: str | None = None,
+        swimlane_id: str | None = None,
+        number_value: int | None = None,
+        description: str | None = None,
+        color: str | None = None,
+        responsible_user_id: str | None = None,
+    ) -> KfTask: ...
+    def delete_task(self, task_id: str) -> None: ...
+    def set_task_custom_field(
+        self, task_id: str, custom_field_id: str, value: str | float
+    ) -> None: ...
+    def add_comment(self, task_id: str, text: str) -> str: ...
+    def add_label(self, task_id: str, name: str) -> None: ...
+    def remove_label(self, task_id: str, name: str) -> None: ...
+
+
+class KanbanFlowProvider:
+    _CAPABILITIES = frozenset(Capability) - _OMITTED_CAPABILITIES  # == frozenset()
+
+    def __init__(
+        self,
+        *,
+        client: KanbanFlowClientLike,
+        board: KfBoard,
+        field_defs: list[KfCustomFieldDef],
+        index: KfNumberIndex,
+    ) -> None:
+        self._client = client
+        self._board = board
+        self._index = index
+        self._column_id_by_name = {c.name: c.unique_id for c in board.columns}
+        self._column_name_by_id = {c.unique_id: c.name for c in board.columns}
+        self._swimlane_id_by_name = {s.name: s.unique_id for s in board.swimlanes}
+        self._swimlane_name_by_id = {s.unique_id: s.name for s in board.swimlanes}
+        self._field_def_by_name = {d.name: d for d in field_defs}
+        self._field_name_by_id = {d.id: d.name for d in field_defs}
+
+    # --- introspection ---
+    def capabilities(self) -> frozenset[Capability]:
+        return self._CAPABILITIES
+
+    # --- private resolution helpers ---
+    def _column_id(self, status: str) -> str:
+        if status not in self._column_id_by_name:
+            available = ", ".join(sorted(self._column_id_by_name)) or "(none)"
+            raise FieldNotFound(
+                f"Status column '{status}' not on the board. Available: {available}"
+            )
+        return self._column_id_by_name[status]
+
+    def _swimlane_id(self, name: str) -> str:
+        if name not in self._swimlane_id_by_name:
+            available = ", ".join(sorted(self._swimlane_id_by_name)) or "(none)"
+            raise FieldNotFound(
+                f"Milestone (swimlane) '{name}' not on the board. Available: {available}"
+            )
+        return self._swimlane_id_by_name[name]
+
+    def _field_def(self, name: str) -> KfCustomFieldDef:
+        if name not in self._field_def_by_name:
+            available = ", ".join(sorted(self._field_def_by_name)) or "(none)"
+            raise FieldNotFound(f"Field '{name}' not on the board. Available: {available}")
+        return self._field_def_by_name[name]
+
+    def _check_option(self, field_name: str, value: str) -> KfCustomFieldDef:
+        definition = self._field_def(field_name)
+        if value not in definition.dropdown_options:
+            available = ", ".join(definition.dropdown_options) or "(none)"
+            raise OptionNotFound(
+                f"Option '{value}' not valid for field '{field_name}'. Available: {available}"
+            )
+        return definition
+
+    @staticmethod
+    def _parse_blocked_by(label_names: list[str]) -> list[int]:
+        out: list[int] = []
+        for name in label_names:
+            if name.startswith(_BLOCKED_BY_PREFIX):
+                with contextlib.suppress(ValueError):
+                    out.append(int(name[len(_BLOCKED_BY_PREFIX) :]))
+        return out
+
+    def _item_from_task(self, task: KfTask) -> BoardItem:
+        label_names = [label.name for label in task.labels]
+        priority: str | None = None
+        fields: dict[str, str] = {}
+        for cf in task.custom_fields:
+            field_name = self._field_name_by_id.get(cf.custom_field_id)
+            if field_name is None:
+                continue
+            if field_name == "Priority":
+                priority = str(cf.value)
+            else:
+                fields[field_name] = str(cf.value)
+        return BoardItem(
+            number=task.number_value or 0,
+            title=task.name,
+            status=self._column_name_by_id.get(task.column_id) if task.column_id else None,
+            priority=priority,
+            body=task.description,
+            labels=[n for n in label_names if not n.startswith(_BLOCKED_BY_PREFIX)],
+            milestone=self._swimlane_name_by_id.get(task.swimlane_id) if task.swimlane_id else None,
+            blocked_by=sorted(self._parse_blocked_by(label_names)),
+            assignee=task.responsible_user_id,
+            fields=fields,
+            provider_ref=task.id,
+        )
+
+    # --- index plumbing ---
+    def _reseed_index(self) -> None:
+        mapping = {
+            t.number_value: t.id
+            for t in self._client.iter_all_tasks()
+            if t.number_value is not None
+        }
+        self._index.replace(mapping)
+
+    def _ensure_seeded(self) -> None:
+        if self._index.is_empty():
+            self._reseed_index()
+
+    def _resolve_id(self, ref: IssueRef) -> str:
+        task_id = self._index.get(ref)
+        if task_id is None:
+            self._reseed_index()
+            task_id = self._index.get(ref)
+        if task_id is None:
+            raise ItemNotFound(f"#{ref} not found on the KanbanFlow board")
+        return task_id
+
+    def _set_custom_field(self, field_name: str, value: str, task_id: str) -> None:
+        definition = self._check_option(field_name, value)
+        self._client.set_task_custom_field(task_id, definition.id, value)
