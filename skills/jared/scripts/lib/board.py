@@ -1691,6 +1691,14 @@ def compute_velocity(
     from statistics import median
 
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    # Guard against silent truncation: gh caps the result at --limit. An at-limit
+    # count means the window almost certainly overflowed, so the medians (and the
+    # milestone dates they anchor in /jared-audit) would compute over a capped
+    # snapshot and undercount velocity. Raise rather than trust it — mirrors
+    # GitHubProjectsProvider.recently_closed's guard (same limit). 200 sits well
+    # clear of this repo's real cadence (~90 closed / ~70 merged per 14d window),
+    # so it fires only on a genuine velocity anomaly, not the common path.
+    limit = 200
     issues_args = [
         "issue",
         "list",
@@ -1703,9 +1711,15 @@ def compute_velocity(
         "--json",
         "number,createdAt,closedAt",
         "--limit",
-        "100",
+        str(limit),
     ]
     closed = run_gh(issues_args, cache=cache) or []
+    if len(closed) == limit:
+        raise GhInvocationError(
+            f"gh issue list --state closed returned exactly {limit} items "
+            f"in the last {days}d — likely truncated. Velocity would undercount; "
+            f"narrow the window or paginate. Do not trust this snapshot."
+        )
 
     prs_args = [
         "pr",
@@ -1719,9 +1733,15 @@ def compute_velocity(
         "--json",
         "number,createdAt,mergedAt",
         "--limit",
-        "100",
+        str(limit),
     ]
     merged = run_gh(prs_args, cache=cache) or []
+    if len(merged) == limit:
+        raise GhInvocationError(
+            f"gh pr list --state merged returned exactly {limit} items "
+            f"in the last {days}d — likely truncated. Velocity would undercount; "
+            f"narrow the window or paginate. Do not trust this snapshot."
+        )
 
     def _days_between(start: str, end: str) -> float:
         s = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))

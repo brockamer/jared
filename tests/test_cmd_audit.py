@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from skills.jared.scripts.lib.board import compute_velocity
+from skills.jared.scripts.lib.board import GhInvocationError, compute_velocity
 from tests.conftest import patch_gh_by_arg
 
 EMPTY_BLOCKED_BY_PAYLOAD = json.dumps(
@@ -109,6 +109,61 @@ def test_compute_velocity_pr_duration(monkeypatch: pytest.MonkeyPatch) -> None:
     velocity = compute_velocity("brockamer/jared")
 
     assert velocity["median_pr_duration_days"] == 2.0
+
+
+def test_compute_velocity_raises_when_closures_hit_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A closed-issue list returned at exactly the gh --limit is treated as
+    truncated: compute_velocity raises rather than compute medians over a
+    silently-capped snapshot. Undercounting velocity skews proposed milestone
+    dates conservative — against this repo's documented aggressive-date pref.
+
+    The fixture size (200) must match the `--limit` in compute_velocity.
+    """
+    closed_at_limit = json.dumps(
+        [
+            {
+                "number": n,
+                "createdAt": "2026-05-10T00:00:00Z",
+                "closedAt": "2026-05-20T00:00:00Z",
+            }
+            for n in range(200)
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"--state closed": closed_at_limit, "pr list": "[]"},
+    )
+
+    with pytest.raises(GhInvocationError, match="truncat"):
+        compute_velocity("brockamer/jared")
+
+
+def test_compute_velocity_raises_when_prs_hit_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The merged-PR list is guarded identically to the closed-issue list:
+    an at-limit result is treated as truncated and raises. Closed issues come
+    back under-limit here so the PR path is the one exercised.
+    """
+    merged_at_limit = json.dumps(
+        [
+            {
+                "number": n,
+                "createdAt": "2026-05-18T00:00:00Z",
+                "mergedAt": "2026-05-20T00:00:00Z",
+            }
+            for n in range(200)
+        ]
+    )
+    patch_gh_by_arg(
+        monkeypatch,
+        {"--state closed": "[]", "pr list": merged_at_limit},
+    )
+
+    with pytest.raises(GhInvocationError, match="truncat"):
+        compute_velocity("brockamer/jared")
 
 
 def test_fetch_audit_window_count_returns_oldest_first(
