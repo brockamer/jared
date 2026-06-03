@@ -187,3 +187,47 @@ def test_add_to_board_applies_status_priority_fields_labels(tmp_path: Path) -> N
     assert item.priority == "Medium"
     assert item.fields == {"Work Stream": "beta"}
     assert "session-2" in item.labels
+
+
+def _filed(provider: KanbanFlowProvider, **kw: object) -> int:
+    item = provider.file(title="t", body="", priority="Low", status="Backlog", **kw)  # type: ignore[arg-type]
+    return item.number
+
+
+def test_set_field_updates_custom_field(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.set_field(n, "Work Stream", "beta")
+    assert provider.get_item(n).fields == {"Work Stream": "beta"}  # type: ignore[union-attr]
+
+
+def test_move_changes_status_column(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.move(n, "In Progress")
+    assert provider.get_item(n).status == "In Progress"  # type: ignore[union-attr]
+
+
+def test_set_body_updates_description(tmp_path: Path) -> None:
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.set_body(n, "new body")
+    assert provider.get_body(n) == "new body"
+
+
+def test_comment_adds_and_returns_id(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    n = _filed(provider)
+    cid = provider.comment(n, "a note")
+    assert cid
+    task_id = provider._index.get(n)
+    assert client.list_comments(task_id)[-1].text == "a note"  # type: ignore[arg-type]
+
+
+def test_close_comments_then_moves_to_done(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    n = _filed(provider)
+    provider.close(n, comment="closing")
+    assert provider.get_item(n).status == "Done"  # type: ignore[union-attr]
+    task_id = provider._index.get(n)
+    assert client.list_comments(task_id)[-1].text == "closing"  # type: ignore[arg-type]
