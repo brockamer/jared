@@ -1303,6 +1303,15 @@ Expected: FAIL
 
 ```python
     def set_field(self, ref: IssueRef, field_name: str, value: str) -> None:
+        # "Status" is a structural column on KanbanFlow, not a custom field. The
+        # CLI drives Status changes through set_field (jared move -> _cmd_set ->
+        # set_field, and `jared set N Status`), mirroring GitHub where move() IS
+        # set_field("Status"). Route Status to the column move so both CLI paths
+        # work. (Caught by the Phase-3 final review; add a CLI-dispatch test for
+        # `jared move` on a KF backend, not just a direct provider.move() test.)
+        if field_name == "Status":
+            self.move(ref, value)
+            return
         self._set_custom_field(field_name, value, self._resolve_id(ref))
 
     def move(self, ref: IssueRef, status: str) -> None:
