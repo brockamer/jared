@@ -45,7 +45,7 @@ The batch scripts (`sweep.py`, `bootstrap-project.py`, `archive-plan.py`, `captu
 Any board operation picks the highest-precision tool available at runtime:
 
 1. **MCP first.** If the GitHub MCP server is loaded, prefer its typed tools for issues/projects. Conversational code should check `tool_search` before shelling out.
-2. **`jared` CLI second.** `skills/jared/scripts/jared` is a Python entry point (argparse) that orchestrates the multi-step GitHub operations that are error-prone to stitch together by hand — `file`, `move`, `set`, `close`, `comment`, `blocked-by`, `get-item`, `summary`. Each subcommand owns an invariant (e.g., `file` guarantees "issue on board AND Status set" atomically; `close` verifies auto-move to Done and falls back to explicit Status=Done).
+2. **`jared` CLI second.** `skills/jared/scripts/jared` is a Python entry point (argparse) that orchestrates the multi-step GitHub operations that are error-prone to stitch together by hand. The core surface is `file`, `move`, `set`, `close`, `comment`, `blocked-by`, `get-item`, `summary`, plus internal/automation helpers (`add-to-board`, `ties`, `next-session-prompt`, `wrap-state`, `session-resolve`, `session-lock-write`, `session-lock-clear`, `worktree-add`, `propose-partition`, `audit`) — ~18 subcommands in all. Each subcommand owns an invariant (e.g., `file` guarantees "issue on board AND Status set" atomically; `close` verifies auto-move to Done and falls back to explicit Status=Done).
 3. **Raw `gh` CLI fallback.** Documented in `skills/jared/references/operations.md` for cases the CLI doesn't cover.
 
 Python subprocesses can't call MCP tools, so batch scripts (`sweep.py` et al.) use `gh` directly. That's deliberate — interactive conversations choose MCP; batch jobs use `gh`.
@@ -86,8 +86,8 @@ These aren't just docs — the CLI validates them:
 
 ```
 .claude-plugin/           plugin.json + marketplace.json (self-hosted single-plugin marketplace)
-commands/                 Slash-command stubs (/jared, /jared-file, /jared-groom, /jared-init,
-                          /jared-reshape, /jared-stage, /jared-start, /jared-wrap)
+commands/                 Slash-command stubs (/jared, /jared-audit, /jared-file, /jared-groom,
+                          /jared-init, /jared-reshape, /jared-stage, /jared-start, /jared-wrap)
 skills/jared/
   SKILL.md                The skill contract — what Jared is, when to trigger, the discipline
   references/             Loaded on demand: operations.md, structural-review.md, board-sweep.md,

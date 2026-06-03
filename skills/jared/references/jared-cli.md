@@ -210,6 +210,43 @@ leaves the issue in place for a human to reconcile.
 
 ---
 
+## `jared add-to-board <issue_number> --priority ... [--status ...] [--label ...] [--field ...]`
+
+**Purpose.** Add an *existing* issue to the board and set its required fields —
+Priority + Status (+ any extra single-select fields). Idempotent, so it is safe
+to re-run. Two uses: the **recovery path** when `jared file` fails *after* the
+issue is created (the issue exists but never made it onto the board), and a
+**standalone** add for issues created outside `jared file` (e.g. `gh issue
+create`, or an issue opened in the GitHub UI).
+
+```
+# Recovery / standalone add with the required Priority:
+jared add-to-board 42 --priority High
+
+# Land it directly in a column, with labels and an extra field:
+jared add-to-board 42 --priority Medium --status "Up Next" \
+  --label enhancement --field "Work Stream=Planning"
+```
+
+**Arguments:**
+
+| Flag | Required | Notes |
+|---|---|---|
+| `issue_number` | yes | Positional. The existing issue to add to the board. |
+| `--priority {High,Medium,Low}` | yes | Enforced — an issue added without Priority sorts to the bottom with null Status and effectively disappears. |
+| `--status` | no | Any Status column. Default: `Backlog`. |
+| `--label` | no | Repeatable issue label. |
+| `--field` | no | Repeatable `NAME=VALUE` for additional single-select fields (e.g. `Work Stream=Planning`). |
+
+**Why it exists.** `jared file` is create + add + set-fields as one atom; if it
+fails *after* the GitHub issue is created, the issue is stranded off the board.
+`add-to-board` is the idempotent re-entry point that finishes the job — which is
+why `sweep.py` and `references/board-sweep.md` hand it to the operator as
+paste-able recovery copy. It takes no `--milestone` flag; milestone assignment
+lives on `jared file` (or raw `gh issue edit --milestone`).
+
+---
+
 ## `jared blocked-by <dependent> <blocker> [--remove]`
 
 **Purpose.** Add or remove a native GitHub `blockedBy` edge between two
