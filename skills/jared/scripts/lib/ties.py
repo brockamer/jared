@@ -27,6 +27,11 @@ SignalName = Literal[
     # the announce so deterministic and semantic ties don't cross-contaminate.
     "possibly_already_done",
     "semantic_overlap",
+    # Same new module two in-flight/staged issues both describe building a
+    # not-yet-existing module/file that neither body cites as a path, so the
+    # cohesion-first partitioner can't co-locate them (#332). Conversational
+    # only — surfaced at /jared-stage and /jared-start, never computed here.
+    "shared_new_module",
 ]
 Confidence = Literal["strong", "medium", "weak", "llm"]
 # Threshold and Confidence model different roles (filter cutoff vs. signal
@@ -62,6 +67,7 @@ _SIGNAL_PRIORITY: dict[SignalName, int] = {
     "labels": 5,
     "possibly_already_done": 6,
     "semantic_overlap": 7,
+    "shared_new_module": 8,
 }
 
 # Score cap so a single candidate firing every signal doesn't dominate sorting.
@@ -417,6 +423,7 @@ _RELATIONSHIP_LABELS: dict[SignalName, str] = {
     # LLM-overlay labels mirror the SignalName for clarity in rendered output.
     "possibly_already_done": "possibly-already-done",
     "semantic_overlap": "semantic-overlap",
+    "shared_new_module": "shared-new-module",
 }
 
 

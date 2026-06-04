@@ -120,6 +120,7 @@ Flow:
 
    - **possibly-already-done** — another issue substantially covers the target's scope. Look at recent closures (last 7 days surfaced by `jared next-session-prompt`) and the active Backlog.
    - **semantic-overlap** — another open issue covers meaningfully overlapping scope (not merely milestone-mate or shared-label adjacency — those are deterministic-tier signals already covered).
+   - **shared-new-module** — another in-flight or staged issue describes building the same *new* module/file that neither body cites as a path yet, so the cohesion-first partitioner can't co-locate them. Distinct from semantic-overlap: the two issues may be entirely different features that nonetheless collide on a shared helper. Most relevant under parallel sessions; the remedy is to co-locate the pair into one session or extract the module precursor-first with `blocked-by` edges. See `references/parallel-sessions.md` § "Same new module".
 
    When something stands out, render it in a separate sub-block after the deterministic ties, mirroring the deterministic block's `[<confidence>, <label>]` shape with `llm` as the confidence tier:
 
@@ -127,9 +128,10 @@ Flow:
    Semantic ties (advisory):
      #N [llm, semantic-overlap]   <one-line rationale>
      #M [llm, possibly-already-done]   <one-line rationale>
+     #K [llm, shared-new-module]   both describe a new "<helper>" neither body cites as a path
    ```
 
-   Be strict — empty is the right and expected answer when nothing semantic stands out. The `llm` confidence value exists in `lib/ties.py`'s `Confidence` literal precisely so this prose-rendered tag stays consistent with the deterministic block's tagging convention.
+   Be strict — empty is the right and expected answer when nothing semantic stands out. The `llm` confidence value exists in `lib/ties.py`'s `Confidence` literal precisely so this prose-rendered tag stays consistent with the deterministic block's tagging convention; `shared_new_module` is a member of the `SignalName` literal for the same reason (#332).
 
    This intentionally lives in the conversational layer rather than as a Python LLM call inside `jared ties`. The active Claude session already has the full context; spending API tokens on a fresh subprocess to redo work the conversation can do natively is duplicative. See `references/llm-assistance.md` (when filed per #123) for the broader doctrine on LLM-in-CLI vs LLM-in-conversation.
 
