@@ -66,27 +66,36 @@ Flow:
 
 2. **Capture stdout.** The CLI emits a per-session block showing `keep` (existing labels honored) and `add` (no existing label, partition proposes one), plus a `floats` block for candidates with no surface signal.
 
-3. **Display verbatim, voice-wrapped:**
+3. **Run the shared-new-module scan (conversational).** Before displaying, read the candidate bodies — the `floats` especially — and flag any pair that describes building the **same not-yet-existing module** in prose, even though neither cites a path (so the deterministic partitioner floated them apart). This is your judgment, not the CLI's; see **Shared-new-module scan** below. Render hits as a sub-block mirroring the `[llm, <label>]` shape. Empty is the common, expected answer.
+
+4. **Display verbatim, voice-wrapped:**
 
    > Looking at the partition for sessions 1 and 2 — here's what I'd propose based on file paths in the issue bodies:
    >
    > [verbatim CLI output]
    >
+   > [if the scan found anything, append:]
+   >
+   > Shared-new-module (advisory):
+   >   #984 ↔ #985 [llm, shared-new-module]   both describe a "probe helper" neither body cites as a path
+   >
    > Approve? (`y` to apply all additions / `edit #N session=K` to override / `skip` to leave everything as-is)
 
-4. **On `y`:** apply each `add` assignment with:
+5. **On `y`:** apply each `add` assignment with:
 
    ```bash
    gh issue edit <N> --add-label session-K --repo <owner>/<repo>
    ```
 
-5. **On `edit #N session=K`:** apply the operator's override for that issue, then continue applying the remaining `add` entries.
+6. **On `edit #N session=K`:** apply the operator's override for that issue, then continue applying the remaining `add` entries.
 
-6. **On `skip`:** do nothing; the partition is unchanged.
+7. **On `skip`:** do nothing; the partition is unchanged.
 
 **Honoring existing labels.** The partition algorithm never overrides an existing `session-N` label. To re-balance, the operator removes the label manually and re-runs `/jared-stage --sessions N`.
 
 **Single signal.** v1 uses only file paths cited in issue bodies. Two candidates whose bodies share a path are presumed to touch overlapping code. Issues with no paths in their body float (no label proposed) — they appear in the `floats` block for manual assignment.
+
+**Shared-new-module scan (conversational, #332).** The single deterministic signal is blind to a module that doesn't exist yet: when two candidates will both *create* the same new file, neither body cites its path, so both float and the partitioner scatters them across sessions. The duplicate then surfaces only as an add/add conflict at `/jared-wrap`, or a conflicting PR after one session's precursor merges. Because the active session already holds the candidate bodies, catch it here in conversation (step 3) rather than in a Python subprocess — read the `floats` for pairs whose prose describes the same not-yet-existing module (e.g. both say "a shared probe helper"), and surface them with the `[llm, shared-new-module]` tag. On a hit, the operator co-locates the pair into one session or extracts the module precursor-first. See `references/parallel-sessions.md` § "Same new module" for the remedies and the full rationale.
 
 ## Flags
 

@@ -156,6 +156,40 @@ its argparse block), lift *that* region into a focused module as part of that
 issue's work. The monolith shrinks where it's hottest, with no dedicated
 big-bang split — which would itself be the kind of sprawl this project avoids.
 
+### Same new module: two sessions creating the same file
+
+The concession above is about an *existing* hot file. A sharper, harder-to-see
+variant is two in-flight or staged issues that will both create the **same new**
+module. The cohesion-first partitioner (`scripts/lib/partition.py`) can't
+co-locate them, because the path is in *neither* body yet — it doesn't exist, so
+both issues float (no surface signal) and scatter across sessions by load. The
+duplicate then surfaces only as an add/add merge conflict at `/jared-wrap`, or
+worse, as a conflicting PR after a sibling's precursor merges mid-session.
+(Motivating scar: findajob #984 / #985 both hand-built the same probe helper;
+the precursor that owned it, PR #1023, was created ~50h *after* the consumers,
+so no shared path and no `blocked-by` edge existed at staging time.)
+
+Two remedies, in preference order, for when you **recognize** the shared module:
+
+- **Precursor-first (preferred).** File the shared module as its own precursor
+  issue and add native `blocked-by` edges from the consumers. This is the only
+  remedy that yields a *mechanical* guard: `stage.has_no_open_blockers`
+  sequences the precursor first, and the consumers inherit the built module
+  instead of racing to create it.
+- **Name-the-path (lighter fallback).** If you can already name the concrete
+  file path, cite it in *both* consumer bodies. The cohesion-first partitioner
+  then co-locates them into one session automatically — no precursor issue
+  needed.
+
+The common case, though, is the one the episode's timing shows: you *didn't*
+foresee the shared module, so neither remedy was applied at filing. The net for
+that is a conversational **`shared-new-module` tie** — when two in-flight/staged
+bodies describe building the same not-yet-existing module in prose, `/jared-stage`
+and `/jared-start` surface the pair (advisory, `[llm, shared-new-module]`), and
+the operator co-locates them or applies a remedy retroactively. The scan is the
+only signal that fires at the decisive moment, because it reads prose, not paths
+or edges — see `/jared-stage` and `/jared-start` step 6 for where it runs.
+
 ## Triggers for the worktree default
 
 - Operator explicitly says "the other session is working #X, you start #Y."
