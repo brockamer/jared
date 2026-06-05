@@ -250,9 +250,17 @@ def test_get_task_returns_single(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_task_always_sends_explicit_number(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = patch_kf(
+    calls = _make_routing_fake(
         monkeypatch,
-        body=json.dumps({"_id": "T1", "name": "n", "columnId": "C1", "number": {"value": 7}}),
+        {
+            ("POST", "/tasks"): {"taskId": "T1", "taskNumber": {"value": 7}},
+            ("GET", "/tasks/T1"): {
+                "_id": "T1",
+                "name": "n",
+                "columnId": "C1",
+                "number": {"value": 7},
+            },
+        },
     )
     task = _client().create_task(name="n", column_id="C1", number_value=7)
     sent = json.loads(cast(bytes, calls[0]["data"]))
@@ -264,9 +272,12 @@ def test_create_task_always_sends_explicit_number(monkeypatch: pytest.MonkeyPatc
 def test_update_task_uses_post_and_includes_only_given_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = patch_kf(
+    calls = _make_routing_fake(
         monkeypatch,
-        body=json.dumps({"_id": "T1", "name": "renamed", "columnId": "C2"}),
+        {
+            ("POST", "/tasks/T1"): None,
+            ("GET", "/tasks/T1"): {"_id": "T1", "name": "renamed", "columnId": "C2"},
+        },
     )
     _client().update_task("T1", name="renamed", column_id="C2")
     assert calls[0]["method"] == "POST"
@@ -441,9 +452,17 @@ def test_429_exhaustion_raises_rate_limit_error(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_create_task_serializes_labels(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = patch_kf(
+    calls = _make_routing_fake(
         monkeypatch,
-        body=json.dumps({"_id": "T1", "name": "n", "columnId": "C1", "number": {"value": 7}}),
+        {
+            ("POST", "/tasks"): {"taskId": "T1", "taskNumber": {"value": 7}},
+            ("GET", "/tasks/T1"): {
+                "_id": "T1",
+                "name": "n",
+                "columnId": "C1",
+                "number": {"value": 7},
+            },
+        },
     )
     _client().create_task(
         name="n", column_id="C1", number_value=7, labels=[KfLabel(name="Priority", pinned=True)]
@@ -453,7 +472,13 @@ def test_create_task_serializes_labels(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_update_task_wraps_number_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = patch_kf(monkeypatch, body=json.dumps({"_id": "T1", "name": "n", "columnId": "C1"}))
+    calls = _make_routing_fake(
+        monkeypatch,
+        {
+            ("POST", "/tasks/T1"): None,
+            ("GET", "/tasks/T1"): {"_id": "T1", "name": "n", "columnId": "C1"},
+        },
+    )
     _client().update_task("T1", number_value=9)
     sent = json.loads(cast(bytes, calls[0]["data"]))
     assert sent["number"] == {"value": 9}
@@ -518,8 +543,105 @@ def test_500_then_success_retries(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_update_task_sends_swimlane_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = patch_kf(monkeypatch, status=200, body=json.dumps({"_id": "T1", "name": "x"}))
+    calls = _make_routing_fake(
+        monkeypatch,
+        {
+            ("POST", "/tasks/T1"): None,
+            ("GET", "/tasks/T1"): {"_id": "T1", "name": "x", "columnId": "C1"},
+        },
+    )
     _client().update_task("T1", swimlane_id="SW2")
     # The POST body must carry swimlaneId.
-    sent = json.loads(cast(bytes, calls[-1]["data"]))
+    sent = json.loads(cast(bytes, calls[0]["data"]))
     assert sent["swimlaneId"] == "SW2"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: create_task and update_task live write-endpoint shapes
+# ---------------------------------------------------------------------------
+
+_FULL_TASK_T1 = {
+    "_id": "T1",
+    "name": "My Task",
+    "columnId": "C1",
+    "number": {"value": 5},
+}
+
+
+def _make_routing_fake(
+    monkeypatch: pytest.MonkeyPatch,
+    routes: dict[tuple[str, str], object],
+) -> list[dict[str, object]]:
+    """Patch _raw_http to dispatch by (method, path-suffix) from `routes`.
+
+    Each key is (METHOD, url_suffix) e.g. ("POST", "/tasks") or ("GET", "/tasks/T1").
+    The value is the response body (any JSON-serialisable object, including None).
+    Returns a list of recorded call dicts for assertions.
+    """
+    import skills.jared.scripts.lib.kanbanflow_client as _kf
+
+    calls: list[dict[str, object]] = []
+
+    def fake(
+        method: str, url: str, hdrs: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        calls.append({"method": method, "url": url, "headers": hdrs, "data": data})
+        for (route_method, suffix), body_obj in routes.items():
+            if method == route_method and url.endswith(suffix):
+                encoded = json.dumps(body_obj).encode() if body_obj is not None else b""
+                return 200, {}, encoded
+        raise AssertionError(f"Unexpected request: {method} {url}")
+
+    monkeypatch.setattr(_kf, "_raw_http", fake)
+    monkeypatch.setattr(_kf, "_sleep", lambda _s: None)
+    monkeypatch.setattr(_kf, "_now", lambda: 1_000_000)
+    return calls
+
+
+def test_create_task_follows_up_with_get_after_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /tasks returns {taskId, taskNumber}, not a full task.
+
+    create_task must re-fetch via GET /tasks/{id} and return the parsed KfTask.
+    """
+    calls = _make_routing_fake(
+        monkeypatch,
+        {
+            ("POST", "/tasks"): {"taskId": "T1", "taskNumber": {"value": 5}},
+            ("GET", "/tasks/T1"): _FULL_TASK_T1,
+        },
+    )
+    task = _client().create_task(name="My Task", column_id="C1", number_value=5)
+
+    assert isinstance(task, KfTask)
+    assert task.id == "T1"
+    assert task.name == "My Task"
+    assert task.column_id == "C1"
+    assert task.number_value == 5
+
+    methods = [str(c["method"]) for c in calls]
+    assert methods == ["POST", "GET"], "create_task must POST to /tasks then GET the created task"
+
+
+def test_update_task_follows_up_with_get_after_null_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /tasks/{id} (update) returns null, not a full task.
+
+    update_task must re-fetch via GET /tasks/{id} and return the parsed KfTask
+    without crashing on the null update response.
+    """
+    calls = _make_routing_fake(
+        monkeypatch,
+        {
+            ("POST", "/tasks/T1"): None,
+            ("GET", "/tasks/T1"): {**_FULL_TASK_T1, "columnId": "C2"},
+        },
+    )
+    task = _client().update_task("T1", column_id="C2")
+
+    assert isinstance(task, KfTask)
+    assert task.id == "T1"
+    assert task.column_id == "C2"
+
+    methods = [str(c["method"]) for c in calls]
+    assert methods == ["POST", "GET"], (
+        "update_task must POST to /tasks/{id} then GET the updated task"
+    )
