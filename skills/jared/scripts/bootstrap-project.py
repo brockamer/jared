@@ -770,10 +770,15 @@ def main_guard(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Non
 _CANONICAL_STATUSES = ("Backlog", "Up Next", "In Progress", "Blocked", "Done")
 
 
-def map_status_columns(board: KfBoard) -> tuple[dict[str, str], list[str]]:
+def map_status_columns(
+    board: KfBoard, *, assume_yes: bool = False
+) -> tuple[dict[str, str], list[str]]:
     """Auto-map exact column-name matches; interview for the rest. 1:1.
 
-    Returns (status->column map, leftover-unmapped-column-names).
+    Returns (status->column map, leftover-unmapped-column-names). When
+    `assume_yes` is set (non-interactive run) and some Status has no exact-name
+    column, fails cleanly listing what needs mapping rather than blocking on
+    input().
     """
     col_names = [c.name for c in board.columns]
     mapping: dict[str, str] = {}
@@ -782,9 +787,16 @@ def map_status_columns(board: KfBoard) -> tuple[dict[str, str], list[str]]:
         if status in col_names:
             mapping[status] = status
             used.add(status)
-    for status in _CANONICAL_STATUSES:
-        if status in mapping:
-            continue
+    needs_interview = [s for s in _CANONICAL_STATUSES if s not in mapping]
+    if needs_interview and assume_yes:
+        print(
+            "bootstrap: cannot map non-interactively — these Statuses have no "
+            f"exact-name column and need mapping: {', '.join(needs_interview)}. "
+            "Re-run without --yes to map them, or rename the board's columns to match.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    for status in needs_interview:
         choices = [n for n in col_names if n not in used]
         print(f'\nWhich column is "{status}"?')
         for i, n in enumerate(choices, 1):
@@ -798,8 +810,11 @@ def map_status_columns(board: KfBoard) -> tuple[dict[str, str], list[str]]:
             chosen = choices[n - 1]
         else:
             chosen = raw
-        if chosen not in col_names:
-            print(f"bootstrap: '{chosen}' is not a column on this board", file=sys.stderr)
+        if chosen not in col_names or chosen in used:
+            print(
+                f"bootstrap: '{chosen}' is not an available (unused) column on this board",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
         mapping[status] = chosen
         used.add(chosen)
@@ -860,7 +875,7 @@ def bootstrap_kanbanflow(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Connected to KanbanFlow board: {board.name} ({board.id})")
-    status_map, unmapped = map_status_columns(board)
+    status_map, unmapped = map_status_columns(board, assume_yes=args.yes)
     validate_priority_field(field_defs)
 
     if unmapped:
