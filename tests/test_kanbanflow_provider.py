@@ -304,3 +304,121 @@ def test_get_item_reseeds_index_on_cold_miss(tmp_path: Path) -> None:
     item = provider.get_item(7)
     assert item is not None and item.number == 7
     assert provider._index.get(7) is not None
+
+
+def _gtd_client() -> FakeKanbanFlowClient:
+    """A board whose columns are NOT jared's canonical names."""
+    from skills.jared.scripts.lib.kanbanflow_client import KfBoard, KfColumn, KfCustomFieldDef
+
+    board = KfBoard(
+        id="B1",
+        name="GTD",
+        columns=[
+            KfColumn(unique_id="c-someday", name="Someday"),
+            KfColumn(unique_id="c-soon", name="Planned Soon"),
+            KfColumn(unique_id="c-now", name="Doing Now"),
+            KfColumn(unique_id="c-blk", name="Blocked"),
+            KfColumn(unique_id="c-complete", name="Complete"),  # Done renamed
+        ],
+    )
+    fields = [
+        KfCustomFieldDef(
+            id="cf-priority",
+            name="Priority",
+            field_type="dropdown",
+            dropdown_options=["High", "Medium", "Low"],
+        ),
+    ]
+    return FakeKanbanFlowClient(board=board, field_defs=fields)
+
+
+_GTD_MAP = {
+    "Backlog": "Someday",
+    "Up Next": "Planned Soon",
+    "In Progress": "Doing Now",
+    "Blocked": "Blocked",
+    "Done": "Complete",
+}
+
+
+def test_status_map_move_writes_mapped_column(tmp_path: Path) -> None:
+    client = _gtd_client()
+    index = KfNumberIndex(tmp_path / "kf-index-B1.json")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+        status_column_map=_GTD_MAP,
+    )
+    task = client.create_task(name="x", column_id="c-someday", number_value=5)
+    provider._index.put(5, task.id)
+    provider.move(5, "In Progress")
+    assert client.get_task(task.id).column_id == "c-now"
+
+
+def test_status_map_get_item_reports_canonical_status(tmp_path: Path) -> None:
+    client = _gtd_client()
+    index = KfNumberIndex(tmp_path / "kf-index-B1.json")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+        status_column_map=_GTD_MAP,
+    )
+    task = client.create_task(name="x", column_id="c-now", number_value=6)
+    provider._index.put(6, task.id)
+    assert provider.get_item(6).status == "In Progress"  # type: ignore[union-attr]
+
+
+def test_status_map_list_open_excludes_mapped_done(tmp_path: Path) -> None:
+    # The regression guard: Done is mapped from "Complete". A task there must
+    # be excluded from open items. An identity Done->Done fake would pass even
+    # with the map unwired — this renamed-Done case is what proves the wiring.
+    client = _gtd_client()
+    index = KfNumberIndex(tmp_path / "kf-index-B1.json")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+        status_column_map=_GTD_MAP,
+    )
+    client.create_task(name="done", column_id="c-complete", number_value=7)
+    client.create_task(name="open", column_id="c-now", number_value=8)
+    nums = {it.number for it in provider.list_open_items()}
+    assert 8 in nums
+    assert 7 not in nums
+
+
+def test_expected_board_id_mismatch_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = FakeKanbanFlowClient()
+    index = KfNumberIndex(tmp_path / "kf-index-B1.json")
+    KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+        expected_board_id="some-other-board",
+    )
+    assert "some-other-board" in capsys.readouterr().err
+
+
+def test_status_map_missing_mapped_column_raises_on_move(tmp_path: Path) -> None:
+    client = _gtd_client()
+    index = KfNumberIndex(tmp_path / "kf-index-B1.json")
+    bad_map = dict(_GTD_MAP, Done="No Such Column")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+        status_column_map=bad_map,
+    )
+    task = client.create_task(name="x", column_id="c-now", number_value=9)
+    provider._index.put(9, task.id)
+    with pytest.raises(FieldNotFound):
+        provider.move(9, "Done")

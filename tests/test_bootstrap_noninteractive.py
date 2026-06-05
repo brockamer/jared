@@ -10,6 +10,8 @@ input() raises EOFError. Two flags make the script usable non-interactively:
 Both are optional; omitting them leaves the script interactive.
 """
 
+import pytest
+
 from tests.conftest import import_bootstrap
 
 
@@ -39,3 +41,22 @@ def test_parse_work_streams_empty_is_empty_list() -> None:
     mod = import_bootstrap()
     assert mod.parse_work_streams("") == []
     assert mod.parse_work_streams("  ,  ,") == []
+
+
+def test_url_with_kanbanflow_is_rejected() -> None:
+    # --url + kanbanflow is enforced in main_guard() via parser.error (SystemExit),
+    # not at parse time; parse the args then assert the cross-field guard fires.
+    b = import_bootstrap()
+    parser = b.build_parser()
+    args = parser.parse_args(["--backend", "kanbanflow", "--repo", "o/r", "--url", "https://x"])
+    assert args.backend == "kanbanflow" and args.url == "https://x"
+    with pytest.raises(SystemExit):
+        b.main_guard(args, parser)
+
+
+def test_backend_defaults_to_github() -> None:
+    b = import_bootstrap()
+    args = b.build_parser().parse_args(
+        ["--url", "https://github.com/users/o/projects/4", "--repo", "o/r"]
+    )
+    assert args.backend == "github"
