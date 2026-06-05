@@ -456,7 +456,9 @@ class KanbanFlowClient:
         if labels:
             body["labels"] = [{"name": label.name, "pinned": label.pinned} for label in labels]
         raw = self._request("POST", "/tasks", body=body)
-        return _parse_task(raw)  # type: ignore[arg-type]
+        # POST /tasks returns {"taskId": ..., "taskNumber": ...}, NOT a full task;
+        # fetch the created task to get its full shape (incl. _id).
+        return self.get_task(str(raw["taskId"]))  # type: ignore[index]
 
     def update_task(
         self,
@@ -485,8 +487,9 @@ class KanbanFlowClient:
             body["color"] = color
         if responsible_user_id is not None:
             body["responsibleUserId"] = responsible_user_id
-        raw = self._request("POST", f"/tasks/{task_id}", body=body)
-        return _parse_task(raw)  # type: ignore[arg-type]
+        # POST /tasks/{id} (update) returns null, NOT a full task; re-fetch.
+        self._request("POST", f"/tasks/{task_id}", body=body)
+        return self.get_task(task_id)
 
     def delete_task(self, task_id: str) -> None:
         self._request("DELETE", f"/tasks/{task_id}")
