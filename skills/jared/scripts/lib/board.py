@@ -54,11 +54,11 @@ class Board:
         ".github/project-board.md",
     )
 
-    project_number: int
-    project_id: str
-    owner: str
-    repo: str
-    project_url: str
+    project_number: int | None = None
+    project_id: str = ""
+    owner: str = ""
+    repo: str = ""
+    project_url: str = ""
     _field_ids: dict[str, str] = field(default_factory=dict)
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
     session_handoff_prompt: str = "ask"
@@ -81,6 +81,12 @@ class Board:
     # Backend selector — defaults to "github". Parsed from the optional
     # `- backend: <x>` bullet under `## Jared config` in project-board.md.
     backend: str = "github"
+    # KanbanFlow Status->column map (canonical Status -> board column name).
+    # Empty for GitHub boards. Parsed from the `### Status column map` block.
+    status_column_map: dict[str, str] = field(default_factory=dict)
+    # KanbanFlow board id (from `- Board ID:`); None for GitHub. Used for the
+    # provider's board-identity soft-verify.
+    board_id: str | None = None
     # Cached provider instance, lazily populated by the `provider` property.
     _provider: BoardProvider | None = field(default=None, repr=False)
 
@@ -166,23 +172,56 @@ class Board:
 
         repo = find_optional(r"Repo:\s*(\S+)") or repo_fallback
 
-        missing: list[str] = []
+        jared_config = cls._parse_jared_config(text)
+        backend = jared_config.get("backend", "github")
+        session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
+        session_start_checks = cls._parse_session_start_checks(text)
+        operator_docs, code_surface = cls._parse_operator_docs(text)
+
+        if backend == "kanbanflow":
+            status_column_map = cls._parse_status_column_map(text)
+            board_id = find_optional(r"Board ID:\s*(\S+)")
+            missing: list[str] = []
+            if repo is None:
+                missing.append("Repo")
+            if not status_column_map:
+                missing.append("Status column map")
+            if missing:
+                raise BoardConfigError(
+                    f"{source} (backend=kanbanflow) missing: {', '.join(missing)}. "
+                    "Run /jared-init to bootstrap or patch the file."
+                )
+            assert repo is not None
+            return cls(
+                owner=repo.split("/")[0],
+                repo=repo,
+                backend="kanbanflow",
+                status_column_map=status_column_map,
+                board_id=board_id,
+                session_handoff_prompt=session_handoff_prompt,
+                session_start_checks=session_start_checks,
+                operator_docs=operator_docs,
+                code_surface=code_surface,
+                _raw_doc=text,
+            )
+
+        # backend == "github" (default): GitHub Project identifiers required.
+        missing_gh: list[str] = []
         if project_url is None:
-            missing.append("Project URL")
+            missing_gh.append("Project URL")
         if project_id is None:
-            missing.append("Project ID")
+            missing_gh.append("Project ID")
         if project_number_val is None:
-            missing.append("Project number")
+            missing_gh.append("Project number")
         if owner is None:
-            missing.append("Owner")
+            missing_gh.append("Owner")
         if repo is None:
-            missing.append("Repo")
-        if missing:
+            missing_gh.append("Repo")
+        if missing_gh:
             raise BoardConfigError(
-                f"{source} missing required field(s): {', '.join(missing)}. "
+                f"{source} missing required field(s): {', '.join(missing_gh)}. "
                 "Run /jared-init to bootstrap or patch the file."
             )
-        # Narrow Optional types after the missing-fields check for mypy.
         assert project_url is not None
         assert project_id is not None
         assert project_number_val is not None
@@ -190,12 +229,6 @@ class Board:
         assert repo is not None
 
         field_ids, field_options = cls._parse_field_blocks(text)
-        jared_config = cls._parse_jared_config(text)
-        session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
-        backend = jared_config.get("backend", "github")
-        session_start_checks = cls._parse_session_start_checks(text)
-        operator_docs, code_surface = cls._parse_operator_docs(text)
-
         return cls(
             project_number=project_number_val,
             project_id=project_id,
@@ -345,6 +378,23 @@ class Board:
 
         return docs, surface
 
+    @staticmethod
+    def _parse_status_column_map(text: str) -> dict[str, str]:
+        """Parse the optional `### Status column map` block into {Status: column}."""
+        m = re.search(
+            r"^### Status column map\s*\n(.*?)(?=^#{2,3}\s|\Z)",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+        if not m:
+            return {}
+        result: dict[str, str] = {}
+        for line in m.group(1).splitlines():
+            bm = re.match(r"\s*-\s*([^:]+):\s*(.+?)\s*$", line)
+            if bm:
+                result[bm.group(1).strip()] = bm.group(2).strip()
+        return result
+
     def field_id(self, name: str) -> str:
         if name not in self._field_ids:
             available = ", ".join(sorted(self._field_ids)) or "(none)"
@@ -402,6 +452,7 @@ class Board:
             if self.backend == "github":
                 from .github_provider import GitHubProjectsProvider
 
+                assert self.project_number is not None  # github docs always carry it
                 self._provider = GitHubProjectsProvider(
                     project_number=self.project_number,
                     project_id=self.project_id,
@@ -420,7 +471,12 @@ class Board:
                 field_defs = client.list_custom_field_defs()
                 index = KfNumberIndex.for_board(kf_board.id)
                 self._provider = KanbanFlowProvider(
-                    client=client, board=kf_board, field_defs=field_defs, index=index
+                    client=client,
+                    board=kf_board,
+                    field_defs=field_defs,
+                    index=index,
+                    status_column_map=self.status_column_map,
+                    expected_board_id=self.board_id,
                 )
         return self._provider
 
@@ -445,6 +501,7 @@ class Board:
 
         Opt-out: `JARED_NO_CACHE=1` skips both cache layers.
         """
+        assert self.project_number is not None  # github-only method
         if self._items is not None:
             return self._items
         no_cache = os.environ.get("JARED_NO_CACHE") == "1"
@@ -480,19 +537,30 @@ class Board:
         return self._items
 
     def invalidate_items(self) -> None:
-        """Drop both in-process and on-disk snapshot caches."""
+        """Drop both in-process and on-disk snapshot caches.
+
+        No-op on backends without a gh item-list cache (e.g. KanbanFlow,
+        project_number is None) — the core mutation commands call this
+        unconditionally after a write, so it must be safe on any backend.
+        """
+        if self.project_number is None:
+            return
         self._items = None
         cache.invalidate_item_list(self.project_number)
 
     def invalidate_closed_items(self) -> None:
         """Drop the on-disk closed-items snapshot (#186).
 
-        Called from `_cmd_set` when field_name=='Status' — Status mutations
-        are the only first-party path that can move an item into or out of
-        the closed set, so the invalidation is gated on field, not on every
-        mutation. Non-Status writes (Priority, Work Stream) leave the cache
-        intact to avoid a wasted full-board refetch on next sweep.
+        Called from `_cmd_set` when field_name=='Status'. No-op on backends
+        without a gh closed-items cache (KanbanFlow, project_number is None).
+
+        Status mutations are the only first-party path that can move an item
+        into or out of the closed set, so the invalidation is gated on field,
+        not on every mutation. Non-Status writes (Priority, Work Stream) leave
+        the cache intact to avoid a wasted full-board refetch on next sweep.
         """
+        if self.project_number is None:
+            return
         cache.invalidate_closed_items(self.project_number)
 
     _OPEN_ITEMS_QUERY = """
@@ -542,6 +610,7 @@ class Board:
         Raises GhInvocationError if there are >100 open issues — pagination
         is not implemented and a silent truncation would mis-report status.
         """
+        assert self.project_number is not None  # github-only method
         owner, repo_name = self.repo.split("/", 1)
         data = self.run_graphql(
             self._OPEN_ITEMS_QUERY,

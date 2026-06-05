@@ -88,6 +88,13 @@ def test_move_on_kanbanflow_backend_routes_status_to_column(
         - Owner: brockamer
         - Repo: brockamer/findajob
 
+        ### Status column map
+        - Backlog: Backlog
+        - Up Next: Up Next
+        - In Progress: In Progress
+        - Blocked: Blocked
+        - Done: Done
+
         ## Jared config
         - backend: kanbanflow
     """)

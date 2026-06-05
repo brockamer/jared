@@ -62,6 +62,13 @@ Python subprocesses can't call MCP tools, so batch scripts (`sweep.py` et al.) u
 
 **Board-provider abstraction (Phase 1, #314).** Board operations now go through a backend-neutral `BoardProvider` contract (`lib/board_provider.py`): semantic methods (`get_item`, `list_open_items`, `file`, `set_field`, `move`, `close`, `comment`, `add_blocked_by`, `set_milestone`, …) that speak the stable integer `IssueRef` and neutral dataclasses (`BoardItem`, `Edge`, `Milestone`, `ClosedItem`) — provider-internal IDs (GitHub node-ids, KanbanFlow `_id`) never cross the boundary. `GitHubProjectsProvider` (`lib/github_provider.py`) is the sole implementation; all `gh`/GraphQL/`field_id`/`option_id` live private inside it. `Board` is now the **config-parsing facade**: it parses `docs/project-board.md`, reads the `- backend:` selector (default `github`), and exposes `board.provider`. New CLI subcommands should call `board.provider.<method>` — the CLI file is free of raw `run_gh`/`field_id`/`option_id`. (The module-level `run_gh`/`run_gh_raw`/`run_graphql` in `board.py` remain the subprocess seam the provider and batch scripts route through.) Phase-1 boundary: a few batch/analytic surfaces still use `Board` methods directly — `sweep.py`/`stage.py` (`open_items`/`board_items`), `_cmd_ties`/`_cmd_propose_partition` (`fetch_open_issues_for_ties`). Those migrate when the KanbanFlow provider lands (epic #313, Phases 2–6).
 
+A KanbanFlow-backed `docs/project-board.md` carries `- backend: kanbanflow`, a `Repo:`
+bullet, a `Board ID:` / `Board URL:`, and a `### Status column map` block (canonical
+Status → the board's actual column name); it omits the GitHub Project identifiers and
+field/option-ID blocks (the provider resolves columns/options live from the API, with the
+board-scoped `KANBANFLOW_API_TOKEN` selecting the board). Init-time selection landed in #317
+(Phase 4 of epic #313).
+
 ## Dual import path — important gotcha
 
 The `Board` module is imported via two different paths in the same process tree:

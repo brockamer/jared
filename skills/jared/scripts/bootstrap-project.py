@@ -11,6 +11,7 @@ Usage:
   bootstrap-project.py --url https://github.com/users/brockamer/projects/1 --repo brockamer/findajob
   bootstrap-project.py --url <url> --repo <repo> --output docs/project-board.md
   bootstrap-project.py --url <url> --repo <repo> --no-create  # don't offer to create missing fields
+  bootstrap-project.py --backend kanbanflow --repo <repo>  # KanbanFlow (token in env)
 
 The output file will not be overwritten if it already exists unless --force is
 passed; instead, the script writes to <output>.new and shows a diff.
@@ -25,7 +26,10 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from lib.kanbanflow_client import KfBoard, KfCustomFieldDef  # type: ignore[import-not-found]
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -706,7 +710,15 @@ def render_doc(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--url", required=True, help="GitHub Project v2 URL")
+    parser.add_argument(
+        "--url", required=False, help="GitHub Project v2 URL (required for --backend github)"
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["github", "kanbanflow"],
+        default="github",
+        help="Board backend. 'kanbanflow' uses KANBANFLOW_API_TOKEN; 'github' needs --url.",
+    )
     parser.add_argument(
         "--repo",
         required=True,
@@ -744,9 +756,159 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def main_guard(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Enforce backend/url cross-field rules. Raises SystemExit via parser.error."""
+    if args.backend == "kanbanflow" and args.url:
+        parser.error(
+            "--url is not valid with --backend kanbanflow"
+            " (the board-scoped token selects the board)"
+        )
+    if args.backend == "github" and not args.url:
+        parser.error("--url is required for --backend github")
+
+
+_CANONICAL_STATUSES = ("Backlog", "Up Next", "In Progress", "Blocked", "Done")
+
+
+def map_status_columns(
+    board: KfBoard, *, assume_yes: bool = False
+) -> tuple[dict[str, str], list[str]]:
+    """Auto-map exact column-name matches; interview for the rest. 1:1.
+
+    Returns (status->column map, leftover-unmapped-column-names). When
+    `assume_yes` is set (non-interactive run) and some Status has no exact-name
+    column, fails cleanly listing what needs mapping rather than blocking on
+    input().
+    """
+    col_names = [c.name for c in board.columns]
+    mapping: dict[str, str] = {}
+    used: set[str] = set()
+    for status in _CANONICAL_STATUSES:
+        if status in col_names:
+            mapping[status] = status
+            used.add(status)
+    needs_interview = [s for s in _CANONICAL_STATUSES if s not in mapping]
+    if needs_interview and assume_yes:
+        print(
+            "bootstrap: cannot map non-interactively — these Statuses have no "
+            f"exact-name column and need mapping: {', '.join(needs_interview)}. "
+            "Re-run without --yes to map them, or rename the board's columns to match.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    for status in needs_interview:
+        choices = [n for n in col_names if n not in used]
+        print(f'\nWhich column is "{status}"?')
+        for i, n in enumerate(choices, 1):
+            print(f"  [{i}] {n}")
+        raw = input(f'Column for "{status}" (name or number): ').strip()
+        if raw.isdigit():
+            n = int(raw)
+            if not (1 <= n <= len(choices)):
+                print(f"bootstrap: '{raw}' is out of range (1-{len(choices)})", file=sys.stderr)
+                raise SystemExit(1)
+            chosen = choices[n - 1]
+        else:
+            chosen = raw
+        if chosen not in col_names or chosen in used:
+            print(
+                f"bootstrap: '{chosen}' is not an available (unused) column on this board",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        mapping[status] = chosen
+        used.add(chosen)
+    unmapped = [n for n in col_names if n not in used]
+    return mapping, unmapped
+
+
+def validate_priority_field(field_defs: list[KfCustomFieldDef]) -> None:
+    """Hard-stop unless a 'Priority' dropdown with High/Medium/Low exists."""
+    pri = next((d for d in field_defs if d.name == "Priority"), None)
+    needed = {"High", "Medium", "Low"}
+    if pri is None or not needed.issubset(set(pri.dropdown_options)):
+        print(
+            "bootstrap: no 'Priority' custom field with options High, Medium, Low. "
+            "jared requires it. Create a dropdown custom field named 'Priority' "
+            "(options: High, Medium, Low) in the KanbanFlow board's "
+            "Settings -> Custom fields, then re-run.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def render_kanbanflow_doc(*, board: KfBoard, repo: str, status_map: dict[str, str]) -> str:
+    rows = "\n".join(f"- {s}: {status_map[s]}" for s in _CANONICAL_STATUSES)
+    return f"""# Project Board — How It Works
+
+- Backend: kanbanflow
+- Board URL: https://kanbanflow.com/board/{board.id}
+- Board ID: {board.id}
+- Board name: {board.name}
+- Repo: {repo}
+
+Auth: set `KANBANFLOW_API_TOKEN` in your environment (board-scoped token from
+KanbanFlow Settings -> API). The token is never stored in this file.
+
+### Status column map
+{rows}
+
+### Priority
+- Field name: Priority
+- Options: High, Medium, Low
+
+## Jared config
+- backend: kanbanflow
+- voice: enabled
+"""
+
+
+def bootstrap_kanbanflow(args: argparse.Namespace) -> int:
+    from lib.kanbanflow_client import KanbanFlowClient  # noqa: PLC0415
+
+    try:
+        client = KanbanFlowClient.from_env()
+        board = client.get_board()
+        field_defs = client.list_custom_field_defs()
+    except Exception as e:  # noqa: BLE001
+        print(f"bootstrap: KanbanFlow connect failed: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Connected to KanbanFlow board: {board.name} ({board.id})")
+    status_map, unmapped = map_status_columns(board, assume_yes=args.yes)
+    validate_priority_field(field_defs)
+
+    if unmapped:
+        print(
+            f"NOTE: columns not mapped to a jared Status — items there are invisible "
+            f"to jared: {', '.join(unmapped)}",
+            file=sys.stderr,
+        )
+    if not board.swimlanes:
+        print(
+            "NOTE: no swimlanes on this board — milestones map to swimlanes and are "
+            "unavailable; jared's dateless milestone convention degrades gracefully.",
+            file=sys.stderr,
+        )
+
+    doc = render_kanbanflow_doc(board=board, repo=args.repo, status_map=status_map)
+    out = Path(args.output)
+    if out.exists() and not args.force:
+        print(f"bootstrap: {out} exists; pass --force to overwrite", file=sys.stderr)
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(doc)
+    print(f"Wrote {out}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    main_guard(args, parser)
+    if args.backend == "kanbanflow":
+        return bootstrap_kanbanflow(args)
 
     try:
         owner_type, owner, number = parse_url(args.url)
