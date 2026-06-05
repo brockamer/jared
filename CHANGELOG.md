@@ -7,6 +7,25 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.29.0 — 2026-06-05
+
+**Features**
+- **KanbanFlow as a board backend, end to end.** A project can now be stewarded on a KanbanFlow board instead of GitHub Projects. `bootstrap-project.py --backend kanbanflow` (and `/jared-init`) connects via `KANBANFLOW_API_TOKEN`, maps jared's Status columns onto the board's *existing* columns (auto-match + interview, no board-structure mutation — the API is read-only there), validates a `Priority` dropdown, and writes a slim convention doc; `Board._parse` is backend-aware and `KanbanFlowProvider` honors the Status→column map on read and write. Shipped across epic #313's Phases 2–4: the stdlib-only REST client (#325), the provider over it (#329), and init-time selection (#334). Verified end-to-end against a live board.
+- `jared` guards against two parallel sessions both creating the same new module. (#333)
+
+**Bug fixes**
+- KanbanFlow `create_task`/`update_task` re-fetch the full task after a write — the live API returns `{taskId}` / `null` rather than a task object, which had broken file/move/close on a real board (caught by the Phase-4 live e2e). (#334)
+- `compute_velocity` guards against silent `gh`-query `--limit` truncation. (#328)
+- `dependency-graph` sources Priority from the project field, not `priority:` labels. (#326)
+
+**Refactor**
+- Phase-3 interface-purity / strict-parity cleanup of the provider seam (residues from the #320 review). (#321)
+- Added test coverage for `dependency-graph`'s graph algorithms — topo-sort, critical path, orphan detection. (#327)
+
+**Doctrine**
+- Reconciled the `/jared-stage` + `/jared-audit` command inventories and documented `jared add-to-board`. (#331)
+- Clarified the milestone soft-date doctrine and archived the shipped Phase 2/3 plans. (#330)
+
 ## v0.28.0 — 2026-06-02
 
 **Refactor**
