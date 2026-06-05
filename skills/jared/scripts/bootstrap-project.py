@@ -25,7 +25,10 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from lib.kanbanflow_client import KfBoard, KfCustomFieldDef  # type: ignore[import-not-found]
 
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -763,8 +766,124 @@ def main_guard(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Non
         parser.error("--url is required for --backend github")
 
 
+_CANONICAL_STATUSES = ("Backlog", "Up Next", "In Progress", "Blocked", "Done")
+
+
+def map_status_columns(board: KfBoard) -> tuple[dict[str, str], list[str]]:
+    """Auto-map exact column-name matches; interview for the rest. 1:1.
+
+    Returns (status->column map, leftover-unmapped-column-names).
+    """
+    col_names = [c.name for c in board.columns]
+    mapping: dict[str, str] = {}
+    used: set[str] = set()
+    for status in _CANONICAL_STATUSES:
+        if status in col_names:
+            mapping[status] = status
+            used.add(status)
+    for status in _CANONICAL_STATUSES:
+        if status in mapping:
+            continue
+        choices = [n for n in col_names if n not in used]
+        print(f'\nWhich column is "{status}"?')
+        for i, n in enumerate(choices, 1):
+            print(f"  [{i}] {n}")
+        raw = input(f'Column for "{status}" (name or number): ').strip()
+        if raw.isdigit():
+            n = int(raw)
+            if not (1 <= n <= len(choices)):
+                print(f"bootstrap: '{raw}' is out of range (1-{len(choices)})", file=sys.stderr)
+                raise SystemExit(1)
+            chosen = choices[n - 1]
+        else:
+            chosen = raw
+        if chosen not in col_names:
+            print(f"bootstrap: '{chosen}' is not a column on this board", file=sys.stderr)
+            raise SystemExit(1)
+        mapping[status] = chosen
+        used.add(chosen)
+    unmapped = [n for n in col_names if n not in used]
+    return mapping, unmapped
+
+
+def validate_priority_field(field_defs: list[KfCustomFieldDef]) -> None:
+    """Hard-stop unless a 'Priority' dropdown with High/Medium/Low exists."""
+    pri = next((d for d in field_defs if d.name == "Priority"), None)
+    needed = {"High", "Medium", "Low"}
+    if pri is None or not needed.issubset(set(pri.dropdown_options)):
+        print(
+            "bootstrap: no 'Priority' custom field with options High, Medium, Low. "
+            "jared requires it. Create a dropdown custom field named 'Priority' "
+            "(options: High, Medium, Low) in the KanbanFlow board's "
+            "Settings -> Custom fields, then re-run.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def render_kanbanflow_doc(*, board: KfBoard, repo: str, status_map: dict[str, str]) -> str:
+    rows = "\n".join(f"- {s}: {status_map[s]}" for s in _CANONICAL_STATUSES)
+    return f"""# Project Board — How It Works
+
+- Backend: kanbanflow
+- Board URL: https://kanbanflow.com/board/{board.id}
+- Board ID: {board.id}
+- Board name: {board.name}
+- Repo: {repo}
+
+Auth: set `KANBANFLOW_API_TOKEN` in your environment (board-scoped token from
+KanbanFlow Settings -> API). The token is never stored in this file.
+
+### Status column map
+{rows}
+
+### Priority
+- Field name: Priority
+- Options: High, Medium, Low
+
+## Jared config
+- backend: kanbanflow
+- voice: enabled
+"""
+
+
 def bootstrap_kanbanflow(args: argparse.Namespace) -> int:
-    raise NotImplementedError  # implemented in Task 4
+    from lib.kanbanflow_client import KanbanFlowClient  # noqa: PLC0415
+
+    try:
+        client = KanbanFlowClient.from_env()
+        board = client.get_board()
+        field_defs = client.list_custom_field_defs()
+    except Exception as e:  # noqa: BLE001
+        print(f"bootstrap: KanbanFlow connect failed: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Connected to KanbanFlow board: {board.name} ({board.id})")
+    status_map, unmapped = map_status_columns(board)
+    validate_priority_field(field_defs)
+
+    if unmapped:
+        print(
+            f"NOTE: columns not mapped to a jared Status — items there are invisible "
+            f"to jared: {', '.join(unmapped)}",
+            file=sys.stderr,
+        )
+    if not board.swimlanes:
+        print(
+            "NOTE: no swimlanes on this board — milestones map to swimlanes and are "
+            "unavailable; jared's dateless milestone convention degrades gracefully.",
+            file=sys.stderr,
+        )
+
+    doc = render_kanbanflow_doc(board=board, repo=args.repo, status_map=status_map)
+    out = Path(args.output)
+    if out.exists() and not args.force:
+        print(f"bootstrap: {out} exists; pass --force to overwrite", file=sys.stderr)
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(doc)
+    print(f"Wrote {out}")
+    return 0
 
 
 def main() -> int:
