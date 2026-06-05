@@ -706,7 +706,15 @@ def render_doc(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--url", required=True, help="GitHub Project v2 URL")
+    parser.add_argument(
+        "--url", required=False, help="GitHub Project v2 URL (required for --backend github)"
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["github", "kanbanflow"],
+        default="github",
+        help="Board backend. 'kanbanflow' uses KANBANFLOW_API_TOKEN; 'github' needs --url.",
+    )
     parser.add_argument(
         "--repo",
         required=True,
@@ -744,9 +752,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def main_guard(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Enforce backend/url cross-field rules. Raises SystemExit via parser.error."""
+    if args.backend == "kanbanflow" and args.url:
+        parser.error(
+            "--url is not valid with --backend kanbanflow"
+            " (the board-scoped token selects the board)"
+        )
+    if args.backend == "github" and not args.url:
+        parser.error("--url is required for --backend github")
+
+
+def bootstrap_kanbanflow(args: argparse.Namespace) -> int:
+    raise NotImplementedError  # implemented in Task 4
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    main_guard(args, parser)
+    if args.backend == "kanbanflow":
+        return bootstrap_kanbanflow(args)
 
     try:
         owner_type, owner, number = parse_url(args.url)
