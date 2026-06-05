@@ -287,9 +287,11 @@ jared <any board cmd>  ──▶  Board.from_default()
 - `pytest -m 'not integration'` green with **no GitHub-doc test changes and no conftest
   signature change**; new KanbanFlow tests added. `ruff check .`, `ruff format .`,
   `mypy --strict` clean.
-- `/jared-init` asks the backend and dispatches correctly; docs updated
-  (`docs/project-board.md` convention doc gains a KanbanFlow section; CLAUDE.md notes the
-  KanbanFlow doc shape if warranted).
+- `/jared-init` asks the backend and dispatches correctly; docs updated:
+  `commands/jared-init.md` documents both invocations, `CLAUDE.md` notes the KanbanFlow
+  doc shape, and `render_kanbanflow_doc` is the source of truth for the doc's shape. (No
+  KanbanFlow section is added to jared's own `docs/project-board.md` — that board is
+  GitHub-backed; a KF section there would be incongruous.)
 
 ## Open questions / deferred
 

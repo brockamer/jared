@@ -110,3 +110,31 @@ def test_map_status_columns_zero_number_hard_stops(monkeypatch: MonkeyPatch) -> 
     monkeypatch.setattr("builtins.input", lambda _prompt="": "0")
     with pytest.raises(SystemExit):
         b.map_status_columns(_gtd_board())
+
+
+def test_map_status_columns_non_interactive_unmapped_hard_stops() -> None:
+    b = _load_bootstrap()
+    # GTD board: only Blocked/Done auto-map; Backlog/Up Next/In Progress need the
+    # interview, so a non-interactive (--yes) run must fail cleanly, not EOFError.
+    with pytest.raises(SystemExit):
+        b.map_status_columns(_gtd_board(), assume_yes=True)
+
+
+def test_map_status_columns_non_interactive_canonical_ok() -> None:
+    from tests.fake_kanbanflow import FakeKanbanFlowClient
+
+    b = _load_bootstrap()
+    # A board whose columns ARE the canonical names auto-maps fully -> no interview
+    # needed -> assume_yes succeeds.
+    mapping, unmapped = b.map_status_columns(FakeKanbanFlowClient().board, assume_yes=True)
+    assert mapping == {s: s for s in ("Backlog", "Up Next", "In Progress", "Blocked", "Done")}
+    assert unmapped == []
+
+
+def test_map_status_columns_free_text_collision_hard_stops(monkeypatch: MonkeyPatch) -> None:
+    b = _load_bootstrap()
+    # Backlog -> "Doing Now", then Up Next -> "Doing Now" again (already used) must hard-stop.
+    answers = iter(["Doing Now", "Doing Now"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    with pytest.raises(SystemExit):
+        b.map_status_columns(_gtd_board())
