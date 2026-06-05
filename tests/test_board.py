@@ -1596,9 +1596,68 @@ def test_board_provider_returns_kanbanflow_provider(
         - Owner: brockamer
         - Repo: brockamer/findajob
 
+        ### Status column map
+        - Backlog: Backlog
+        - Up Next: Up Next
+        - In Progress: In Progress
+        - Blocked: Blocked
+        - Done: Done
+
         ## Jared config
         - backend: kanbanflow
         """)
     )
     board = Board.from_path(board_md)
     assert isinstance(board.provider, KanbanFlowProvider)
+
+
+_KF_DOC = """# Project Board
+
+- Backend: kanbanflow
+- Board URL: https://kanbanflow.com/board/p9vK6cR
+- Board ID: p9vK6cR
+- Board name: Jared Test
+- Repo: brockamer/jared
+
+### Status column map
+- Backlog: Planned One Day
+- Up Next: Planned This Week
+- In Progress: Doing Now
+- Blocked: Blocked
+- Done: Done
+
+## Jared config
+- backend: kanbanflow
+"""
+
+
+def test_parse_kanbanflow_doc(tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board
+
+    p = tmp_path / "project-board.md"
+    p.write_text(_KF_DOC)
+    board = Board.from_path(p)
+    assert board.backend == "kanbanflow"
+    assert board.repo == "brockamer/jared"
+    assert board.owner == "brockamer"  # derived from repo
+    assert board.board_id == "p9vK6cR"
+    assert board.status_column_map["In Progress"] == "Doing Now"
+
+
+def test_kanbanflow_doc_missing_repo_fails(tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board, BoardConfigError
+
+    p = tmp_path / "project-board.md"
+    p.write_text(_KF_DOC.replace("- Repo: brockamer/jared\n", ""))
+    with pytest.raises(BoardConfigError, match="Repo"):
+        Board.from_path(p)
+
+
+def test_kanbanflow_doc_missing_status_map_fails(tmp_path: Path) -> None:
+    from skills.jared.scripts.lib.board import Board, BoardConfigError
+
+    p = tmp_path / "project-board.md"
+    body = _KF_DOC.split("### Status column map")[0] + "## Jared config\n- backend: kanbanflow\n"
+    p.write_text(body)
+    with pytest.raises(BoardConfigError, match="Status column map"):
+        Board.from_path(p)
