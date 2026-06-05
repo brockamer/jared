@@ -11,6 +11,7 @@ Usage:
   bootstrap-project.py --url https://github.com/users/brockamer/projects/1 --repo brockamer/findajob
   bootstrap-project.py --url <url> --repo <repo> --output docs/project-board.md
   bootstrap-project.py --url <url> --repo <repo> --no-create  # don't offer to create missing fields
+  bootstrap-project.py --backend kanbanflow --repo <repo>  # KanbanFlow (token in env)
 
 The output file will not be overwritten if it already exists unless --force is
 passed; instead, the script writes to <output>.new and shows a diff.

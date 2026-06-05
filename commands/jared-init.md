@@ -19,11 +19,22 @@ Flow:
 
    Wait for the user to respond before proceeding.
 
-2. **Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py`.**
-   ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py --url <project-url> --repo <owner>/<repo>
-   ```
-   This introspects the board's fields and emits `docs/project-board.md` with IDs filled in. For a fresh project, offers to create Status and Priority. Work Stream is optional — useful when the project has multiple distinct categories of work; skipped when it doesn't. For an existing convention doc, shows a diff.
+2. **Choose the backend, then run `bootstrap-project.py`.** Ask the operator
+   (voice ON — first impression): *GitHub Projects or KanbanFlow?*
+
+   - GitHub (default):
+     ```
+     ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py --backend github --url <project-url> --repo <owner>/<repo>
+     ```
+   - KanbanFlow (requires `KANBANFLOW_API_TOKEN` in env; the board-scoped token
+     selects the board, so no `--url`). The script interviews the operator to map
+     jared's Status columns onto the board's existing columns:
+     ```
+     ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py --backend kanbanflow --repo <owner>/<repo>
+     ```
+   Script output (including the column interview) stays voice-OFF / verbatim.
+
+   For **GitHub**, this introspects the board's fields and emits `docs/project-board.md` with IDs filled in. For a fresh project, offers to create Status and Priority. Work Stream is optional — useful when the project has multiple distinct categories of work; skipped when it doesn't. For an existing convention doc, shows a diff. For **KanbanFlow**, there are no field IDs to introspect: the script validates that a `Priority` dropdown (High/Medium/Low) exists, interviews to map Status columns, and writes the slim `### Status column map` doc — secrets stay in `KANBANFLOW_API_TOKEN`, never the doc.
 
    If the existing `docs/project-board.md` predates the machine-readable bullet block (URL only in a markdown link, Project ID in a code fence, no `- Project URL:` / `- Project number:` / `- Owner:` / `- Repo:` bullets), the script enters **patch mode**: it proposes inserting just the bullet block near the top of the file, preserving all prose and custom sections verbatim. See `references/new-board.md` → "Upgrading an older project-board.md".
 
