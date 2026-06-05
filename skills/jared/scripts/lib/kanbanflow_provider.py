@@ -12,6 +12,7 @@ design spec for the per-capability rationale.
 from __future__ import annotations
 
 import contextlib
+import sys
 from typing import Protocol
 
 from .board import FieldNotFound, ItemNotFound, OptionNotFound
@@ -25,6 +26,8 @@ from .kf_number_index import KfNumberIndex
 # until their task and trip ruff F401).
 
 _BLOCKED_BY_PREFIX = "blocked-by:"
+
+_CANONICAL_STATUSES = ("Backlog", "Up Next", "In Progress", "Blocked", "Done")
 
 # KanbanFlow advertises the full Capability set MINUS these. The remainder is
 # empty: KF supports only the core board loop. See the design spec.
@@ -98,16 +101,35 @@ class KanbanFlowProvider:
         board: KfBoard,
         field_defs: list[KfCustomFieldDef],
         index: KfNumberIndex,
+        status_column_map: dict[str, str] | None = None,
+        expected_board_id: str | None = None,
     ) -> None:
         self._client = client
         self._board = board
         self._index = index
+        self._status_column_map = status_column_map or {}
+        # Raw board column maps — kept only for the "available columns" error message.
         self._column_id_by_name = {c.name: c.unique_id for c in board.columns}
-        self._column_name_by_id = {c.unique_id: c.name for c in board.columns}
+        # Status-keyed maps — every Status<->column translation goes through these,
+        # so a renamed column (e.g. Done<-"Complete") stays correct on read AND write.
+        self._column_id_by_status: dict[str, str] = {}
+        self._status_by_column_id: dict[str, str] = {}
+        for status in _CANONICAL_STATUSES:
+            col_name = self._status_column_map.get(status, status)  # identity fallback
+            col_id = self._column_id_by_name.get(col_name)
+            if col_id is not None:
+                self._column_id_by_status[status] = col_id
+                self._status_by_column_id[col_id] = status
         self._swimlane_id_by_name = {s.name: s.unique_id for s in board.swimlanes}
         self._swimlane_name_by_id = {s.unique_id: s.name for s in board.swimlanes}
         self._field_def_by_name = {d.name: d for d in field_defs}
         self._field_name_by_id = {d.id: d.name for d in field_defs}
+        if expected_board_id is not None and board.id != expected_board_id:
+            print(
+                f"WARNING: KanbanFlow token points at board '{board.id}' but the doc "
+                f"records '{expected_board_id}'. Operating on '{board.id}'.",
+                file=sys.stderr,
+            )
 
     # --- introspection ---
     def capabilities(self) -> frozenset[Capability]:
@@ -115,12 +137,12 @@ class KanbanFlowProvider:
 
     # --- private resolution helpers ---
     def _column_id(self, status: str) -> str:
-        if status not in self._column_id_by_name:
+        if status not in self._column_id_by_status:
             available = ", ".join(sorted(self._column_id_by_name)) or "(none)"
             raise FieldNotFound(
-                f"Status column '{status}' not on the board. Available: {available}"
+                f"Status column for '{status}' not on the board. Available columns: {available}"
             )
-        return self._column_id_by_name[status]
+        return self._column_id_by_status[status]
 
     def _swimlane_id(self, name: str) -> str:
         if name not in self._swimlane_id_by_name:
@@ -166,10 +188,12 @@ class KanbanFlowProvider:
                 priority = str(cf.value)
             else:
                 fields[field_name] = str(cf.value)
+        # A task in an unmapped column has no canonical Status -> None (by design:
+        # such columns are intentionally invisible to jared; bootstrap warns about them).
         return BoardItem(
             number=task.number_value or 0,
             title=task.name,
-            status=self._column_name_by_id.get(task.column_id) if task.column_id else None,
+            status=self._status_by_column_id.get(task.column_id) if task.column_id else None,
             priority=priority,
             body=task.description,
             labels=[n for n in label_names if not n.startswith(_BLOCKED_BY_PREFIX)],
@@ -221,7 +245,7 @@ class KanbanFlowProvider:
         return self._item_from_task(task)
 
     def list_open_items(self) -> list[BoardItem]:
-        done_id = self._column_id_by_name.get("Done")
+        done_id = self._column_id_by_status.get("Done")
         # Skip un-numbered tasks (e.g. created in the KF UI without a jared
         # number): they have no stable #N handle, so they're already invisible
         # to ref-resolution and edge-building (_reseed_index,
