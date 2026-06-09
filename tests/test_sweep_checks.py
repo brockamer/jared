@@ -5,6 +5,7 @@ separate from the full sweep flow (which shells out to gh and reads live
 board state) — these only exercise the pure list-processing logic.
 """
 
+import datetime as dt
 import json
 from pathlib import Path
 from textwrap import dedent
@@ -1032,3 +1033,167 @@ def test_fetch_items_with_closed_cache_filters_by_status_on_realistic_shape(
     # This is the "Open items on board: N" preamble logic in main().
     total_open = sum(1 for i in realistic_items if i.get("status") != "Done")
     assert total_open == 2  # #10 Backlog + #11 In Progress; #20 / #21 Done are excluded
+
+
+# ---------------------------------------------------------------------------
+# Date-math + body-parsing checks (#305).
+#
+# Five checks combine `fromisoformat`/`.replace("Z", "+00:00")` parsing with
+# `## Blocked by` / `## Session` body matching — tz handling, missing keys, and
+# regex drift are the cheap-to-catch failure modes these positive+negative
+# pairs lock down. All offline; the one check that fans out for comments has
+# its board helper monkeypatched.
+# ---------------------------------------------------------------------------
+
+
+def _iso_days_ago(days: int) -> str:
+    """A UTC ISO timestamp ``days`` in the past, with a literal ``Z`` suffix.
+
+    The checks all do ``.replace("Z", "+00:00")`` before ``fromisoformat`` —
+    emitting the ``Z`` form (what gh actually returns) exercises that path
+    honestly, rather than feeding a pre-normalised ``+00:00`` that would skip it.
+    """
+    ts = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
+    return ts.isoformat().replace("+00:00", "Z")
+
+
+def _item_pri(number: int, status: str, priority: str, title: str = "") -> dict[str, Any]:
+    """`_item` plus the top-level `priority` key that `field(item, "priority")` reads."""
+    item = _item(number, status, title)
+    item["priority"] = priority
+    return item
+
+
+# --- check_stale_high_backlog ---------------------------------------------
+
+
+def test_check_stale_high_backlog_flags_old_high_backlog_item() -> None:
+    sweep = import_sweep()
+    items = [_item_pri(1, "Backlog", "High")]
+    issues = {1: {"createdAt": _iso_days_ago(30), "title": "Ancient High item"}}
+    findings = sweep.check_stale_high_backlog(items, issues, days=14)
+    assert len(findings) == 1
+    assert findings[0].startswith("#1:")
+    assert "d old" in findings[0]
+
+
+def test_check_stale_high_backlog_passes_recent_and_non_high_items() -> None:
+    sweep = import_sweep()
+    items = [
+        _item_pri(1, "Backlog", "High"),  # recent → not stale
+        _item_pri(2, "Backlog", "Medium"),  # old but not High → skipped
+        _item_pri(3, "In Progress", "High"),  # High + old but not Backlog → skipped
+    ]
+    issues = {
+        1: {"createdAt": _iso_days_ago(2), "title": "Fresh High"},
+        2: {"createdAt": _iso_days_ago(90), "title": "Old Medium"},
+        3: {"createdAt": _iso_days_ago(90), "title": "Old In-Progress High"},
+    }
+    assert sweep.check_stale_high_backlog(items, issues, days=14) == []
+
+
+# --- check_in_progress_staleness ------------------------------------------
+
+
+def test_check_in_progress_staleness_flags_inactive_item() -> None:
+    sweep = import_sweep()
+    items = [_item(1, "In Progress")]
+    issues = {1: {"updatedAt": _iso_days_ago(10), "title": "Stalled work"}}
+    findings = sweep.check_in_progress_staleness(items, issues, days=7)
+    assert len(findings) == 1
+    assert findings[0].startswith("#1:")
+    assert "no activity" in findings[0]
+
+
+def test_check_in_progress_staleness_passes_recently_touched_item() -> None:
+    sweep = import_sweep()
+    items = [_item(1, "In Progress")]
+    issues = {1: {"updatedAt": _iso_days_ago(1), "title": "Active work"}}
+    assert sweep.check_in_progress_staleness(items, issues, days=7) == []
+
+
+# --- check_blocked_status_hygiene -----------------------------------------
+
+
+def test_check_blocked_status_hygiene_flags_missing_section() -> None:
+    sweep = import_sweep()
+    items = [_item(1, "Blocked")]
+    # Recently updated so the aging branch stays quiet — isolates the
+    # missing-`## Blocked by` finding.
+    issues = {1: {"body": "Some body, no blocked-by section.", "updatedAt": _iso_days_ago(0)}}
+    findings = sweep.check_blocked_status_hygiene(items, issues, blocked_aging_days=7)
+    assert len(findings) == 1
+    assert "no `## Blocked by` section" in findings[0]
+
+
+def test_check_blocked_status_hygiene_flags_aging_blocked_item() -> None:
+    sweep = import_sweep()
+    items = [_item(1, "Blocked")]
+    # Has the section, so only the aging branch should fire.
+    issues = {1: {"body": "## Blocked by\n- #9", "updatedAt": _iso_days_ago(30)}}
+    findings = sweep.check_blocked_status_hygiene(items, issues, blocked_aging_days=7)
+    assert len(findings) == 1
+    assert "no activity for" in findings[0]
+
+
+def test_check_blocked_status_hygiene_passes_healthy_blocked_item() -> None:
+    sweep = import_sweep()
+    items = [_item(1, "Blocked")]
+    issues = {1: {"body": "## Blocked by\n- #9", "updatedAt": _iso_days_ago(0)}}
+    assert sweep.check_blocked_status_hygiene(items, issues, blocked_aging_days=7) == []
+
+
+# --- check_native_dependencies --------------------------------------------
+
+
+def test_check_native_dependencies_flags_edge_to_closed_blocker() -> None:
+    sweep = import_sweep()
+    blocked_by = {1: [{"number": 2, "state": "CLOSED"}]}
+    issues = {1: {"title": "Dependent"}}
+    findings = sweep.check_native_dependencies(blocked_by, issues)
+    assert len(findings) == 1
+    assert "#1" in findings[0] and "#2" in findings[0]
+    assert "closed" in findings[0]
+
+
+def test_check_native_dependencies_passes_edge_to_open_blocker() -> None:
+    sweep = import_sweep()
+    blocked_by = {1: [{"number": 2, "state": "OPEN"}]}
+    issues = {1: {"title": "Dependent"}}
+    assert sweep.check_native_dependencies(blocked_by, issues) == []
+
+
+# --- check_session_note_freshness -----------------------------------------
+
+
+def test_check_session_note_freshness_flags_in_progress_without_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sweep = import_sweep()
+    items = [_item(1, "In Progress")]
+    monkeypatch.setattr(sweep, "board_fetch_recent_comments_batch", lambda *a, **k: {1: []})
+    findings = sweep.check_session_note_freshness(items, repo="owner/repo", days=3)
+    assert len(findings) == 1
+    assert "no Session note comment ever" in findings[0]
+
+
+def test_check_session_note_freshness_flags_stale_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sweep = import_sweep()
+    items = [_item(1, "In Progress")]
+    comments = {1: [{"body": "## Session 2020-01-01\nold note", "createdAt": _iso_days_ago(30)}]}
+    monkeypatch.setattr(sweep, "board_fetch_recent_comments_batch", lambda *a, **k: comments)
+    findings = sweep.check_session_note_freshness(items, repo="owner/repo", days=3)
+    assert len(findings) == 1
+    assert "d old" in findings[0]
+
+
+def test_check_session_note_freshness_passes_recent_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sweep = import_sweep()
+    items = [_item(1, "In Progress")]
+    comments = {1: [{"body": "## Session 2026-06-09\nfresh note", "createdAt": _iso_days_ago(0)}]}
+    monkeypatch.setattr(sweep, "board_fetch_recent_comments_batch", lambda *a, **k: comments)
+    assert sweep.check_session_note_freshness(items, repo="owner/repo", days=3) == []
