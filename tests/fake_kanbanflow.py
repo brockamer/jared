@@ -7,6 +7,9 @@ exercising file()'s rollback path.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from skills.jared.scripts.lib.kanbanflow_client import (
     KanbanFlowNotFoundError,
     KfBoard,
@@ -17,7 +20,10 @@ from skills.jared.scripts.lib.kanbanflow_client import (
     KfLabel,
     KfSwimlane,
     KfTask,
+    KfUser,
 )
+from skills.jared.scripts.lib.kanbanflow_provider import KanbanFlowProvider
+from skills.jared.scripts.lib.kf_number_index import KfNumberIndex
 
 
 class FakeKanbanFlowClient:
@@ -58,12 +64,16 @@ class FakeKanbanFlowClient:
         ]
         self.tasks: dict[str, KfTask] = {}
         self.comments: dict[str, list[KfComment]] = {}
+        self.users: list[KfUser] = []
         self._next_id = 0
         self.fail_set_custom_field = False
 
     # --- reads ---
     def get_board(self) -> KfBoard:
         return self.board
+
+    def list_users(self) -> list[KfUser]:
+        return list(self.users)
 
     def list_custom_field_defs(self) -> list[KfCustomFieldDef]:
         return self.field_defs
@@ -163,3 +173,45 @@ class FakeKanbanFlowClient:
 
     def list_labels(self, task_id: str) -> list[KfLabel]:
         return self.get_task(task_id).labels
+
+
+def make_kf_provider_with_task(
+    *,
+    users: dict[str, str] | None = None,
+    comments: list[dict[str, str]] | None = None,
+) -> tuple[KanbanFlowProvider, FakeKanbanFlowClient, int]:
+    """Build a (KanbanFlowProvider, FakeKanbanFlowClient, ref) triple.
+
+    Creates one task with number_value=1, seeds `users` (id->name) and
+    `comments` (list of dicts with text/createdTimestamp/authorUserId keys)
+    directly into the fake client so tests can call provider.list_comments(ref)
+    without I/O. Suitable for offline unit tests.
+
+    The KfNumberIndex is backed by a real tmpdir so _resolve_id works after
+    the index is seeded from iter_all_tasks() on first access.
+    """
+    client = FakeKanbanFlowClient()
+    # Seed users.
+    for uid, name in (users or {}).items():
+        client.users.append(KfUser(id=uid, name=name))
+    # Create the task so the index can resolve ref=1.
+    task = client.create_task(name="test task", column_id="col-backlog", number_value=1)
+    # Seed comments directly (bypass add_comment which drops authorUserId).
+    for raw in comments or []:
+        cmt = KfComment(
+            id=f"c-{len(client.comments.get(task.id, [])) + 1}",
+            text=raw.get("text", ""),
+            created_timestamp=raw.get("createdTimestamp", ""),
+            author_user_id=raw.get("authorUserId", ""),
+        )
+        client.comments.setdefault(task.id, []).append(cmt)
+    # Build the provider with a real tmpdir-backed index.
+    tmp_dir = Path(tempfile.mkdtemp())
+    index = KfNumberIndex(tmp_dir / "kf-index-B1.json")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+    )
+    return provider, client, 1
