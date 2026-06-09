@@ -59,17 +59,10 @@ def compute_loss_axes(
     A capability the SOURCE has but the TARGET lacks is a loss. KF->GitHub
     additionally renumbers (#N is auto-assigned on GitHub), which is a loss axis
     even though it is not a capability difference.
-
-    Normalises the input capability sets to their string values before
-    comparison so that the dual-import-path (lib.board_provider vs
-    skills.jared.scripts.lib.board_provider) does not cause false negatives
-    from enum-identity checks.
     """
-    source_vals = frozenset(c.value for c in source_caps)
-    target_vals = frozenset(c.value for c in target_caps)
     axes: list[LossAxis] = []
     for cap in Capability:
-        if cap.value in source_vals and cap.value not in target_vals and cap in _CAPABILITY_LOSS:
+        if cap in source_caps and cap not in target_caps and cap in _CAPABILITY_LOSS:
             key, desc = _CAPABILITY_LOSS[cap]
             axes.append(LossAxis(key=key, description=desc))
     if direction == "kanbanflow->github":

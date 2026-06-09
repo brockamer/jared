@@ -12,6 +12,19 @@ import pytest
 
 from skills.jared.scripts.lib.board_provider import BoardItem, Capability, Edge, Milestone
 from skills.jared.scripts.lib.board_provider import Comment as _Comment  # noqa: F401
+from tests.conftest import import_cli as _import_cli
+
+
+# The CLI inserts scripts/ on sys.path and imports from lib.board_provider; the
+# test tree imports from skills.jared.scripts.lib.board_provider — two different
+# module objects, two different Capability enum classes.  Build the "all caps"
+# frozenset from the CLI-resolved module so enum identity matches what
+# compute_loss_axes iterates (mirroring the FieldNotFound pattern in
+# test_apply_refuses_on_missing_target_structure).
+def _all_capabilities() -> frozenset[Capability]:
+    cli = _import_cli()
+    CliCap = cli.Capability
+    return frozenset(CliCap)
 
 
 class _StubProvider:
@@ -127,7 +140,7 @@ def test_dry_run_prints_report_and_writes_nothing(
             BoardItem(number=2, title="b", status="Backlog", priority="Low", body="see #1"),
         ],
         edges=[Edge(dependent=2, blocker=1)],
-        caps=frozenset(Capability),
+        caps=_all_capabilities(),
     )
     tgt = _StubProvider(items=[], edges=[], caps=frozenset())
     cli = _patch_boards(monkeypatch, src, tgt)
@@ -177,7 +190,7 @@ def test_apply_refuses_on_missing_target_structure(
             BoardItem(number=1, title="a", status="Up Next", priority="High", body=""),
         ],
         edges=[],
-        caps=frozenset(Capability),
+        caps=_all_capabilities(),
     )
     tgt = _StubProvider(
         items=[],
