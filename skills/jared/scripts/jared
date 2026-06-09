@@ -759,7 +759,16 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
     # from #52's body — any board-state mutation invalidates the cache.
     board.invalidate_items()
     action = "removed" if args.remove else "added"
-    print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}")
+    # Phase 6: when NATIVE_DEPENDENCIES is absent the provider uses label
+    # emulation — the operation still succeeds, but the output notes it.
+    native_absent = degraded_or_none(
+        board,
+        Capability.NATIVE_DEPENDENCIES,
+        "native blocked-by edges",
+        "NATIVE_DEPENDENCIES not supported on this backend",
+    )
+    suffix = " (label emulation — NATIVE_DEPENDENCIES not supported on this backend)" if native_absent else ""
+    print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}{suffix}")
     return 0
 
 
@@ -1200,6 +1209,17 @@ def _cmd_ties(args: argparse.Namespace) -> int:
             "run jared ties <N> later for full pass)"
         )
     )
+
+    # Phase 6: surface the NATIVE_DEPENDENCIES degradation note as an additional
+    # diagnostic line (the fetch still succeeds, but blocked_by fields are empty).
+    native_dep_note = degraded_or_none(
+        board,
+        Capability.NATIVE_DEPENDENCIES,
+        "native blocked-by edges for ties",
+        "blocked_by fields will be empty — ties analysis uses body-ref signals only",
+    )
+    if native_dep_note:
+        diagnostic = f"{diagnostic}\n{native_dep_note}" if diagnostic else native_dep_note
 
     # Single batched fetch, then resolve target by walking the result.
     # Replaces the older Board.get_issue + fetch_open_issues_for_ties pair
