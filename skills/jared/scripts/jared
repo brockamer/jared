@@ -696,6 +696,15 @@ def _cmd_file(args: argparse.Namespace) -> int:
     issue_url = item.url or f"https://github.com/{board.repo}/issues/{item.number}"
     print(f"OK: filed #{item.number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
+    # Phase 6: MARKDOWN_BODY — body content is preserved but rendered as plain text.
+    markdown_note = degraded_or_none(
+        board,
+        Capability.MARKDOWN_BODY,
+        "markdown body rendering",
+        "stored as plain text",
+    )
+    if markdown_note:
+        print(f"note: {markdown_note}")
     return 0
 
 
@@ -825,6 +834,15 @@ def _cmd_comment(args: argparse.Namespace) -> int:
     # and returns the URL.
     comment_url = board.provider.comment(args.issue_number, body)
     print(f"OK: commented on #{args.issue_number} ({comment_url})")
+    # Phase 6: MARKDOWN_BODY — content is preserved but rendered as plain text.
+    markdown_note = degraded_or_none(
+        board,
+        Capability.MARKDOWN_BODY,
+        "markdown body rendering",
+        "stored as plain text",
+    )
+    if markdown_note:
+        print(f"note: {markdown_note}")
     return 0
 
 
