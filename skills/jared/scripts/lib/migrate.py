@@ -8,7 +8,8 @@ model is anchored to Appendix A of the Phase-1 board-provider spec.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from .board_provider import Capability
 
@@ -74,3 +75,41 @@ def compute_loss_axes(
             )
         )
     return axes
+
+
+@dataclass
+class NumberMap:
+    """old #N -> new #N. Identity on GH->KF; load-bearing on KF->GitHub."""
+
+    mapping: dict[int, int] = field(default_factory=dict)
+
+    @classmethod
+    def identity(cls, numbers: list[int]) -> NumberMap:
+        return cls({n: n for n in numbers})
+
+    def put(self, old: int, new: int) -> None:
+        self.mapping[old] = new
+
+    def to_new(self, old: int) -> int | None:
+        return self.mapping.get(old)
+
+    def keys(self) -> set[int]:
+        return set(self.mapping)
+
+
+_ISSUE_REF_RE = re.compile(r"#(\d+)\b")
+
+
+def rewrite_cross_refs(text: str, number_map: NumberMap) -> str:
+    """Rewrite '#<old>' -> '#<new>' for every old number that is a key in the map.
+
+    Numbers absent from the map are left untouched — the false-positive guard
+    for '#N' tokens that are not migrated issue refs (Q2).
+    """
+
+    def _sub(m: re.Match[str]) -> str:
+        old = int(m.group(1))
+        new = number_map.to_new(old)
+        return f"#{new}" if new is not None else m.group(0)
+
+    return _ISSUE_REF_RE.sub(_sub, text)
