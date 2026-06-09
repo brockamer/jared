@@ -79,6 +79,7 @@ ALL_SUBCOMMANDS = [
     "session-lock-clear",
     "worktree-add",
     "wrap-state",
+    "migrate",
 ]
 
 
@@ -437,6 +438,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format (default: human).",
     )
     pp.set_defaults(func=_cmd_propose_partition)
+
+    migrate_p = sub.add_parser(
+        "migrate",
+        help="Copy this board to the other backend (GitHub <-> KanbanFlow). Dry-run by default.",
+        allow_abbrev=False,
+    )
+    migrate_p.add_argument(
+        "--to", required=True, choices=["github", "kanbanflow"],
+        help="Target backend. Must differ from the source (current) backend.",
+    )
+    migrate_p.add_argument(
+        "--target-doc", required=True,
+        help="Path to the target backend's project-board.md (produced by `jared init` on the target).",
+    )
+    migrate_p.add_argument("--apply", action="store_true", help="Perform writes (default: dry-run).")
+    migrate_p.add_argument("--include-closed", action="store_true", help="Also migrate Done/closed items.")
+    migrate_p.add_argument("--out", default=None, help="Path for the run artifact / resume ledger (JSON).")
+    migrate_p.add_argument("--yes", action="store_true", help="Skip the interactive confirmation on --apply.")
+    migrate_p.set_defaults(func=_cmd_migrate)
 
     return parser
 
@@ -1548,6 +1568,15 @@ def _cmd_propose_partition(args: argparse.Namespace) -> int:
         print()
 
     print("Approve? (y / edit / skip)")
+    return 0
+
+
+def _load_target_board(target_doc: str) -> Board:
+    return Board.from_path(Path(target_doc))
+
+
+def _cmd_migrate(args: argparse.Namespace) -> int:
+    # Stub — filled in by Phase 2.2 (dry-run pipeline).
     return 0
 
 
