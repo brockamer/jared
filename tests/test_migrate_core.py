@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from skills.jared.scripts.lib.board_provider import Capability
+from skills.jared.scripts.lib.board_provider import Capability, Edge
 from skills.jared.scripts.lib.migrate import (
     LossAxis,
     NumberMap,
     compute_loss_axes,
+    estimate_kf_calls,
     rewrite_cross_refs,
+    translate_edges,
 )
 
 _FULL = frozenset(Capability)
@@ -51,3 +53,22 @@ def test_rewrite_cross_refs_is_word_boundaried() -> None:
     nm = NumberMap({1: 50})
     # '#10' must NOT be rewritten by the '#1' mapping (no partial-number match).
     assert rewrite_cross_refs("see #1 and #10", nm) == "see #50 and #10"
+
+
+def test_translate_edges_through_number_map() -> None:
+    nm = NumberMap({1: 101, 2: 102, 3: 103})
+    edges = [Edge(dependent=2, blocker=1), Edge(dependent=3, blocker=2)]
+    out = translate_edges(edges, nm)
+    assert out == [Edge(dependent=102, blocker=101), Edge(dependent=103, blocker=102)]
+
+
+def test_translate_edges_drops_unmapped() -> None:
+    nm = NumberMap({2: 102})  # blocker 1 is unmapped
+    assert translate_edges([Edge(dependent=2, blocker=1)], nm) == []
+
+
+def test_estimate_kf_calls_counts_create_fields_edges_comments() -> None:
+    # 2 items, each with 1 extra custom field beyond Priority; 1 edge; 3 comments.
+    # create(1) + Priority(1) + extra-field(1) = 3 per item -> 6; +1 edge label; +3 comments = 10.
+    n = estimate_kf_calls(item_count=2, extra_fields_per_item=1, edge_count=1, comment_count=3)
+    assert n == 10
