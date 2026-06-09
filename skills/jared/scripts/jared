@@ -1575,9 +1575,101 @@ def _load_target_board(target_doc: str) -> Board:
     return Board.from_path(Path(target_doc))
 
 
+def _backend_direction(source_backend: str, to: str) -> str:
+    return f"{source_backend}->{to}"
+
+
+def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
+    """Return a list of missing-structure error strings.
+
+    Probes the target provider for every distinct (priority, status) pair present
+    in the source items by calling validate_fields(). Collects every FieldNotFound
+    / OptionNotFound into a precise missing-structure list rather than raising on
+    the first miss. An empty list means all required structure is present.
+    """
+    seen: set[tuple[str, str]] = set()
+    misses: list[str] = []
+    for item in items:
+        key = (item.priority, item.status)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            tgt.validate_fields(priority=item.priority, status=item.status)
+        except (FieldNotFound, OptionNotFound) as exc:
+            misses.append(str(exc))
+    return misses
+
+
+def _apply_migration(
+    args: argparse.Namespace,
+    source_board: Any,
+    target_board: Any,
+    direction: str,
+    items: list[BoardItem],
+    edges: Any,
+) -> int:
+    # Phase 3 — not yet implemented.
+    raise NotImplementedError("_apply_migration: Phase 3 not yet implemented")
+
+
 def _cmd_migrate(args: argparse.Namespace) -> int:
-    # Stub — filled in by Phase 2.2 (dry-run pipeline).
-    return 0
+    from lib.migrate import compute_loss_axes, estimate_kf_calls, render_report  # type: ignore[import-not-found]
+
+    source_board = _load_board(args.board)
+    if args.to == source_board.backend:
+        print(
+            f"error: --to {args.to} equals the current backend; nothing to migrate.",
+            file=sys.stderr,
+        )
+        return 2
+    target_board = _load_target_board(args.target_doc)
+    direction = _backend_direction(source_board.backend, args.to)
+
+    src = source_board.provider
+    tgt = target_board.provider
+    items = src.list_open_items()
+    edges = src.fetch_blocked_by_edges()
+    axes = compute_loss_axes(
+        source_caps=src.capabilities(),
+        target_caps=tgt.capabilities(),
+        direction=direction,
+    )
+    # Annotate edge-count magnitude on the native_dependencies axis.
+    for a in axes:
+        if a.key == "native_dependencies":
+            a.count = len(edges)
+    kf_estimate = (
+        estimate_kf_calls(
+            item_count=len(items),
+            extra_fields_per_item=1,
+            edge_count=len(edges),
+            comment_count=0,
+        )
+        if args.to == "kanbanflow"
+        else 0
+    )
+    report = render_report(
+        direction=direction,
+        item_count=len(items),
+        axes=axes,
+        kf_call_estimate=kf_estimate,
+    )
+    print(report)
+
+    if not args.apply:
+        print("\nDry-run only. Re-run with --apply to perform the migration.")
+        return 0
+
+    # Validate target structure before any writes.
+    misses = _validate_target_structure(tgt, items)
+    if misses:
+        print("missing target structure:")
+        for m in misses:
+            print(f"  {m}")
+        return 1
+
+    return _apply_migration(args, source_board, target_board, direction, items, edges)
 
 
 def main(argv: list[str] | None = None) -> int:
