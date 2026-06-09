@@ -154,6 +154,7 @@ def restrict_capabilities(
     # the class object reachable via the skills path (same file, different
     # module object).
     import importlib
+
     try:
         lib_board = importlib.import_module("lib.board")
         lib_board_cls = getattr(lib_board, "Board", None)
