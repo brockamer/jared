@@ -26,7 +26,9 @@ These settle the 7 open questions in the spec (`docs/superpowers/specs/2026-06-0
 6. **Comment author attribution (GH→KF):** **prepend** `(originally @<author>, <date>)` into the comment text.
 7. **Comment portage:** **bundle** the `list_comments()` contract extension here (Phase 0). Additive to `board_provider.py` + both providers. If it bloats the PR, it may split to a follow-up issue — but it is **not** scoped out.
 
-## OPEN design-tension — `#N` preservation on GH→KF (Phase 3 gate; do NOT implement Phase 3.1 until resolved)
+## RESOLVED — `#N` preservation on GH→KF = option (a) (extend `file(number=)`, lands in Task 0.4)
+
+> **Operator decision 2026-06-09: option (a).** Rationale retained below; the additive contract edit is Task 0.4.
 
 `KanbanFlowProvider.file()` hardcodes `number = self._next_number()` and takes **no** `number` argument — it never threads a caller-supplied number to `create_task(number_value=…)` (which the *client* supports). So the headline acceptance criterion "GH→KF preserves every `#N` exactly" is **not** achievable through the current contract. Migrating sparse GitHub numbers (#299, #301, #318…) would silently reassign them 1, 2, 3… and `add_blocked_by` (which writes `blocked-by:<N>` labels) would then point at wrong numbers.
 
@@ -35,13 +37,13 @@ Two ways out — **operator decides before Phase 3.1**:
 - **(a) Extend the contract:** add `number: int | None = None` to `BoardProvider.file()`. `KanbanFlowProvider` threads it to `create_task(number_value=number or self._next_number())`; `GitHubProjectsProvider` ignores it (GitHub auto-assigns issue numbers — it *cannot* set them, and KF→GitHub renumbers regardless). Additive, default-None, no existing caller affected. **Seam consequence:** this is a **second** `board_provider.py` edit beyond `list_comments` — still additive and still collision-free with #319 *iff* #319 keeps its degradation helper out of `board_provider.py`, but session-1 must be re-told. **(Recommended** — preserves the headline goal; KF already supports it at the client layer.)
 - **(b) Drop `#N`-preservation to a named loss:** GH→KF renumbers too (both directions renumber); cross-refs are rewritten via the number map in both directions. No contract change, smaller PR, but it abandons a stated spec goal and the GH→KF "lossless-number" property.
 
-This blocks **only** Phase 3.1. Phases 0, 1, and 2 are independent of it and can proceed. Surface the decision before starting Phase 3.
+**Resolved: option (a).** The additive `file(number: int | None = None)` edit lands in Task 0.4 (Phase 0, alongside `list_comments`); Phase 3.1 then passes `number=item.number` on GH→KF. Session-1 has been re-told the seam: #318's `board_provider.py` footprint is two additive edits.
 
 ## Parallel-session seam (do not violate — #319 runs concurrently in session-1)
 
 #319 (capability-degradation) shares files with this work. The boundary, verified by the pre-pull collision analysis:
 
-- **This plan touches `board_provider.py` additively, once — or twice if the `#N` decision picks option (a):** the `Comment` dataclass + `list_comments()` (Phase 0), plus (conditionally) a `number: int | None = None` kwarg on `file()` (Phase 3 gate). Both are additive (new symbol / new default-None kwarg). It adds **no** degradation helper and **no** note-format constant there. (#319's degradation helper must live in `board.py`/CLI, not `board_provider.py` — that constraint is what keeps these additive edits collision-free.)
+- **This plan touches `board_provider.py` additively, twice:** the `Comment` dataclass + `list_comments()` (Task 0.1) and a `number: int | None = None` kwarg on `file()` (Task 0.4). Both additive (new symbol / new default-None kwarg) — no existing caller affected. It adds **no** degradation helper and **no** note-format constant there. (#319's degradation helper must live in `board.py`/CLI, not `board_provider.py` — that constraint is what keeps these additive edits collision-free.)
 - **This plan reads `target.capabilities()` directly** to compute losses. It does **not** import any #319 helper as a build dependency.
 - **The translation core takes `frozenset[Capability]` arguments**, so its unit tests need **no** capability-restricted fake provider. Do **not** author a shared capability-restricted fake in `tests/conftest.py` — that artifact belongs to #319.
 - **`skills/jared/scripts/jared` is the one co-edited file:** append `"migrate"` to `ALL_SUBCOMMANDS` and add the parser block + `_cmd_migrate` at the *end* of the relevant lists to keep the merge hunk small. At merge, the `ALL_SUBCOMMANDS`/parser region is a mechanical union with #319's additions.
@@ -284,6 +286,42 @@ Expected: all clean, full suite green.
 ```bash
 git add skills/jared/scripts/lib/kanbanflow_provider.py tests/test_provider_comments.py tests/fake_kanbanflow.py
 git commit -m "feat(318): KanbanFlowProvider.list_comments with author-name resolution (Phase 0.3)"
+```
+
+### Task 0.4: Extend `file()` with optional `number` (TDD) — enables GH→KF `#N` preservation
+
+**Files:**
+- Modify: `skills/jared/scripts/lib/board_provider.py` (Protocol), `github_provider.py` (ignore), `kanbanflow_provider.py` (thread)
+- Test: `tests/test_provider_comments.py` (append, or a new `tests/test_provider_file_number.py`)
+
+- [ ] **Step 1: Write the failing test.**
+
+```python
+def test_kanbanflow_file_honors_explicit_number() -> None:
+    provider, client, _ = make_kf_provider_with_task()  # fresh empty board helper
+    item = provider.file(title="t", body="b", priority="High", status="Backlog", number=318)
+    assert item.number == 318  # NOT _next_number()'s 1
+
+
+def test_github_file_ignores_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    # GitHub auto-assigns; number= is accepted-and-ignored (no TypeError, no effect).
+    ...  # patch_gh to a successful create; assert the call succeeds with number=999 passed
+```
+
+- [ ] **Step 2: Run to confirm failure** — `TypeError: file() got an unexpected keyword argument 'number'`.
+
+- [ ] **Step 3: Implement.**
+  - `board_provider.py` Protocol: add `number: int | None = None,` to the `file(...)` signature (last keyword param).
+  - `github_provider.py` `file(...)`: add `number: int | None = None,` to the signature; do **not** use it (GitHub assigns issue numbers). Add a one-line comment: `# number is honored only on backends that allow setting it (KanbanFlow); GitHub auto-assigns.`
+  - `kanbanflow_provider.py` `file(...)`: add `number: int | None = None,` to the signature and change `number = self._next_number()` to `number = number if number is not None else self._next_number()`.
+
+- [ ] **Step 4: Run to confirm pass** + full gate (`ruff`/`mypy`/`pytest`).
+
+- [ ] **Step 5: Commit.**
+
+```bash
+git add skills/jared/scripts/lib/board_provider.py skills/jared/scripts/lib/github_provider.py skills/jared/scripts/lib/kanbanflow_provider.py tests/
+git commit -m "feat(318): file() accepts optional number= (KanbanFlow honors, GitHub ignores) (Phase 0.4)"
 ```
 
 ---
@@ -901,9 +939,9 @@ Item creation (preserve `#N` GH→KF / accumulate map KF→GH) → fields/status
 
 ### Task 3.1: Confirmation gate + item creation with number map (TDD)
 
-> **GATE: do not start until the `#N`-preservation design-tension above is resolved.** If option (a): land the additive `file(..., number=None)` contract edit (its own sub-task: extend Protocol + both impls + a test that `KanbanFlowProvider.file(number=318)` threads `number_value=318`, GitHub ignores it) **before** this task, and re-tell session-1 the seam. If option (b): `#N`-preservation is a named loss and GH→KF passes no number.
+> **Resolved: option (a)** — `file(..., number=None)` landed in Task 0.4. This task passes `number=item.number` on GH→KF.
 
-- [ ] Write a test: `--apply --yes` on the 2-item stub creates 2 target items and records an old→new map; without `--yes`, monkeypatch `input` to "n" and assert zero writes. Implement `_apply_migration` to: print report, require `--apply` + (`--yes` or interactive `y`), then for each source item (skipping `ledger.is_done`) call `tgt.file(...)` and `ledger.mark(old=item.number, new=created.number)`. **Number handling depends on the resolved decision:** option (a) → GH→KF passes `number=item.number` so the new number equals the old; option (b) → no number passed, KF assigns its own and the map is non-identity in both directions. Apply Status via `move`, extra fields via `set_field`, milestone via `set_milestone`. Bodies get `rewrite_cross_refs(body, ledger.number_map())` **after** all items exist (Task 3.3 re-pass) — on first creation write the raw body, then rewrite in the second pass.
+- [ ] Write a test: `--apply --yes` on the 2-item stub creates 2 target items and records an old→new map; without `--yes`, monkeypatch `input` to "n" and assert zero writes. Implement `_apply_migration` to: print report, require `--apply` + (`--yes` or interactive `y`), then for each source item (skipping `ledger.is_done`) call `tgt.file(...)` and `ledger.mark(old=item.number, new=created.number)`. **GH→KF passes `number=item.number`** so the new number equals the old (Task 0.4 contract); KF→GitHub passes no number and GitHub assigns it. Apply Status via `move`, extra fields via `set_field`, milestone via `set_milestone`. Bodies get `rewrite_cross_refs(body, ledger.number_map())` **after** all items exist (Task 3.3 re-pass) — on first creation write the raw body, then rewrite in the second pass.
 - [ ] Commit `feat(318): migrate apply — confirmation gate + item creation + number map (Phase 3.1)`.
 
 ### Task 3.2: Second-pass edges (TDD)
