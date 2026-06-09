@@ -36,6 +36,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
     BoardItem,
+    Capability,
     ClosedItem,
 )
 from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
