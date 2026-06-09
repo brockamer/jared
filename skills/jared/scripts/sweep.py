@@ -916,7 +916,19 @@ def main() -> int:
     print()
 
     print("== Native dependency hygiene ==")
-    if not repo:
+    native_dep_note = (
+        degraded_or_none(
+            capability_board,
+            Capability.NATIVE_DEPENDENCIES,
+            "native-dependency hygiene",
+            "native edges unavailable — emulated `blocked-by:` labels only",
+        )
+        if capability_board
+        else None
+    )
+    if native_dep_note:
+        print(f"  {native_dep_note}")
+    elif not repo:
         print("  (skipped — repo not determined)")
     else:
         try:

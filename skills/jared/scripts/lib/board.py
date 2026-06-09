@@ -682,8 +682,37 @@ class Board:
         NOTE: projectItems(first: 5) takes [0] — assumes one board per repo.
         If an issue is on multiple boards, the first item's Status/Priority are
         used (typically the relevant one for jared-governed repos).
+
+        Phase 6: when NATIVE_DEPENDENCIES is absent, skips the GitHub GraphQL
+        path (which includes blockedBy) and routes through
+        board.provider.list_open_items() instead, returning records with
+        blocked_by=() (empty). The jared-ties/jared-propose-partition callers
+        emit the degradation note at the diagnostic layer.
         """
         from .ties import OpenIssueForTies
+
+        # Phase 6: degrade to provider.list_open_items() when native edges absent.
+        if degraded_or_none(
+            self,
+            Capability.NATIVE_DEPENDENCIES,
+            "native blocked-by edges for ties",
+            "blocked_by fields will be empty — ties analysis uses body-ref signals only",
+        ):
+            items = self.provider.list_open_items()
+            return [
+                OpenIssueForTies(
+                    number=item.number,
+                    title=item.title,
+                    body=item.body if include_bodies else "",
+                    labels=tuple(item.labels),
+                    milestone=item.milestone,
+                    status=item.status or "Backlog",
+                    priority=item.priority,
+                    blocked_by=(),
+                )
+                for item in items
+                if (item.status or "") != "Done"
+            ]
 
         body_field = "body" if include_bodies else ""
         # Board.repo is stored as "owner/name" (see _parse and _infer_repo_from_git).
@@ -1971,15 +2000,25 @@ def fetch_audit_window(
         )
 
     if items:
-        # Invert repo-wide blockedBy edges: who depends on each candidate?
-        edges = fetch_blocked_by_edges(board.repo, cache=cache)
-        dependents: dict[int, list[int]] = {}
-        for dependent_num, blocked_by in edges.items():
-            for blocker in blocked_by:
-                if blocker.get("state") == "OPEN":
-                    dependents.setdefault(blocker["number"], []).append(dependent_num)
-        for item in items:
-            item["open_dependents"] = sorted(dependents.get(item["number"], []))
+        # Phase 6: skip the blocked-by edges enrichment when NATIVE_DEPENDENCIES absent.
+        # open_dependents will be absent from items on degraded backends — the
+        # jared-audit slash-command reads it via item.get("open_dependents", []).
+        edges_note = degraded_or_none(
+            board,
+            Capability.NATIVE_DEPENDENCIES,
+            "blocked-by edges",
+            "native edges unavailable on this backend",
+        )
+        if not edges_note:
+            # Invert repo-wide blockedBy edges: who depends on each candidate?
+            edges = fetch_blocked_by_edges(board.repo, cache=cache)
+            dependents: dict[int, list[int]] = {}
+            for dependent_num, blocked_by in edges.items():
+                for blocker in blocked_by:
+                    if blocker.get("state") == "OPEN":
+                        dependents.setdefault(blocker["number"], []).append(dependent_num)
+            for item in items:
+                item["open_dependents"] = sorted(dependents.get(item["number"], []))
 
     return {
         "items": items,

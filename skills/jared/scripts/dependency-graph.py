@@ -53,6 +53,12 @@ from lib.board import (
 from lib.board import (
     run_gh as board_run_gh,
 )
+from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    Capability,
+)
+from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
+    degraded_or_none,
+)
 
 # ---------- gh helpers ----------
 
@@ -137,7 +143,9 @@ def fetch_field_priorities(repo: str, *, board: Board | None = None) -> dict[int
     return priorities
 
 
-def fetch_all_native_dependencies(repo: str) -> dict[int, list[int]] | None:
+def fetch_all_native_dependencies(
+    repo: str, *, board: Board | None = None
+) -> dict[int, list[int]] | None:
     """Fetch native blockedBy edges for ALL open issues in one paginated call.
 
     Returns `{issue_number: [open_blocker_numbers]}` (closed-state blockers
@@ -147,9 +155,24 @@ def fetch_all_native_dependencies(repo: str) -> dict[int, list[int]] | None:
     "fall back to body-text parsing" and missing-key as "no native data
     for this issue."
 
+    Phase 6: when ``board`` is provided and NATIVE_DEPENDENCIES is absent,
+    emits a degradation note to stderr and returns None so the caller
+    falls through to body-text parsing (do not silently switch — the note
+    makes the fallback explicit).
+
     Replaces the old per-issue call (which made one GraphQL request per
     open issue — O(N) instead of O(pages)).
     """
+    if board is not None:
+        note = degraded_or_none(
+            board,
+            Capability.NATIVE_DEPENDENCIES,
+            "native blocked-by edges",
+            "native edges unavailable — falling back to `## Blocked by` body-text parsing",
+        )
+        if note:
+            print(f"  {note}", file=sys.stderr)
+            return None
     try:
         edges = board_fetch_blocked_by_edges(repo, cache="60s")
     except (GhInvocationError, RuntimeError):
@@ -386,13 +409,22 @@ def main() -> int:
     issues_by_number = {i["number"]: i for i in issues}
     open_numbers = set(issues_by_number.keys())
 
+    # Resolve capabilities offline (no live API calls — never touch board.provider).
+    # If the board doc can't be found/parsed, capability_board stays None and all
+    # gates are skipped, preserving pre-Phase-6 behaviour.
+    capability_board: Board | None = None
+    try:  # noqa: SIM105
+        capability_board = Board.from_default()
+    except Exception:  # noqa: BLE001 — offline doc parse; never fail the graph build
+        pass
+
     # Pre-fetch ALL native dependency edges for the repo in one paginated
     # GraphQL call instead of one per issue. None means the GraphQL call
     # failed entirely; any per-issue lookup miss means no native data for
     # that issue (treat as fall-back-to-body, same as before).
     all_native: dict[int, list[int]] | None = None
     if not args.no_native:
-        all_native = fetch_all_native_dependencies(args.repo)
+        all_native = fetch_all_native_dependencies(args.repo, board=capability_board)
 
     # Build graph: N → set of issues N depends on
     graph: dict[int, set[int]] = defaultdict(set)
