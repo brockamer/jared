@@ -1,6 +1,14 @@
+---
+**Shipped in #317 on 2026-06-05. Final decisions captured in issue body.**
+---
+
 # Phase 4 — Init-time Backend Selection Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+## Issue
+
+- #317
 
 **Goal:** Make jared's board backend selectable at `jared init` and make a KanbanFlow-backed `docs/project-board.md` parse and run, adapting to a board's existing columns via a Status→column map rather than mutating board structure.
 
