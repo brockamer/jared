@@ -104,6 +104,8 @@ Flow:
    For body/title edits: `gh api -X PATCH /repos/{owner}/{repo}/issues/{N} -f title=… -f body=…`
    For milestone mutations: `gh api -X PATCH /repos/{owner}/{repo}/milestones/{N} …` (or `DELETE` for `dissolve`).
 
+   **Body shape — canonical, never the audit-report shape.** Any issue body the audit *writes* — a `reshape` body edit, or a (restraint-gated) discovered-scope filing per SKILL.md § "Post-investigation findings" — follows the canonical `assets/issue-body.md.template` structure: one-sentence summary → `## Current state` → `## Decisions` → `## Acceptance criteria` (wrapped in a `<details><summary>Expand</summary>` fold) → `## Planning`. Do **not** emit the audit *report's* analytical shape (`## Context` / `## Why` / `## Proposed change` / `## Effort / Confidence`, with acceptance criteria as bare `- [ ]` bullets) into an issue body — that shape belongs to the writeup, not the board. A discovered-scope filing goes through `jared file`, which enforces the template plus Status/Priority atomically. No code gates on body shape — the readiness gate is wrapper-agnostic since #307 — so this is display consistency: an audit-touched issue should read identically to a `jared file` issue.
+
    Per-issue atomicity is provided by the existing atoms. Batch-level atomicity is out of scope; if item 4 of a batch fails after items 1–3 succeeded, re-run just item 4.
 
 10. **PII pre-flight runs on every proposed body edit and close comment**, same as `jared file`.
