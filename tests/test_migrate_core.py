@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from skills.jared.scripts.lib.board_provider import Capability
-from skills.jared.scripts.lib.migrate import LossAxis, compute_loss_axes
+from skills.jared.scripts.lib.migrate import (
+    LossAxis,
+    NumberMap,
+    compute_loss_axes,
+    rewrite_cross_refs,
+)
 
 _FULL = frozenset(Capability)
 _NONE: frozenset[Capability] = frozenset()
@@ -27,3 +32,22 @@ def test_kanbanflow_to_github_adds_renumber_axis() -> None:
     assert "renumber" in keys
     # Capabilities the target ADDS are not losses.
     assert "milestone_state" not in keys
+
+
+def test_number_map_identity_for_gh_to_kf() -> None:
+    nm = NumberMap.identity([1, 2, 3])
+    assert nm.to_new(2) == 2
+    assert nm.keys() == {1, 2, 3}
+
+
+def test_rewrite_cross_refs_only_touches_mapped_numbers() -> None:
+    nm = NumberMap({10: 101, 11: 102})
+    text = "Depends on #10 and #11, but #9999 is an external tracker ref."
+    out = rewrite_cross_refs(text, nm)
+    assert out == "Depends on #101 and #102, but #9999 is an external tracker ref."
+
+
+def test_rewrite_cross_refs_is_word_boundaried() -> None:
+    nm = NumberMap({1: 50})
+    # '#10' must NOT be rewritten by the '#1' mapping (no partial-number match).
+    assert rewrite_cross_refs("see #1 and #10", nm) == "see #50 and #10"
