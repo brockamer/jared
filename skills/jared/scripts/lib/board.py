@@ -1050,6 +1050,12 @@ def _format_token_scope_diagnostic() -> str:
     auth surfaces are independent so `gh auth refresh -s project` isn't assumed
     to fix the MCP side. Always-mention is the only viable shape here, since
     conditional-on-MCP-failure can't be detected from a gh subprocess path.
+
+    Phase 6 deliberate non-finding (MCP_TIER): KanbanFlow routes through
+    KanbanFlowClient (HTTP/Bearer), never through run_gh_raw; the TOKEN_SCOPE_ERROR
+    guard means only GitHub PAT errors trigger this path. So MCP_TIER is always
+    present when this function runs — gating the MCP paragraph on `board.capabilities()`
+    would be unreachable dead code. The capability is therefore not checked here.
     """
     lines: list[str] = ["", "Token-scope diagnostic:"]
 

@@ -932,3 +932,128 @@ def test_find_orphaned_returns_empty_with_note_when_closed_state_absent(
 
     assert result == []
     assert "degraded: orphaned-dependency check unavailable on" in err
+
+
+# ---------------------------------------------------------------------------
+# Task 7: MARKDOWN_BODY + MCP_TIER Python surfaces
+# Note: _format_token_scope_diagnostic (MCP_TIER) is a deliberate non-finding —
+# run_gh_raw is GitHub-only (KanbanFlow routes through KanbanFlowClient, never gh),
+# so MCP_TIER is always present when that function is reached. No gate needed.
+# ---------------------------------------------------------------------------
+
+
+# 7a: _cmd_comment emits MARKDOWN_BODY note when capability absent
+
+def test_comment_appends_markdown_body_note_when_markdown_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_cmd_comment prints a MARKDOWN_BODY degradation note when the capability is absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    board_md = write_minimal_board(tmp_path)
+
+    import importlib
+
+    import skills.jared.scripts.lib.github_provider as _skill_ghp
+
+    fake_url = "https://github.com/brockamer/findajob/issues/1#issuecomment-99"
+
+    monkeypatch.setattr(
+        _skill_ghp.GitHubProjectsProvider, "comment",
+        lambda self, num, body: fake_url,
+    )
+    try:
+        _lib_ghp = importlib.import_module("lib.github_provider")
+        _lib_cls = getattr(_lib_ghp, "GitHubProjectsProvider", None)
+        if _lib_cls is not None and _lib_cls is not _skill_ghp.GitHubProjectsProvider:
+            monkeypatch.setattr(
+                _lib_cls, "comment",
+                lambda self, num, body: fake_url,
+            )
+    except ModuleNotFoundError:
+        pass
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeGhResult(stdout="{}"),
+    )
+
+    rc = mod.main(["--board", str(board_md), "comment", "42", "--body", "hello"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "OK: commented on #42" in out
+    assert "degraded: markdown body rendering unavailable on" in out
+    assert "stored as plain text" in out
+
+
+# 7b: _cmd_file emits MARKDOWN_BODY note when capability absent
+
+def test_file_appends_markdown_body_note_when_markdown_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_cmd_file prints a MARKDOWN_BODY degradation note (no skip) when the capability is absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    board_md = write_minimal_board(tmp_path)
+
+    import importlib
+
+    import skills.jared.scripts.lib.board_provider as _skill_bp
+    import skills.jared.scripts.lib.github_provider as _skill_ghp
+
+    fake_item = _skill_bp.BoardItem(
+        number=101,
+        title="Test issue",
+        status="Backlog",
+        priority="Medium",
+        url="https://github.com/brockamer/findajob/issues/101",
+    )
+
+    monkeypatch.setattr(
+        _skill_ghp.GitHubProjectsProvider, "validate_fields",
+        lambda self, **kw: None,
+    )
+    monkeypatch.setattr(
+        _skill_ghp.GitHubProjectsProvider, "list_milestones",
+        lambda self: [],
+    )
+    monkeypatch.setattr(
+        _skill_ghp.GitHubProjectsProvider, "file",
+        lambda self, **kw: fake_item,
+    )
+    try:
+        _lib_ghp = importlib.import_module("lib.github_provider")
+        _lib_cls = getattr(_lib_ghp, "GitHubProjectsProvider", None)
+        if _lib_cls is not None and _lib_cls is not _skill_ghp.GitHubProjectsProvider:
+            monkeypatch.setattr(_lib_cls, "validate_fields", lambda self, **kw: None)
+            monkeypatch.setattr(_lib_cls, "list_milestones", lambda self: [])
+            monkeypatch.setattr(_lib_cls, "file", lambda self, **kw: fake_item)
+    except ModuleNotFoundError:
+        pass
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeGhResult(stdout="{}"),
+    )
+
+    rc = mod.main([
+        "--board", str(board_md),
+        "file",
+        "--title", "Test issue",
+        "--priority", "Medium",
+        "--no-milestone",
+        "--body", "Issue body text here",
+    ])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "OK: filed #101" in out
+    assert "degraded: markdown body rendering unavailable on" in out
+    assert "stored as plain text" in out
