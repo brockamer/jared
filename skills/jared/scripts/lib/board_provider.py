@@ -123,6 +123,7 @@ class BoardProvider(Protocol):
         labels: list[str] | None = None,
         milestone: str | None = None,
         fields: list[tuple[str, str]] | None = None,
+        number: int | None = None,
     ) -> BoardItem: ...
     def add_to_board(
         self,
