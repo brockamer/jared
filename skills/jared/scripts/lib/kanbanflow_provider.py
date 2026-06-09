@@ -338,12 +338,13 @@ class KanbanFlowProvider:
         labels: list[str] | None = None,
         milestone: str | None = None,
         fields: list[tuple[str, str]] | None = None,
+        number: int | None = None,
     ) -> BoardItem:
         effective_status = status or "Backlog"
         self.validate_fields(priority=priority, status=effective_status, fields=fields)
         column_id = self._column_id(effective_status)
         swimlane_id = self._swimlane_id(milestone) if milestone else None
-        number = self._next_number()
+        number = number if number is not None else self._next_number()
         kf_labels = [KfLabel(name=n) for n in (labels or [])]
         task = self._client.create_task(
             name=title,

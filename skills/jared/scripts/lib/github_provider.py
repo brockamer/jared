@@ -594,6 +594,7 @@ class GitHubProjectsProvider:
         labels: list[str] | None = None,
         milestone: str | None = None,
         fields: list[tuple[str, str]] | None = None,
+        number: int | None = None,
     ) -> BoardItem:
         """Atomic: create issue, add to project, set Priority + Status + extras.
 
@@ -612,6 +613,8 @@ class GitHubProjectsProvider:
         responsible for validation — same as how the CLI validates before calling
         this method).
         """
+        # number= is honored only on backends that allow setting it (KanbanFlow);
+        # GitHub auto-assigns issue numbers and this kwarg is intentionally ignored.
         effective_status = status or "Backlog"
 
         # Pre-resolve field/option IDs before ANY gh call so misconfiguration
