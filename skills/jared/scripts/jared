@@ -1583,12 +1583,20 @@ def _backend_direction(source_backend: str, to: str) -> str:
 def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
     """Return a list of missing-structure error strings.
 
-    Probes the target provider for every distinct (priority, status) pair present
-    in the source items by calling validate_fields(). Collects every FieldNotFound
-    / OptionNotFound into a precise missing-structure list rather than raising on
-    the first miss. An empty list means all required structure is present.
+    The target backend cannot create columns/options/swimlanes from the API, so
+    every structural element a source item needs must pre-exist. This probes two
+    dimensions before any write and aggregates all gaps (never raising on the
+    first miss); an empty list means all required structure is present:
+
+    - Status + Priority (+ extra fields): validate_fields() per distinct
+      (priority, status) pair, collecting FieldNotFound / OptionNotFound.
+    - Milestone (swimlane): validate_fields does NOT cover swimlanes — the
+      KanbanFlow provider resolves the swimlane separately inside file()/
+      set_milestone(), so a missing swimlane would otherwise explode mid-apply.
+      Every distinct source milestone name must be a known target milestone
+      (compared via the neutral list_milestones() names — no provider internals).
     """
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str | None, str | None]] = set()
     misses: list[str] = []
     for item in items:
         key = (item.priority, item.status)
@@ -1599,6 +1607,10 @@ def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
             tgt.validate_fields(priority=item.priority, status=item.status)
         except (FieldNotFound, OptionNotFound) as exc:
             misses.append(str(exc))
+    target_milestones = {m.name for m in tgt.list_milestones()}
+    source_milestones = {item.milestone for item in items if item.milestone}
+    for name in sorted(source_milestones - target_milestones):
+        misses.append(f"milestone (swimlane) '{name}' not on the target board")
     return misses
 
 

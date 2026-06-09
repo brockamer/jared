@@ -204,3 +204,36 @@ def test_apply_refuses_on_missing_target_structure(
     out = capsys.readouterr().out
     assert "missing target structure:" in out
     assert tgt.created == []  # no writes performed
+
+
+def test_apply_refuses_on_missing_target_swimlane(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A source item carrying a milestone whose swimlane does not pre-exist on the
+    target must be refused before any write. validate_fields covers Status +
+    Priority + extra fields but NOT swimlanes (KanbanFlow's file() resolves the
+    swimlane separately), so the milestone dimension is a distinct check:
+    every source milestone name must be a known target milestone (swimlane)."""
+    from tests.conftest import import_cli
+
+    cli = import_cli()
+
+    src = _StubProvider(
+        items=[
+            BoardItem(
+                number=1, title="a", status="Up Next", priority="High", body="", milestone="M1"
+            ),
+        ],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    # validate_fields passes (validate_raises=None); the target has no "M1"
+    # swimlane (empty milestones), so the milestone gap is the only miss.
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset(), milestones=[])
+    _patch_boards(monkeypatch, src, tgt, cli_override=cli)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "missing target structure:" in out
+    assert "M1" in out
+    assert tgt.created == []  # no writes performed
