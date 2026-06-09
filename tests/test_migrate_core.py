@@ -3,9 +3,11 @@ from __future__ import annotations
 from skills.jared.scripts.lib.board_provider import Capability, Edge
 from skills.jared.scripts.lib.migrate import (
     LossAxis,
+    MigrationLedger,
     NumberMap,
     compute_loss_axes,
     estimate_kf_calls,
+    render_report,
     rewrite_cross_refs,
     translate_edges,
 )
@@ -72,3 +74,24 @@ def test_estimate_kf_calls_counts_create_fields_edges_comments() -> None:
     # create(1) + Priority(1) + extra-field(1) = 3 per item -> 6; +1 edge label; +3 comments = 10.
     n = estimate_kf_calls(item_count=2, extra_fields_per_item=1, edge_count=1, comment_count=3)
     assert n == 10
+
+
+def test_render_report_lists_every_loss_and_estimate() -> None:
+    axes = [LossAxis(key="renumber", description="reassigned", count=5)]
+    text = render_report(
+        direction="kanbanflow->github", item_count=5, axes=axes, kf_call_estimate=0
+    )
+    assert "kanbanflow->github" in text
+    assert "5 items" in text
+    assert "reassigned" in text
+
+
+def test_ledger_round_trips_and_marks_completed() -> None:
+    led = MigrationLedger(direction="github->kanbanflow")
+    led.mark(old=1, new=1)
+    led.mark(old=2, new=2)
+    blob = led.to_json()
+    back = MigrationLedger.from_json(blob)
+    assert back.is_done(1) and back.is_done(2)
+    assert not back.is_done(3)
+    assert back.number_map().to_new(2) == 2
