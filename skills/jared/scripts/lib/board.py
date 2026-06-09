@@ -1978,26 +1978,37 @@ def fetch_audit_window(
             items = kept
 
     if entity_type in ("milestones", "both"):
-        owner, name = board.repo.split("/", 1)
-        milestones = (
-            run_gh(
-                [
-                    "api",
-                    f"/repos/{owner}/{name}/milestones",
-                    "--paginate",
-                    "-X",
-                    "GET",
-                    "-f",
-                    "state=open",
-                    "-f",
-                    "sort=due_on",
-                    "-f",
-                    "direction=asc",
-                ],
-                cache=cache,
-            )
-            or []
+        # Phase 6: gate the milestones REST call on MILESTONE_STATE availability.
+        # _cmd_audit_fetch already refuses --type milestones (exit 2) and downgrades
+        # --type both → issues only when MILESTONE_STATE is absent, so this guard
+        # is a defensive belt-and-suspenders for any callers that bypass the CLI.
+        milestone_note = degraded_or_none(
+            board,
+            Capability.MILESTONE_STATE,
+            "milestone audit window",
+            "no milestone state/due-dates on this backend",
         )
+        if not milestone_note:
+            owner, name = board.repo.split("/", 1)
+            milestones = (
+                run_gh(
+                    [
+                        "api",
+                        f"/repos/{owner}/{name}/milestones",
+                        "--paginate",
+                        "-X",
+                        "GET",
+                        "-f",
+                        "state=open",
+                        "-f",
+                        "sort=due_on",
+                        "-f",
+                        "direction=asc",
+                    ],
+                    cache=cache,
+                )
+                or []
+            )
 
     if items:
         # Phase 6: skip the blocked-by edges enrichment when NATIVE_DEPENDENCIES absent.

@@ -651,3 +651,184 @@ def test_stage_main_native_edges_note_in_render_when_degraded(
     )
 
     assert "note: degraded: native blocked-by edges unavailable on" in output
+
+
+# ---------------------------------------------------------------------------
+# Task 5: MILESTONE_STATE surfaces + whole-scope-absent refusals
+# ---------------------------------------------------------------------------
+
+
+# 5a: jared audit fetch --type milestones exits nonzero when MILESTONE_STATE absent
+
+def test_audit_fetch_milestones_refuses_when_milestone_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--type milestones exits 2 with a degraded note when MILESTONE_STATE absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    board_md = write_minimal_board(tmp_path)
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeGhResult(stdout="[]"),
+    )
+
+    rc = mod.main(
+        ["--board", str(board_md), "audit", "fetch", "--type", "milestones", "--count", "5"]
+    )
+    err = capsys.readouterr().err
+
+    assert rc == 2
+    assert "degraded" in err and "milestone" in err.lower()
+
+
+# 5b: jared audit fetch --type both warns + continues issues-only
+
+def test_audit_fetch_both_warns_and_continues_issues_when_milestone_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--type both warns and falls back to issues-only when MILESTONE_STATE absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    board_md = write_minimal_board(tmp_path)
+
+    def _fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(str(a) for a in args)
+        if "issue" in joined and "list" in joined:
+            return FakeGhResult(stdout="[]")
+        if "graphql" in joined:
+            return FakeGhResult(stdout='{"data": {"viewer": {"rateLimit": {"remaining": 9999}}}}')
+        return FakeGhResult(stdout="[]")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", _fake_run)
+
+    rc = mod.main(["--board", str(board_md), "audit", "fetch", "--type", "both", "--count", "5"])
+    captured = capsys.readouterr()
+
+    # rc 0: continues with issues-only.
+    assert rc == 0
+    # stderr carries the warning.
+    assert "degraded" in captured.err and "milestone" in captured.err.lower()
+    # JSON output: milestones should be empty (the REST milestones call was skipped).
+    result = json.loads(captured.out)
+    assert result["milestones"] == []
+
+
+# 5c: fetch_audit_window milestones REST skipped when MILESTONE_STATE absent
+
+def test_fetch_audit_window_milestones_skipped_when_milestone_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """fetch_audit_window skips the milestones REST call when MILESTONE_STATE absent."""
+    from skills.jared.scripts.lib.board import Board, fetch_audit_window
+
+    restrict_capabilities(monkeypatch)
+
+    b = Board.__new__(Board)
+    b.backend = "github"
+    b.repo = "brockamer/jared"
+
+    milestones_called: list[bool] = []
+
+    def _fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        joined = " ".join(str(a) for a in args)
+        if "api" in joined and "milestones" in joined:
+            milestones_called.append(True)
+            return FakeGhResult(stdout="[]")
+        if "issue" in joined and "list" in joined:
+            return FakeGhResult(stdout="[]")
+        if "graphql" in joined:
+            return FakeGhResult(stdout='{"data": {"viewer": {"rateLimit": {"remaining": 9999}}}}')
+        return FakeGhResult(stdout="[]")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", _fake_run)
+
+    result = fetch_audit_window(b, entity_type="milestones")
+
+    assert result["milestones"] == []
+    assert not milestones_called
+
+
+# 5d: stage.py milestone-proximity note in render when MILESTONE_STATE absent
+
+def test_stage_milestone_proximity_note_when_milestone_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """stage render includes milestone-proximity note when MILESTONE_STATE absent."""
+    stage = import_stage()
+    restrict_capabilities(monkeypatch)
+
+    from skills.jared.scripts.lib.board import Board
+    from skills.jared.scripts.lib.board_provider import Capability
+    from skills.jared.scripts.lib.capabilities import degraded_or_none
+
+    b = Board.__new__(Board)
+    b.backend = "github"
+    b.repo = "brockamer/jared"
+
+    milestone_proximity_note = degraded_or_none(
+        b,
+        Capability.MILESTONE_STATE,
+        "milestone-proximity ranking",
+        "ranked by Priority and age only",
+    )
+
+    proposals = stage.StageProposals(
+        promotions=[],
+        deferred=[],
+        unblocked=[],
+        real_world_still_blocked=[],
+        almost_ready=[],
+    )
+
+    now = dt.datetime(2026, 6, 9, 12, 0, tzinfo=dt.UTC)
+    output = stage.render(
+        proposals,
+        now=now,
+        today=now.date(),
+        report_only=True,
+        milestone_proximity_note=milestone_proximity_note,
+    )
+
+    assert "note: degraded: milestone-proximity ranking unavailable on" in output
+
+
+# 5e: jared file --milestone NAME refuses with exit 2 when MILESTONE_STATE absent
+
+def test_file_milestone_refuses_when_milestone_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """jared file --milestone NAME exits 2 with degraded note when MILESTONE_STATE absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    board_md = write_minimal_board(tmp_path)
+
+    monkeypatch.setattr(
+        "skills.jared.scripts.lib.board.subprocess.run",
+        lambda *a, **kw: FakeGhResult(stdout="{}"),
+    )
+
+    rc = mod.main([
+        "--board", str(board_md),
+        "file",
+        "--title", "Test issue",
+        "--priority", "High",
+        "--status", "Backlog",
+        "--milestone", "v1.0",
+        "--body", "test body",
+    ])
+    err = capsys.readouterr().err
+
+    assert rc == 2
+    assert "degraded" in err and "milestone" in err.lower()

@@ -292,6 +292,7 @@ def render(
     report_only: bool = False,
     backlog_age_note: str | None = None,
     native_edges_note: str | None = None,
+    milestone_proximity_note: str | None = None,
 ) -> str:
     """Format StageProposals as the stdout block documented in the spec."""
     if today is None:
@@ -302,6 +303,8 @@ def render(
         lines.append(f"  note: {backlog_age_note}")
     if native_edges_note:
         lines.append(f"  note: {native_edges_note}")
+    if milestone_proximity_note:
+        lines.append(f"  note: {milestone_proximity_note}")
     lines.append("")
     lines.append("== Backlog → Up Next ==")
     lines.append("")
@@ -508,6 +511,12 @@ def main(argv: list[str] | None = None) -> int:
         "native blocked-by edges",
         "blocker detection from `## Blocked by` body sections only",
     )
+    milestone_proximity_note = degraded_or_none(
+        board,
+        Capability.MILESTONE_STATE,
+        "milestone-proximity ranking",
+        "ranked by Priority and age only",
+    )
     items = fetch_items_for_stage(board, skip_native_edges=native_edges_note is not None)
     today = date.today()
     proposals = stage_proposals(items, up_next_cap=args.up_next_cap, today=today)
@@ -525,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
         report_only=args.report_only,
         backlog_age_note=backlog_age_note,
         native_edges_note=native_edges_note,
+        milestone_proximity_note=milestone_proximity_note,
     )
     print(output)
     return 0
