@@ -1,6 +1,14 @@
+---
+**Shipped in #317 on 2026-06-05. Final decisions captured in issue body.**
+---
+
 # Phase 4 — Init-time backend selection (design)
 
 Epic #313 ("Make jared board-backend-agnostic"), Phase 4 of 6. Issue #317.
+
+## Issue
+
+- #317
 
 Predecessors (shipped): Phase 1 (#314, `BoardProvider` extraction), Phase 2 (#315,
 KanbanFlow REST client), Phase 3 (#316, `KanbanFlowProvider`). This phase makes the
