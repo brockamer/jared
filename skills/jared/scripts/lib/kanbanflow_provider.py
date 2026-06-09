@@ -16,8 +16,16 @@ import sys
 from typing import Protocol
 
 from .board import FieldNotFound, ItemNotFound, OptionNotFound
-from .board_provider import BoardItem, Capability, ClosedItem, Edge, IssueRef, Milestone
-from .kanbanflow_client import KanbanFlowNotFoundError, KfBoard, KfCustomFieldDef, KfLabel, KfTask
+from .board_provider import BoardItem, Capability, ClosedItem, Comment, Edge, IssueRef, Milestone
+from .kanbanflow_client import (
+    KanbanFlowNotFoundError,
+    KfBoard,
+    KfComment,
+    KfCustomFieldDef,
+    KfLabel,
+    KfTask,
+    KfUser,
+)
 from .kf_number_index import KfNumberIndex
 
 # NOTE: later tasks add imports as they first use them — KanbanFlowNotFoundError
@@ -87,6 +95,8 @@ class KanbanFlowClientLike(Protocol):
         self, task_id: str, custom_field_id: str, value: str | float
     ) -> None: ...
     def add_comment(self, task_id: str, text: str) -> str: ...
+    def list_users(self) -> list[KfUser]: ...
+    def list_comments(self, task_id: str) -> list[KfComment]: ...
     def add_label(self, task_id: str, name: str) -> None: ...
     def remove_label(self, task_id: str, name: str) -> None: ...
 
@@ -274,6 +284,30 @@ class KanbanFlowProvider:
         # (VELOCITY_TIMESTAMPS omitted). Degrade to empty; Phase 6 gates callers
         # on the capability.
         return []
+
+    def _user_name(self, user_id: str) -> str:
+        if not hasattr(self, "_user_name_by_id"):
+            self._user_name_by_id: dict[str, str] = {
+                u.id: u.name for u in self._client.list_users()
+            }
+        return self._user_name_by_id.get(user_id, user_id)
+
+    def list_comments(self, ref: IssueRef) -> list[Comment]:
+        """Return a task's comments oldest→newest as neutral Comments.
+
+        Wraps the client's list_comments; resolves KF authorUserId to a display
+        name (lazily, one /users fetch per provider instance). Falls back to the
+        raw id if the user is unknown.
+        """
+        task_id = self._resolve_id(ref)
+        return [
+            Comment(
+                author=self._user_name(c.author_user_id) if c.author_user_id else "",
+                body=c.text,
+                created_at=c.created_timestamp,
+            )
+            for c in self._client.list_comments(task_id)
+        ]
 
     # --- writes ---
     def validate_fields(
