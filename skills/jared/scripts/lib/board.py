@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from . import cache
-from .board_provider import BoardProvider
+from .board_provider import BoardProvider, Capability
 
 if TYPE_CHECKING:
     from .ties import OpenIssueForTies
@@ -479,6 +479,24 @@ class Board:
                     expected_board_id=self.board_id,
                 )
         return self._provider
+
+    def capabilities(self) -> frozenset[Capability]:
+        """The backend's static capability set, resolved WITHOUT constructing the
+        provider — constructing the KanbanFlow provider makes live API calls.
+        Capabilities are a compile-time constant per backend, so the provider class
+        attribute is authoritative and fully offline.
+        """
+        if self.backend == "kanbanflow":
+            from .kanbanflow_provider import KanbanFlowProvider
+
+            return KanbanFlowProvider.default_capabilities()
+        if self.backend == "github":
+            from .github_provider import GitHubProjectsProvider
+
+            return GitHubProjectsProvider.default_capabilities()
+        raise BoardConfigError(
+            f"backend '{self.backend}' has no capability set. Supported: 'github', 'kanbanflow'."
+        )
 
     def run_gh(
         self, args: list[str], *, cache: str | None = None, input_text: str | None = None
