@@ -8,6 +8,7 @@ model is anchored to Appendix A of the Phase-1 board-provider spec.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -139,3 +140,58 @@ def estimate_kf_calls(
     """
     per_item = 1 + 1 + extra_fields_per_item
     return item_count * per_item + edge_count + comment_count
+
+
+def render_report(
+    *, direction: Direction, item_count: int, axes: list[LossAxis], kf_call_estimate: int
+) -> str:
+    lines = [
+        f"Migration plan: {direction}",
+        f"  {item_count} items to copy",
+    ]
+    if kf_call_estimate:
+        lines.append(f"  ~{kf_call_estimate} KanbanFlow write calls (1,000/hr budget)")
+    lines.append("  Named losses (Appendix A):")
+    if not axes:
+        lines.append("    (none — lossless in this direction)")
+    for a in axes:
+        suffix = f" [{a.count}]" if a.count else ""
+        lines.append(f"    - {a.key}: {a.description}{suffix}")
+    return "\n".join(lines)
+
+
+@dataclass
+class MigrationLedger:
+    """Durable resume ledger + run artifact. completed maps old#->new#."""
+
+    direction: Direction
+    completed: dict[int, int] = field(default_factory=dict)
+    losses: list[str] = field(default_factory=list)
+
+    def mark(self, *, old: int, new: int) -> None:
+        self.completed[old] = new
+
+    def is_done(self, old: int) -> bool:
+        return old in self.completed
+
+    def number_map(self) -> NumberMap:
+        return NumberMap(dict(self.completed))
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "direction": self.direction,
+                "completed": {str(k): v for k, v in self.completed.items()},
+                "losses": self.losses,
+            },
+            indent=2,
+        )
+
+    @classmethod
+    def from_json(cls, blob: str) -> MigrationLedger:
+        data = json.loads(blob)
+        return cls(
+            direction=str(data["direction"]),
+            completed={int(k): int(v) for k, v in (data.get("completed") or {}).items()},
+            losses=[str(x) for x in (data.get("losses") or [])],
+        )
