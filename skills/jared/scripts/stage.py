@@ -32,6 +32,12 @@ from lib.board import Board  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # noqa: E402
     fetch_blocked_by_edges as _fetch_blocked_by_edges,
 )
+from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    Capability,
+)
+from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
+    degraded_or_none,
+)
 
 
 @dataclass(frozen=True)
@@ -284,12 +290,15 @@ def render(
     now: datetime,
     today: date | None = None,
     report_only: bool = False,
+    backlog_age_note: str | None = None,
 ) -> str:
     """Format StageProposals as the stdout block documented in the spec."""
     if today is None:
         today = now.date()
     lines: list[str] = []
     lines.append(f"/jared-stage — proposals {now.strftime('%Y-%m-%d %H:%M')}")
+    if backlog_age_note:
+        lines.append(f"  note: {backlog_age_note}")
     lines.append("")
     lines.append("== Backlog → Up Next ==")
     lines.append("")
@@ -486,7 +495,19 @@ def main(argv: list[str] | None = None) -> int:
     today = date.today()
     proposals = stage_proposals(items, up_next_cap=args.up_next_cap, today=today)
     now = datetime.now(UTC).astimezone()
-    output = render(proposals, now=now, today=today, report_only=args.report_only)
+    backlog_age_note = degraded_or_none(
+        board,
+        Capability.VELOCITY_TIMESTAMPS,
+        "Backlog-age tiebreaker",
+        "no creation timestamps — promotion order may differ",
+    )
+    output = render(
+        proposals,
+        now=now,
+        today=today,
+        report_only=args.report_only,
+        backlog_age_note=backlog_age_note,
+    )
     print(output)
     return 0
 

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from . import cache
 from .board_provider import BoardProvider, Capability
+from .capabilities import degraded_or_none
 
 if TYPE_CHECKING:
     from .ties import OpenIssueForTies
@@ -1771,6 +1772,7 @@ def compute_velocity(
     *,
     days: int = 14,
     cache: str | None = None,
+    board: Board | None = None,
 ) -> dict[str, Any]:
     """Recent shipping cadence — count + median age-at-close + median PR duration.
 
@@ -1782,8 +1784,29 @@ def compute_velocity(
         window. Proxy for "time to ship" — used as the anchor for proposed
         milestone due dates in /jared-audit. PR duration is a tighter signal
         than issue creation→close (which folds in backlog dwell time).
+
+    When ``board`` is provided and the backend lacks ``VELOCITY_TIMESTAMPS``,
+    emits a degradation note to stderr and returns the empty/zero result.
     """
     from statistics import median
+
+    if board is not None:
+        note = degraded_or_none(
+            board,
+            Capability.VELOCITY_TIMESTAMPS,
+            "velocity computation",
+            "no closed/merged timestamps — velocity is empty",
+        )
+        if note:
+            import sys as _sys
+
+            print(f"  {note}", file=_sys.stderr)
+            return {
+                "window_days": days,
+                "closures_in_window": 0,
+                "median_age_at_close": 0.0,
+                "median_pr_duration_days": 0.0,
+            }
 
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     # Guard against silent truncation: gh caps the result at --limit. An at-limit
@@ -1872,9 +1895,17 @@ def fetch_audit_window(
     the date anchor formula and by callers omitting --age-days for the
     default staleness threshold).
     """
-    velocity = compute_velocity(board.repo, cache=cache)
+    velocity = compute_velocity(board.repo, cache=cache, board=board)
     items: list[dict[str, Any]] = []
     milestones: list[dict[str, Any]] = []
+
+    # Gate the createdAt sort on VELOCITY_TIMESTAMPS availability.
+    window_note = degraded_or_none(
+        board,
+        Capability.VELOCITY_TIMESTAMPS,
+        "velocity-calibrated audit window",
+        "no creation timestamps — window falls back to the 14-day floor, items unsorted",
+    )
 
     if entity_type in ("issues", "both"):
         raw = (
@@ -1895,7 +1926,7 @@ def fetch_audit_window(
             )
             or []
         )
-        raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
+        raw_sorted = raw if window_note else sorted(raw, key=lambda i: i["createdAt"])
         if issues is not None:
             wanted = set(issues)
             items = [i for i in raw_sorted if i["number"] in wanted]

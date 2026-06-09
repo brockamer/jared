@@ -80,6 +80,12 @@ from lib.board import (
 from lib.board import (
     run_gh_raw as board_run_gh_raw,
 )
+from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    Capability,
+)
+from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
+    degraded_or_none,
+)
 
 # ---------- Config discovery ----------
 
@@ -400,8 +406,16 @@ def check_blocked_status_hygiene(
     items: list[dict[str, Any]],
     issues_by_number: dict[int, dict[str, Any]],
     blocked_aging_days: int,
+    *,
+    velocity_ok: bool = True,
 ) -> list[str]:
-    """Items in Blocked Status must have ## Blocked by; flag ones stuck >N days."""
+    """Items in Blocked Status must have ## Blocked by; flag ones stuck >N days.
+
+    When ``velocity_ok`` is False (capability VELOCITY_TIMESTAMPS absent), the
+    ``updatedAt`` aging sub-check is skipped — only the ``## Blocked by``
+    presence check runs. The caller is responsible for printing the
+    ``Blocked-status aging`` degradation note alongside the findings.
+    """
     findings: list[str] = []
     today = dt.date.today()
     for item in items:
@@ -415,12 +429,13 @@ def check_blocked_status_hygiene(
         body = issue.get("body") or ""
         if "## Blocked by" not in body:
             findings.append(f"#{n}: in Blocked status but body has no `## Blocked by` section")
-        updated = issue.get("updatedAt", "")
-        if updated:
-            updated_date = dt.datetime.fromisoformat(updated.replace("Z", "+00:00")).date()
-            age = (today - updated_date).days
-            if age > blocked_aging_days:
-                findings.append(f"#{n}: in Blocked status with no activity for {age} days")
+        if velocity_ok:
+            updated = issue.get("updatedAt", "")
+            if updated:
+                updated_date = dt.datetime.fromisoformat(updated.replace("Z", "+00:00")).date()
+                age = (today - updated_date).days
+                if age > blocked_aging_days:
+                    findings.append(f"#{n}: in Blocked status with no activity for {age} days")
     return findings
 
 
@@ -754,6 +769,17 @@ def main() -> int:
     else:
         owner, project = args.owner, args.project
 
+    # Hoist a capability-aware Board for offline capability resolution (Phase 6).
+    # Board.capabilities() reads the static per-backend set from board_provider without
+    # constructing the provider (no live API calls). If the board doc is absent or
+    # fails to parse, capability_board stays None and gates are skipped (today's behavior).
+    capability_board: Board | None = None
+    if cfg:
+        try:  # noqa: SIM105
+            capability_board = Board.from_path(cfg)
+        except Exception:  # noqa: BLE001 — offline doc parse; never fail the sweep
+            pass
+
     # Resolve plan dirs
     if args.plan_dir:
         plan_dirs = [Path(p) for p in args.plan_dir]
@@ -824,7 +850,19 @@ def main() -> int:
     print()
 
     print(f"== Stale High-priority Backlog (>{args.staleness_days}d) ==")
-    if not issues_by_number:
+    note = (
+        degraded_or_none(
+            capability_board,
+            Capability.VELOCITY_TIMESTAMPS,
+            "stale High-priority Backlog",
+            "no creation timestamps on this backend",
+        )
+        if capability_board
+        else None
+    )
+    if note:
+        print(f"  {note}")
+    elif not issues_by_number:
         print("  (skipped — no issue data)")
     else:
         stale = check_stale_high_backlog(items, issues_by_number, args.staleness_days)
@@ -833,7 +871,19 @@ def main() -> int:
     print()
 
     print("== Stalled In Progress (>7d no activity) ==")
-    if not issues_by_number:
+    note = (
+        degraded_or_none(
+            capability_board,
+            Capability.VELOCITY_TIMESTAMPS,
+            "stalled In Progress",
+            "no activity timestamps on this backend",
+        )
+        if capability_board
+        else None
+    )
+    if note:
+        print(f"  {note}")
+    elif not issues_by_number:
         print("  (skipped — no issue data)")
     else:
         stalled = check_in_progress_staleness(items, issues_by_number)
@@ -842,14 +892,27 @@ def main() -> int:
     print()
 
     print(f"== Blocked-status hygiene (>{args.blocked_aging_days}d) ==")
+    blocked_aging_note = (
+        degraded_or_none(
+            capability_board,
+            Capability.VELOCITY_TIMESTAMPS,
+            "Blocked-status aging",
+            "no activity timestamps — the `## Blocked by` presence check still runs",
+        )
+        if capability_board
+        else None
+    )
+    velocity_ok = blocked_aging_note is None
     if not issues_by_number:
         print("  (skipped — no issue data)")
     else:
         findings = check_blocked_status_hygiene(
-            items, issues_by_number, args.blocked_aging_days
+            items, issues_by_number, args.blocked_aging_days, velocity_ok=velocity_ok
         ) or ["None"]
         for f in findings:
             print(f"  {f}")
+        if blocked_aging_note:
+            print(f"  {blocked_aging_note}")
     print()
 
     print("== Native dependency hygiene ==")
@@ -939,8 +1002,21 @@ def main() -> int:
     print()
 
     print("== Session-note freshness (In Progress, last 3 days) ==")
-    for f in check_session_note_freshness(items, repo) or ["None"]:
-        print(f"  {f}")
+    session_note = (
+        degraded_or_none(
+            capability_board,
+            Capability.VELOCITY_TIMESTAMPS,
+            "session-note freshness",
+            "no comment timestamps on this backend",
+        )
+        if capability_board
+        else None
+    )
+    if session_note:
+        print(f"  {session_note}")
+    else:
+        for f in check_session_note_freshness(items, repo) or ["None"]:
+            print(f"  {f}")
     print()
 
     print("Sweep complete. Advisory only — review and propose before applying.")

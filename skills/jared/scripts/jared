@@ -36,7 +36,11 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
     BoardItem,
+    Capability,
     ClosedItem,
+)
+from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
+    degraded_or_none,
 )
 from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
     FileBoardSetupError,
@@ -1083,7 +1087,13 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             item for item in items if item.status == "Backlog" and label in item.labels
         ]
     up_next = up_next_all[:3]
-    closed = _fetch_recently_closed(board, days=7)
+    recently_closed_note = degraded_or_none(
+        board,
+        Capability.VELOCITY_TIMESTAMPS,
+        "recently-closed (7d)",
+        "no closed-at timestamps on this backend",
+    )
+    closed = [] if recently_closed_note else _fetch_recently_closed(board, days=7)
 
     print(f"# Session handoff — {board.repo} — {_now_local_iso()}")
     print()
@@ -1125,7 +1135,9 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
         print()
     print("## Recently closed (last 7 days)")
     print()
-    if closed:
+    if recently_closed_note:
+        print(f"  {recently_closed_note}")
+    elif closed:
         for c in closed:
             date = c.closed_at[:10]
             print(f"- #{c.number} {c.title}  ({date})")
