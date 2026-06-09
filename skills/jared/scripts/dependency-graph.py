@@ -288,9 +288,28 @@ def find_priority_inversions(
 
 
 def find_orphaned(
-    graph: dict[int, set[int]], repo: str, open_numbers: set[int]
+    graph: dict[int, set[int]],
+    repo: str,
+    open_numbers: set[int],
+    *,
+    board: Board | None = None,
 ) -> list[tuple[int, int]]:
-    """Dependents whose dependencies are closed or missing."""
+    """Dependents whose dependencies are closed or missing.
+
+    Phase 6: when ``board`` is provided and CLOSED_STATE is absent, the
+    closed-state lookup is meaningless (there is no real "closed" state,
+    only the Done column). Returns [] with a note on stderr.
+    """
+    if board is not None:
+        orphan_note = degraded_or_none(
+            board,
+            Capability.CLOSED_STATE,
+            "orphaned-dependency check",
+            "no closed-state lookup on this backend",
+        )
+        if orphan_note:
+            print(f"  {orphan_note}", file=sys.stderr)
+            return []
     orphaned = []
     # Check referenced issues that aren't in the open set
     referenced = set()
@@ -467,7 +486,7 @@ def main() -> int:
     topo, cycles = topological_sort(dict(graph))
     critical = critical_path(dict(graph))
     inversions = find_priority_inversions(graph, priorities)
-    orphaned = find_orphaned(graph, args.repo, open_numbers)
+    orphaned = find_orphaned(graph, args.repo, open_numbers, board=capability_board)
 
     # Output
     if args.format == "dot":

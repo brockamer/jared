@@ -508,7 +508,17 @@ def _cmd_close(args: argparse.Namespace) -> int:
     board.invalidate_items()
     board.invalidate_closed_items()
     print(f"OK: set Status=Done on issue #{args.issue_number}")
-    print(f"OK: closed #{args.issue_number}, Status=Done")
+    # Phase 6: when CLOSED_STATE absent, the close is a column-move only — no
+    # native closed state is set on the backend. Note that the operation still
+    # succeeds (moving to Done column is the correct action on KanbanFlow).
+    closed_absent = degraded_or_none(
+        board,
+        Capability.CLOSED_STATE,
+        "native close state",
+        "no native closed state on this backend",
+    )
+    suffix = " (column-move only — no native closed state on this backend)" if closed_absent else ""
+    print(f"OK: closed #{args.issue_number}, Status=Done{suffix}")
     return 0
 
 
@@ -1006,7 +1016,22 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
     swallow the error, print a one-line stderr notice, and return [].
     `jared summary` should keep working — sweep has the full picture and
     catches the older drift anyway.
+
+    Phase 6: when CLOSED_STATE is absent, the Done column is the sole closed
+    signal — there's no separate "closed" state to diverge from. Returns []
+    with a note on stderr.
     """
+    # Phase 6: CLOSED_STATE gate — the detector requires a real closed state.
+    stuck_note = degraded_or_none(
+        board,
+        Capability.CLOSED_STATE,
+        "stuck-closed check",
+        "Done column is the sole closed signal on this backend",
+    )
+    if stuck_note:
+        print(f"  {stuck_note}", file=sys.stderr)
+        return []
+
     try:
         closed = _fetch_recently_closed(board, days=days)
     except GhInvocationError as e:

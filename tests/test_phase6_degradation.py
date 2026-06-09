@@ -681,7 +681,7 @@ def test_audit_fetch_milestones_refuses_when_milestone_state_absent(
     )
     err = capsys.readouterr().err
 
-    assert rc == 2
+    assert rc == 2, err
     assert "degraded" in err and "milestone" in err.lower()
 
 
@@ -830,5 +830,105 @@ def test_file_milestone_refuses_when_milestone_state_absent(
     ])
     err = capsys.readouterr().err
 
-    assert rc == 2
+    assert rc == 2, err
     assert "degraded" in err and "milestone" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Task 6: CLOSED_STATE surfaces
+# ---------------------------------------------------------------------------
+
+
+# 6a: _cmd_close appends column-move-only note when CLOSED_STATE absent
+
+def test_close_appends_column_move_only_note_when_closed_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_cmd_close output appends '(column-move only …)' when CLOSED_STATE absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    board_md = write_minimal_board(tmp_path)
+
+    # Patch provider.close to no-op on both import paths so the command doesn't
+    # fail on missing field IDs in the minimal board doc.
+    import importlib
+
+    import skills.jared.scripts.lib.github_provider as _skill_ghp
+
+    monkeypatch.setattr(_skill_ghp.GitHubProjectsProvider, "close", lambda self, ref, **kw: None)
+    try:
+        _lib_ghp = importlib.import_module("lib.github_provider")
+        _lib_cls = getattr(_lib_ghp, "GitHubProjectsProvider", None)
+        if _lib_cls is not None and _lib_cls is not _skill_ghp.GitHubProjectsProvider:
+            monkeypatch.setattr(_lib_cls, "close", lambda self, ref, **kw: None)
+    except ModuleNotFoundError:
+        pass
+
+    def fake_run(args: list[str], **kw: object) -> FakeGhResult:
+        return FakeGhResult(stdout="{}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    rc = mod.main(["--board", str(board_md), "close", "42"])
+    out = capsys.readouterr().out
+
+    assert rc == 0, capsys.readouterr().err
+    assert "OK: closed #42" in out
+    assert "column-move only" in out
+    assert "no native closed state on this backend" in out
+
+
+# 6b: _detect_stuck_closed_recent returns [] + prints note when CLOSED_STATE absent
+
+def test_detect_stuck_closed_returns_empty_with_note_when_closed_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_detect_stuck_closed_recent returns [] and emits stderr note when CLOSED_STATE absent."""
+    mod = import_cli()
+    restrict_capabilities(monkeypatch)
+
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.__new__(Board)
+    b.backend = "github"
+    b.repo = "brockamer/jared"
+
+    # Call the function directly by accessing it from the module.
+    detect_fn = mod._detect_stuck_closed_recent
+    result = detect_fn(b, days=7)
+    err = capsys.readouterr().err
+
+    assert result == []
+    assert "degraded: stuck-closed check unavailable on" in err
+
+
+# 6c: find_orphaned returns [] + note when CLOSED_STATE absent
+
+def test_find_orphaned_returns_empty_with_note_when_closed_state_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """find_orphaned skips the closed-state lookup and returns [] when CLOSED_STATE absent."""
+    dep = import_dep()
+    restrict_capabilities(monkeypatch)
+
+    from skills.jared.scripts.lib.board import Board
+
+    b = Board.__new__(Board)
+    b.backend = "github"
+    b.repo = "brockamer/jared"
+
+    graph: dict[int, set[int]] = {1: {2}}
+    open_numbers = {1}
+
+    result = dep.find_orphaned(graph, "brockamer/jared", open_numbers, board=b)
+    err = capsys.readouterr().err
+
+    assert result == []
+    assert "degraded: orphaned-dependency check unavailable on" in err
