@@ -3,7 +3,7 @@
 **Issue:** #318 (Phase 5). Parent epic: #313.
 **Date:** 2026-06-09
 **Status:** Design — not yet started. Drafted during the 2026-06-09 structural review; **open design questions below are unresolved and must be settled (with the operator) before a plan is written.**
-**Related references:** `skills/jared/scripts/lib/board_provider.py`, `lib/github_provider.py`, `lib/kanbanflow_provider.py`, `docs/superpowers/specs/archived/2026-06/2026-06-02-board-provider-abstraction-design.md` (§ "Appendix A — Migration fidelity"), `docs/project-board.md`.
+**Related references:** `skills/jared/scripts/lib/board_provider.py`, `skills/jared/scripts/lib/github_provider.py`, `skills/jared/scripts/lib/kanbanflow_provider.py`, `docs/superpowers/specs/2026-06-02-board-provider-abstraction-design.md` (§ "Appendix A — Migration fidelity"), `docs/project-board.md`.
 
 ## Context — the larger feature
 
