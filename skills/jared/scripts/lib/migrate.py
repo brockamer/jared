@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .board_provider import Capability
+from .board_provider import Capability, Edge
 
 Direction = str  # "github->kanbanflow" | "kanbanflow->github"
 
@@ -113,3 +113,29 @@ def rewrite_cross_refs(text: str, number_map: NumberMap) -> str:
         return f"#{new}" if new is not None else m.group(0)
 
     return _ISSUE_REF_RE.sub(_sub, text)
+
+
+def translate_edges(edges: list[Edge], number_map: NumberMap) -> list[Edge]:
+    """Re-key edges through the number map. Drop any edge whose endpoint is
+    unmapped (an item that was not migrated)."""
+    out: list[Edge] = []
+    for e in edges:
+        dep = number_map.to_new(e.dependent)
+        blk = number_map.to_new(e.blocker)
+        if dep is not None and blk is not None:
+            out.append(Edge(dependent=dep, blocker=blk))
+    return out
+
+
+def estimate_kf_calls(
+    *, item_count: int, extra_fields_per_item: int, edge_count: int, comment_count: int
+) -> int:
+    """Upper-bound KanbanFlow write calls for a GH->KF apply run.
+
+    Per item: 1 create + 1 Priority custom-field POST + N extra custom-field
+    POSTs. Plus 1 label POST per edge (blocked-by:<N>) and 1 POST per comment.
+    Printed in the dry-run so the operator knows whether the run fits KF's
+    1,000 req/hr window.
+    """
+    per_item = 1 + 1 + extra_fields_per_item
+    return item_count * per_item + edge_count + comment_count
