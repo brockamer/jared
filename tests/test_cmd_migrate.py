@@ -356,3 +356,24 @@ def test_apply_without_yes_proceeds_on_y(monkeypatch: pytest.MonkeyPatch) -> Non
     rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply"])
     assert rc == 0
     assert [i.number for i in tgt.created] == [1]
+
+
+def test_include_closed_warns_it_is_inert(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--include-closed has no closed-items reader on either provider, so it is a
+    no-op. It must warn loudly on stderr (rather than silently lie) whenever set,
+    in both dry-run and apply modes. This dry-run call (no --apply) proves the
+    warning fires regardless of mode."""
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Up Next", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--include-closed"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "closed-item migration not yet supported" in err
+    assert "--include-closed" in err
