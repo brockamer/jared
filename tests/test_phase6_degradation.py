@@ -386,6 +386,7 @@ def test_stage_backlog_age_tiebreaker_note_when_degraded(
 
 # 4a: _cmd_blocked_by success message rewords to label-emulation suffix
 
+
 def test_blocked_by_success_rewrites_to_label_emulation_when_degraded(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -421,6 +422,7 @@ def test_blocked_by_success_rewrites_to_label_emulation_when_degraded(
 
 # 4b: sweep check_native_dependencies section shows degraded note
 
+
 def test_sweep_native_dependencies_note_prints_when_degraded(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -432,6 +434,7 @@ def test_sweep_native_dependencies_note_prints_when_degraded(
 
 
 # 4c: dependency-graph.py fetch_all_native_dependencies emits note + falls back
+
 
 def test_fetch_all_native_dependencies_note_and_fallback_when_degraded(
     monkeypatch: pytest.MonkeyPatch,
@@ -459,6 +462,7 @@ def test_fetch_all_native_dependencies_note_and_fallback_when_degraded(
 
 
 # 4d: fetch_open_issues_for_ties returns empty blocked_by tuples when degraded
+
 
 def test_fetch_open_issues_for_ties_returns_empty_blocked_by_when_degraded(
     monkeypatch: pytest.MonkeyPatch,
@@ -512,6 +516,7 @@ def test_fetch_open_issues_for_ties_returns_empty_blocked_by_when_degraded(
 
 
 # 4e: fetch_audit_window skips edges enrichment when NATIVE absent
+
 
 def test_fetch_audit_window_skips_edges_when_native_dependencies_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -570,6 +575,7 @@ def test_fetch_audit_window_skips_edges_when_native_dependencies_absent(
 
 
 # 4f: stage.fetch_items_for_stage uses body-ref path when NATIVE absent
+
 
 def test_stage_fetch_items_uses_body_ref_when_native_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -660,6 +666,7 @@ def test_stage_main_native_edges_note_in_render_when_degraded(
 
 # 5a: jared audit fetch --type milestones exits nonzero when MILESTONE_STATE absent
 
+
 def test_audit_fetch_milestones_refuses_when_milestone_state_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -686,6 +693,7 @@ def test_audit_fetch_milestones_refuses_when_milestone_state_absent(
 
 
 # 5b: jared audit fetch --type both warns + continues issues-only
+
 
 def test_audit_fetch_both_warns_and_continues_issues_when_milestone_state_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -722,6 +730,7 @@ def test_audit_fetch_both_warns_and_continues_issues_when_milestone_state_absent
 
 # 5c: fetch_audit_window milestones REST skipped when MILESTONE_STATE absent
 
+
 def test_fetch_audit_window_milestones_skipped_when_milestone_state_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -757,6 +766,7 @@ def test_fetch_audit_window_milestones_skipped_when_milestone_state_absent(
 
 
 # 5d: stage.py milestone-proximity note in render when MILESTONE_STATE absent
+
 
 def test_stage_milestone_proximity_note_when_milestone_state_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -803,6 +813,7 @@ def test_stage_milestone_proximity_note_when_milestone_state_absent(
 
 # 5e: jared file --milestone NAME refuses with exit 2 when MILESTONE_STATE absent
 
+
 def test_file_milestone_refuses_when_milestone_state_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -819,15 +830,23 @@ def test_file_milestone_refuses_when_milestone_state_absent(
         lambda *a, **kw: FakeGhResult(stdout="{}"),
     )
 
-    rc = mod.main([
-        "--board", str(board_md),
-        "file",
-        "--title", "Test issue",
-        "--priority", "High",
-        "--status", "Backlog",
-        "--milestone", "v1.0",
-        "--body", "test body",
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test issue",
+            "--priority",
+            "High",
+            "--status",
+            "Backlog",
+            "--milestone",
+            "v1.0",
+            "--body",
+            "test body",
+        ]
+    )
     err = capsys.readouterr().err
 
     assert rc == 2, err
@@ -840,6 +859,7 @@ def test_file_milestone_refuses_when_milestone_state_absent(
 
 
 # 6a: _cmd_close appends column-move-only note when CLOSED_STATE absent
+
 
 def test_close_appends_column_move_only_note_when_closed_state_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -883,6 +903,7 @@ def test_close_appends_column_move_only_note_when_closed_state_absent(
 
 # 6b: _detect_stuck_closed_recent returns [] + prints note when CLOSED_STATE absent
 
+
 def test_detect_stuck_closed_returns_empty_with_note_when_closed_state_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -908,6 +929,7 @@ def test_detect_stuck_closed_returns_empty_with_note_when_closed_state_absent(
 
 
 # 6c: find_orphaned returns [] + note when CLOSED_STATE absent
+
 
 def test_find_orphaned_returns_empty_with_note_when_closed_state_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -944,6 +966,7 @@ def test_find_orphaned_returns_empty_with_note_when_closed_state_absent(
 
 # 7a: _cmd_comment emits MARKDOWN_BODY note when capability absent
 
+
 def test_comment_appends_markdown_body_note_when_markdown_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -962,7 +985,8 @@ def test_comment_appends_markdown_body_note_when_markdown_absent(
     fake_url = "https://github.com/brockamer/findajob/issues/1#issuecomment-99"
 
     monkeypatch.setattr(
-        _skill_ghp.GitHubProjectsProvider, "comment",
+        _skill_ghp.GitHubProjectsProvider,
+        "comment",
         lambda self, num, body: fake_url,
     )
     try:
@@ -970,7 +994,8 @@ def test_comment_appends_markdown_body_note_when_markdown_absent(
         _lib_cls = getattr(_lib_ghp, "GitHubProjectsProvider", None)
         if _lib_cls is not None and _lib_cls is not _skill_ghp.GitHubProjectsProvider:
             monkeypatch.setattr(
-                _lib_cls, "comment",
+                _lib_cls,
+                "comment",
                 lambda self, num, body: fake_url,
             )
     except ModuleNotFoundError:
@@ -991,6 +1016,7 @@ def test_comment_appends_markdown_body_note_when_markdown_absent(
 
 
 # 7b: _cmd_file emits MARKDOWN_BODY note when capability absent
+
 
 def test_file_appends_markdown_body_note_when_markdown_absent(
     monkeypatch: pytest.MonkeyPatch,
@@ -1017,15 +1043,18 @@ def test_file_appends_markdown_body_note_when_markdown_absent(
     )
 
     monkeypatch.setattr(
-        _skill_ghp.GitHubProjectsProvider, "validate_fields",
+        _skill_ghp.GitHubProjectsProvider,
+        "validate_fields",
         lambda self, **kw: None,
     )
     monkeypatch.setattr(
-        _skill_ghp.GitHubProjectsProvider, "list_milestones",
+        _skill_ghp.GitHubProjectsProvider,
+        "list_milestones",
         lambda self: [],
     )
     monkeypatch.setattr(
-        _skill_ghp.GitHubProjectsProvider, "file",
+        _skill_ghp.GitHubProjectsProvider,
+        "file",
         lambda self, **kw: fake_item,
     )
     try:
@@ -1043,14 +1072,20 @@ def test_file_appends_markdown_body_note_when_markdown_absent(
         lambda *a, **kw: FakeGhResult(stdout="{}"),
     )
 
-    rc = mod.main([
-        "--board", str(board_md),
-        "file",
-        "--title", "Test issue",
-        "--priority", "Medium",
-        "--no-milestone",
-        "--body", "Issue body text here",
-    ])
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test issue",
+            "--priority",
+            "Medium",
+            "--no-milestone",
+            "--body",
+            "Issue body text here",
+        ]
+    )
     out = capsys.readouterr().out
 
     assert rc == 0
