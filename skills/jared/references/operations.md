@@ -9,6 +9,17 @@
 
 On KanbanFlow, all board operations route through the `jared` CLI (Tier 2) using the KanbanFlow provider — no `gh`, no GraphQL, no MCP.
 
+## Capabilities & degradation (the model behind the gates)
+
+The backend gate above (and every other `degraded:` note in jared's prose and CLI output) is one mechanism, not a pile of special cases. Each backend advertises a static `Capability` set: GitHub advertises the full set, KanbanFlow advertises **none** of the GitHub-only capabilities (`CLOSED_STATE`, `MILESTONE_STATE`, `MCP_TIER`, `NATIVE_DEPENDENCIES`, `VELOCITY_TIMESTAMPS`, `MARKDOWN_BODY`). When a surface needs a capability the active backend lacks, it degrades with **one** consistent note — `degraded: <feature> unavailable on <backend> — <instead>` — rather than erroring or emitting a misleading value.
+
+Degradation lives in two places:
+
+- **Code (Python surfaces).** CLI subcommands and the batch scripts (`sweep.py`, `dependency-graph.py`, `stage.py`) call `board.capabilities()` and route each gate through the single helper `lib/capabilities.py::degraded_or_none(board, capability, feature, instead)`. `board.capabilities()` is **network-free** — it resolves the static set by backend name without constructing the provider (constructing the KanbanFlow provider would make live API calls). Gating is keyed **per rendered section**: a capability that gates four sweep sections emits four notes. Default is soft-skip-with-note; misleading values are omitted; an invocation whose *entire* requested scope is absent exits nonzero (e.g. `jared audit fetch --type milestones` on a backend without `MILESTONE_STATE`).
+- **Doctrine (prose surfaces).** Slash-command stubs, `SKILL.md`, and references do **not** call the helper — they branch on the `- backend:` bullet in `docs/project-board.md` § Jared config (the voice-kill-switch pattern). The per-surface gates at the top of this file are exactly that: doctrine the reader consults and degrades against.
+
+GitHub advertises the full set, so **nothing degrades on GitHub** — the gates are inert there by design.
+
 Primary reference is `references/jared-cli.md` — use the `jared` CLI for any
 board operation it covers (file, move, set, close, comment, blocked-by,
 get-item, summary). This file is the **escape hatch**: commands for things
