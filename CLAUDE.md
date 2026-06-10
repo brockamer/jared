@@ -69,6 +69,26 @@ field/option-ID blocks (the provider resolves columns/options live from the API,
 board-scoped `KANBANFLOW_API_TOKEN` selecting the board). Init-time selection landed in #317
 (Phase 4 of epic #313).
 
+**Capability-aware degradation (Phase 6, #319).** Phase 6 *consumes* the `Capability` enum
+the provider seam declares — it adds no capabilities and changes no provider. `Board.capabilities()`
+is the **static, network-free** resolver: it reads the provider class's `default_capabilities()`
+classmethod by backend name *without constructing the provider* (constructing the KanbanFlow
+provider makes live API calls). GitHub advertises `frozenset(Capability)` (the full set); KanbanFlow
+advertises `frozenset()`. `lib/capabilities.py` is the single consistency anchor — one note phrasing
+(`degraded: <feature> unavailable on <backend> — <instead>`) and one per-surface gate
+(`degraded_or_none(board, capability, feature, instead) -> str | None`). Two layers gate differently:
+**Python surfaces** (CLI subcommands + `sweep.py`/`dependency-graph.py`/`stage.py`) call the gate
+in-process, keyed **per rendered section** (a capability gating four sweep sections emits four notes);
+**prose surfaces** (slash-command stubs, `SKILL.md`, references) do *not* call the helper — they branch
+on the `- backend:` bullet directly (the voice-kill-switch pattern, no subcommand). Default posture is
+soft-skip-with-note; misleading-if-shown values are omitted; **whole-scope-absent invocations exit
+nonzero** (`jared audit fetch --type milestones` and `jared file --milestone NAME` on a
+`MILESTONE_STATE`-absent backend; `--type both` is only *partial*-scope-absent, so it warns and
+downgrades to issues-only with exit 0). GitHub degrades nothing — the full set means zero behavior change,
+which is the regression bar. `SUB_ISSUES` is a deliberate non-finding: no consumer on either backend
+(jared's epic model is the `epic` *label*), so Phase 6 builds no note, check, or test for it — a guard
+on a path nothing reads would be dead code.
+
 ## Dual import path — important gotcha
 
 The `Board` module is imported via two different paths in the same process tree:

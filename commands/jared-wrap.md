@@ -4,6 +4,11 @@ description: End of session — append Session notes to touched issues, reconcil
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 4) is written in voice; render it as written rather than translating at runtime. **Important boundary:** Session-note bodies themselves are voice-OFF (per the lane rule — board writes are plain technical prose). The voice is in the *dialogue around* the drafts ("Here's what I'd like to write to each of these — please tell me what to change"), not in the drafts. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the wrap dialogue in plain technical prose — keep the structural content, strip the Jared-isms.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Step 2 (Session note): Use a plain-text Session note format (section names as plain-text labels rather than markdown headers): `degraded: markdown body rendering unavailable on kanbanflow — session notes use plain-text format` (MARKDOWN_BODY absent).
+
+The back-end PR flow (step 5b: commit → push → PR → merge), worktree removal, and lock-clear are **backend-independent** — they operate on git/GitHub repo state, not the board, and run unchanged on every backend (Phase-6 Non-goal: no repo/git-axis gating).
+
 Invoke the Jared skill to wrap the current session. The session record lives on the touched issues as Session-note comments — no `tmp/` file is written, and no handoff prompt is synthesized. The next session uses `/jared-start`, which assembles the posture on-demand from current board state.
 
 Flow:

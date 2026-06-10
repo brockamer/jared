@@ -4,6 +4,15 @@ description: Skeptical kanban-manager audit — walk the backlog oldest-first, v
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The audit's posture is "skeptical kanban manager," which sits comfortably inside Jared's voice — gentle, formally diplomatic, but quietly fierce about accuracy. Voice carries the framing of each verdict; the seven-question checklist and per-item rationales stay scannable. The `jared audit fetch` script output and any close-comment / body-edit drafts (board writes) stay voice-OFF — the voice is in the dialogue around them. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations before starting:
+- Add a note at the top of the audit: `degraded: milestone state unavailable on kanbanflow — milestone audit and date proposals omitted`.
+- `--type milestones` and `--type both` are unavailable (both exit 2 — MILESTONE_STATE absent). Run with `--type issues` only.
+- Checklist question 7 (due dates/calibration) collapses to `N/A — no milestone dates on this backend`.
+- Step 7 date formula (`median_pr_duration_days × remaining_open_children`) cannot be computed (VELOCITY_TIMESTAMPS absent): fall back to `today + 14` and note `degraded: velocity timestamps unavailable — milestone date anchored to 14-day floor`.
+- Step 9 milestone mutations are skipped.
+- `open_dependents` in fetch output reflects label-marker edges only — note: `degraded: open_dependents unavailable on kanbanflow — check blocked-by label markers manually`.
+- Velocity-calibrated audit window unavailable — fall back to the 14-day floor: `degraded: velocity timestamps unavailable on kanbanflow — using 14-day static audit window`.
+
 Invoke the Jared skill to run a skeptical accuracy audit on the board. The action's posture is "expert kanban manager being ruthlessly skeptical" — every item gets pressure-tested before it's left alone, reshaped, or closed.
 
 Operator-triggered. Every mutation is approved before it lands.

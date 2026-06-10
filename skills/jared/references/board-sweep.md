@@ -1,5 +1,14 @@
 # Board Sweep — Grooming Checklist
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- §1 Stuck closed (CLOSED_STATE divergence detector) — omit: `degraded: CLOSED_STATE unavailable — Stuck closed check does not apply to this backend; Done column is the only closed signal` (CLOSED_STATE absent).
+- §1 Item-level semantics (open vs. GitHub state) — single-signal backend; divergence model does not apply: `degraded: CLOSED_STATE unavailable — single-signal backend; Stuck closed divergence and open-vs-closed item semantics note does not apply` (CLOSED_STATE absent).
+- §2 WIP stale In Progress (activity timestamps) — omit: `degraded: VELOCITY_TIMESTAMPS unavailable — stale In Progress check omitted; items may be abandoned without flagging` (VELOCITY_TIMESTAMPS absent).
+- §5 Aging checks (Backlog-High >14d, any item >60d) — omit: `degraded: VELOCITY_TIMESTAMPS unavailable — aging checks omitted; backlog may contain undetected stale items` (VELOCITY_TIMESTAMPS absent).
+- §8 Milestone coverage — omit: `degraded: MILESTONE_STATE unavailable — milestone date and state checks do not apply to this backend` (MILESTONE_STATE absent).
+- §9 Dependency hygiene (native blockedBy edges) — reads label-emulation only: `degraded: NATIVE_DEPENDENCIES unavailable — native dependency hygiene check reads label emulation; output may be incomplete` (NATIVE_DEPENDENCIES absent).
+- §11 Session-note freshness — omit: `degraded: VELOCITY_TIMESTAMPS unavailable — session-note freshness check omitted` (VELOCITY_TIMESTAMPS absent).
+
 Routine grooming, distinct from structural review. Run when the user asks "where are we / what's next," when In Progress drops to 0, when a week has passed, or when you spot drift.
 
 ## Goals

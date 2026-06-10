@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from . import cache
-from .board_provider import BoardProvider
+from .board_provider import BoardProvider, Capability
+from .capabilities import degraded_or_none
 
 if TYPE_CHECKING:
     from .ties import OpenIssueForTies
@@ -480,6 +481,24 @@ class Board:
                 )
         return self._provider
 
+    def capabilities(self) -> frozenset[Capability]:
+        """The backend's static capability set, resolved WITHOUT constructing the
+        provider — constructing the KanbanFlow provider makes live API calls.
+        Capabilities are a compile-time constant per backend, so the provider class
+        attribute is authoritative and fully offline.
+        """
+        if self.backend == "kanbanflow":
+            from .kanbanflow_provider import KanbanFlowProvider
+
+            return KanbanFlowProvider.default_capabilities()
+        if self.backend == "github":
+            from .github_provider import GitHubProjectsProvider
+
+            return GitHubProjectsProvider.default_capabilities()
+        raise BoardConfigError(
+            f"backend '{self.backend}' has no capability set. Supported: 'github', 'kanbanflow'."
+        )
+
     def run_gh(
         self, args: list[str], *, cache: str | None = None, input_text: str | None = None
     ) -> Any:
@@ -663,8 +682,37 @@ class Board:
         NOTE: projectItems(first: 5) takes [0] — assumes one board per repo.
         If an issue is on multiple boards, the first item's Status/Priority are
         used (typically the relevant one for jared-governed repos).
+
+        Phase 6: when NATIVE_DEPENDENCIES is absent, skips the GitHub GraphQL
+        path (which includes blockedBy) and routes through
+        board.provider.list_open_items() instead, returning records with
+        blocked_by=() (empty). The jared-ties/jared-propose-partition callers
+        emit the degradation note at the diagnostic layer.
         """
         from .ties import OpenIssueForTies
+
+        # Phase 6: degrade to provider.list_open_items() when native edges absent.
+        if degraded_or_none(
+            self,
+            Capability.NATIVE_DEPENDENCIES,
+            "native blocked-by edges for ties",
+            "blocked_by fields will be empty — ties analysis uses body-ref signals only",
+        ):
+            items = self.provider.list_open_items()
+            return [
+                OpenIssueForTies(
+                    number=item.number,
+                    title=item.title,
+                    body=item.body if include_bodies else "",
+                    labels=tuple(item.labels),
+                    milestone=item.milestone,
+                    status=item.status or "Backlog",
+                    priority=item.priority,
+                    blocked_by=(),
+                )
+                for item in items
+                if (item.status or "") != "Done"
+            ]
 
         body_field = "body" if include_bodies else ""
         # Board.repo is stored as "owner/name" (see _parse and _infer_repo_from_git).
@@ -1002,6 +1050,12 @@ def _format_token_scope_diagnostic() -> str:
     auth surfaces are independent so `gh auth refresh -s project` isn't assumed
     to fix the MCP side. Always-mention is the only viable shape here, since
     conditional-on-MCP-failure can't be detected from a gh subprocess path.
+
+    Phase 6 deliberate non-finding (MCP_TIER): KanbanFlow routes through
+    KanbanFlowClient (HTTP/Bearer), never through run_gh_raw; the TOKEN_SCOPE_ERROR
+    guard means only GitHub PAT errors trigger this path. So MCP_TIER is always
+    present when this function runs — gating the MCP paragraph on `board.capabilities()`
+    would be unreachable dead code. The capability is therefore not checked here.
     """
     lines: list[str] = ["", "Token-scope diagnostic:"]
 
@@ -1760,6 +1814,7 @@ def compute_velocity(
     *,
     days: int = 14,
     cache: str | None = None,
+    board: Board | None = None,
 ) -> dict[str, Any]:
     """Recent shipping cadence — count + median age-at-close + median PR duration.
 
@@ -1771,8 +1826,29 @@ def compute_velocity(
         window. Proxy for "time to ship" — used as the anchor for proposed
         milestone due dates in /jared-audit. PR duration is a tighter signal
         than issue creation→close (which folds in backlog dwell time).
+
+    When ``board`` is provided and the backend lacks ``VELOCITY_TIMESTAMPS``,
+    emits a degradation note to stderr and returns the empty/zero result.
     """
     from statistics import median
+
+    if board is not None:
+        note = degraded_or_none(
+            board,
+            Capability.VELOCITY_TIMESTAMPS,
+            "velocity computation",
+            "no closed/merged timestamps — velocity is empty",
+        )
+        if note:
+            import sys as _sys
+
+            print(f"  {note}", file=_sys.stderr)
+            return {
+                "window_days": days,
+                "closures_in_window": 0,
+                "median_age_at_close": 0.0,
+                "median_pr_duration_days": 0.0,
+            }
 
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     # Guard against silent truncation: gh caps the result at --limit. An at-limit
@@ -1861,9 +1937,17 @@ def fetch_audit_window(
     the date anchor formula and by callers omitting --age-days for the
     default staleness threshold).
     """
-    velocity = compute_velocity(board.repo, cache=cache)
+    velocity = compute_velocity(board.repo, cache=cache, board=board)
     items: list[dict[str, Any]] = []
     milestones: list[dict[str, Any]] = []
+
+    # Gate the createdAt sort on VELOCITY_TIMESTAMPS availability.
+    window_note = degraded_or_none(
+        board,
+        Capability.VELOCITY_TIMESTAMPS,
+        "velocity-calibrated audit window",
+        "no creation timestamps — window falls back to the 14-day floor, items unsorted",
+    )
 
     if entity_type in ("issues", "both"):
         raw = (
@@ -1884,7 +1968,7 @@ def fetch_audit_window(
             )
             or []
         )
-        raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
+        raw_sorted = raw if window_note else sorted(raw, key=lambda i: i["createdAt"])
         if issues is not None:
             wanted = set(issues)
             items = [i for i in raw_sorted if i["number"] in wanted]
@@ -1907,37 +1991,58 @@ def fetch_audit_window(
             items = kept
 
     if entity_type in ("milestones", "both"):
-        owner, name = board.repo.split("/", 1)
-        milestones = (
-            run_gh(
-                [
-                    "api",
-                    f"/repos/{owner}/{name}/milestones",
-                    "--paginate",
-                    "-X",
-                    "GET",
-                    "-f",
-                    "state=open",
-                    "-f",
-                    "sort=due_on",
-                    "-f",
-                    "direction=asc",
-                ],
-                cache=cache,
-            )
-            or []
+        # Phase 6: gate the milestones REST call on MILESTONE_STATE availability.
+        # _cmd_audit_fetch already refuses --type milestones (exit 2) and downgrades
+        # --type both → issues only when MILESTONE_STATE is absent, so this guard
+        # is a defensive belt-and-suspenders for any callers that bypass the CLI.
+        milestone_note = degraded_or_none(
+            board,
+            Capability.MILESTONE_STATE,
+            "milestone audit window",
+            "no milestone state/due-dates on this backend",
         )
+        if not milestone_note:
+            owner, name = board.repo.split("/", 1)
+            milestones = (
+                run_gh(
+                    [
+                        "api",
+                        f"/repos/{owner}/{name}/milestones",
+                        "--paginate",
+                        "-X",
+                        "GET",
+                        "-f",
+                        "state=open",
+                        "-f",
+                        "sort=due_on",
+                        "-f",
+                        "direction=asc",
+                    ],
+                    cache=cache,
+                )
+                or []
+            )
 
     if items:
-        # Invert repo-wide blockedBy edges: who depends on each candidate?
-        edges = fetch_blocked_by_edges(board.repo, cache=cache)
-        dependents: dict[int, list[int]] = {}
-        for dependent_num, blocked_by in edges.items():
-            for blocker in blocked_by:
-                if blocker.get("state") == "OPEN":
-                    dependents.setdefault(blocker["number"], []).append(dependent_num)
-        for item in items:
-            item["open_dependents"] = sorted(dependents.get(item["number"], []))
+        # Phase 6: skip the blocked-by edges enrichment when NATIVE_DEPENDENCIES absent.
+        # open_dependents will be absent from items on degraded backends — the
+        # jared-audit slash-command reads it via item.get("open_dependents", []).
+        edges_note = degraded_or_none(
+            board,
+            Capability.NATIVE_DEPENDENCIES,
+            "blocked-by edges",
+            "native edges unavailable on this backend",
+        )
+        if not edges_note:
+            # Invert repo-wide blockedBy edges: who depends on each candidate?
+            edges = fetch_blocked_by_edges(board.repo, cache=cache)
+            dependents: dict[int, list[int]] = {}
+            for dependent_num, blocked_by in edges.items():
+                for blocker in blocked_by:
+                    if blocker.get("state") == "OPEN":
+                        dependents.setdefault(blocker["number"], []).append(dependent_num)
+            for item in items:
+                item["open_dependents"] = sorted(dependents.get(item["number"], []))
 
     return {
         "items": items,

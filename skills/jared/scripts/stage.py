@@ -32,6 +32,12 @@ from lib.board import Board  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # noqa: E402
     fetch_blocked_by_edges as _fetch_blocked_by_edges,
 )
+from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
+    Capability,
+)
+from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
+    degraded_or_none,
+)
 
 
 @dataclass(frozen=True)
@@ -284,12 +290,21 @@ def render(
     now: datetime,
     today: date | None = None,
     report_only: bool = False,
+    backlog_age_note: str | None = None,
+    native_edges_note: str | None = None,
+    milestone_proximity_note: str | None = None,
 ) -> str:
     """Format StageProposals as the stdout block documented in the spec."""
     if today is None:
         today = now.date()
     lines: list[str] = []
     lines.append(f"/jared-stage — proposals {now.strftime('%Y-%m-%d %H:%M')}")
+    if backlog_age_note:
+        lines.append(f"  note: {backlog_age_note}")
+    if native_edges_note:
+        lines.append(f"  note: {native_edges_note}")
+    if milestone_proximity_note:
+        lines.append(f"  note: {milestone_proximity_note}")
     lines.append("")
     lines.append("== Backlog → Up Next ==")
     lines.append("")
@@ -421,7 +436,7 @@ def _normalise_milestone(raw_milestone: Any) -> dict[str, Any] | None:
     return {"title": raw_milestone.get("title"), "due_on": raw_milestone.get("dueOn")}
 
 
-def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
+def fetch_items_for_stage(board: Any, *, skip_native_edges: bool = False) -> list[dict[str, Any]]:
     """Fetch all open items from the board and normalise to stage.py's dict shape.
 
     Pure functions in this module take dicts with these keys:
@@ -433,12 +448,20 @@ def fetch_items_for_stage(board: Any) -> list[dict[str, Any]]:
     exception is blocked-by edges, which need a separate paginated GraphQL
     pass via fetch_blocked_by_edges. Items with no content.number (draft
     cards, legacy entries) are skipped.
+
+    Phase 6: when ``skip_native_edges=True`` (NATIVE_DEPENDENCIES absent),
+    the edges fetch is skipped and blocked_by_native is set to [] for all
+    items. The ``## Blocked by`` body-section path in ``effective_blockers``
+    still fires for blocked detection. Pass ``native_edges_note`` to
+    ``render()`` so the degradation is visible in the output.
     """
     raw_items: list[dict[str, Any]] = board.board_items()
     if not raw_items:
         return []
 
-    edges_map: dict[int, list[dict[str, Any]]] = _fetch_blocked_by_edges(board.repo)
+    edges_map: dict[int, list[dict[str, Any]]] = (
+        {} if skip_native_edges else _fetch_blocked_by_edges(board.repo)
+    )
 
     normalised: list[dict[str, Any]] = []
     for raw in raw_items:
@@ -482,11 +505,37 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     board = Board.from_default()
-    items = fetch_items_for_stage(board)
+    native_edges_note = degraded_or_none(
+        board,
+        Capability.NATIVE_DEPENDENCIES,
+        "native blocked-by edges",
+        "blocker detection from `## Blocked by` body sections only",
+    )
+    milestone_proximity_note = degraded_or_none(
+        board,
+        Capability.MILESTONE_STATE,
+        "milestone-proximity ranking",
+        "ranked by Priority and age only",
+    )
+    items = fetch_items_for_stage(board, skip_native_edges=native_edges_note is not None)
     today = date.today()
     proposals = stage_proposals(items, up_next_cap=args.up_next_cap, today=today)
     now = datetime.now(UTC).astimezone()
-    output = render(proposals, now=now, today=today, report_only=args.report_only)
+    backlog_age_note = degraded_or_none(
+        board,
+        Capability.VELOCITY_TIMESTAMPS,
+        "Backlog-age tiebreaker",
+        "no creation timestamps — promotion order may differ",
+    )
+    output = render(
+        proposals,
+        now=now,
+        today=today,
+        report_only=args.report_only,
+        backlog_age_note=backlog_age_note,
+        native_edges_note=native_edges_note,
+        milestone_proximity_note=milestone_proximity_note,
+    )
     print(output)
     return 0
 

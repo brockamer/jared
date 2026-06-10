@@ -6,12 +6,17 @@ description: Structural review of the board — shape, phasing, milestones, depe
 
 Invoke the Jared skill to run a full structural review of the project board. This is heavier than `/jared-groom` — a 10,000-foot pass that may propose substantive changes: new milestones, possible board splits, dependency graph rebuilds, strategic issues. Plan for a longer session.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations before starting:
+- Skip Question 3 (milestones/Roadmap) entirely: `degraded: milestone dates unavailable on kanbanflow — Roadmap/milestone section omitted`. KanbanFlow has no native milestone state or due dates (MILESTONE_STATE absent).
+- For Question 4 (dependencies): note that the graph is built from emulated `blocked-by:<N>` label markers, not native edges: `degraded: native dependency edges unavailable on kanbanflow — graph built from label markers (emulated); cycle detection may be incomplete`.
+- Skip Bundles 2 and 3 in the proposal (filing/assigning GitHub milestones).
+
 Follow the Seven Questions in `references/structural-review.md`:
 
 1. **Shape** — one coherent project, or would 2+ boards serve better? See `references/new-board.md` for split criteria.
 2. **Phasing** — items correctly tied to phases/releases? Orphans? Implicit phases not yet named?
-3. **Milestones** — exist, dated, meaningful names, Roadmap view renders? See `references/milestones-and-roadmap.md`.
-4. **Dependencies** — build graph via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo>`. Cycles? Inversions? Long fragile chains?
+3. **Milestones** — exist, dated, meaningful names, Roadmap view renders? See `references/milestones-and-roadmap.md`. *(Skip on KanbanFlow — see backend gate above.)*
+4. **Dependencies** — build graph via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/dependency-graph.py --repo <owner>/<repo>`. Cycles? Inversions? Long fragile chains? *(Label-emulation only on KanbanFlow — see backend gate above.)*
 5. **Metadata drift** — sweep findings classified: real drift vs. noise.
 6. **Deliverables** — each milestone has a one-sentence deliverable proving it's done?
 7. **Future arc** — what's the next 6–12 months beyond the current horizon?

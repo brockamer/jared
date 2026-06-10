@@ -4,6 +4,10 @@ description: Fast read-only status of the project board — In Progress, top of 
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below is written in voice; render it as written rather than translating at runtime. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Replace the `Worth a glance` aging section with: `(degraded: timestamps unavailable on kanbanflow — aging data absent)` rather than showing incorrect day counts. Keep the heading for consistent shape (VELOCITY_TIMESTAMPS absent).
+- MCP tools are not available for board operations on this backend — use `jared` CLI (Tier 2) for all board reads. Skip any Tier 1 MCP tool suggestions (MCP_TIER absent).
+
 Invoke the Jared skill and produce a fast status report of the project board in the current repo.
 
 Specifically:
