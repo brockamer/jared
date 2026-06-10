@@ -36,7 +36,11 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
     BoardItem,
+    Capability,
     ClosedItem,
+)
+from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
+    degraded_or_none,
 )
 from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
     FileBoardSetupError,
@@ -504,7 +508,17 @@ def _cmd_close(args: argparse.Namespace) -> int:
     board.invalidate_items()
     board.invalidate_closed_items()
     print(f"OK: set Status=Done on issue #{args.issue_number}")
-    print(f"OK: closed #{args.issue_number}, Status=Done")
+    # Phase 6: when CLOSED_STATE absent, the close is a column-move only — no
+    # native closed state is set on the backend. Note that the operation still
+    # succeeds (moving to Done column is the correct action on KanbanFlow).
+    closed_absent = degraded_or_none(
+        board,
+        Capability.CLOSED_STATE,
+        "native close state",
+        "no native closed state on this backend",
+    )
+    suffix = " (column-move only — no native closed state on this backend)" if closed_absent else ""
+    print(f"OK: closed #{args.issue_number}, Status=Done{suffix}")
     return 0
 
 
@@ -531,6 +545,22 @@ def _cmd_file(args: argparse.Namespace) -> int:
         name, value = spec.split("=", 1)
         extra_specs.append((name, value))
 
+    # Phase 6: MILESTONE_STATE whole-scope-absent refusal. Check before field
+    # validation so a missing-capability refusal is not confused with a bad
+    # --priority/--status (both exit 1 via FieldNotFound). This is analogous
+    # to the existing unmatched-milestone refusal at line 582 (exit 2).
+    milestone_title: str | None = None
+    if not args.no_milestone and args.milestone is not None:
+        milestone_absent_note = degraded_or_none(
+            board,
+            Capability.MILESTONE_STATE,
+            "milestone assignment",
+            "this backend has no milestone state or due dates",
+        )
+        if milestone_absent_note:
+            print(f"error: {milestone_absent_note}", file=sys.stderr)
+            return 2
+
     # Validate Priority/Status/extra field values up front — before the
     # read-only milestone GET and the body PII scan — so a bad --priority/
     # --status/--field fails fast without paying for that I/O or being
@@ -548,7 +578,6 @@ def _cmd_file(args: argparse.Namespace) -> int:
     # consecutive findajob structural reviews bulk-absorbed orphan filings
     # before this gate landed; making the omission impossible at the source
     # is cheaper than catching it in every sweep.
-    milestone_title: str | None = None
     if not args.no_milestone:
         # provider.list_milestones() uses the query-string form:
         # `gh api repos/{repo}/milestones?state=open&per_page=100`
@@ -569,11 +598,24 @@ def _cmd_file(args: argparse.Namespace) -> int:
                 )
             else:
                 print("  no open milestones on this board.", file=sys.stderr)
-                print(
-                    f"  create one via `gh api repos/{board.repo}/milestones -f title=...` "
-                    "or pass --no-milestone to opt out.",
-                    file=sys.stderr,
+                # Phase 6: omit the GitHub-specific gh-api hint on non-GitHub backends.
+                milestone_state_absent = degraded_or_none(
+                    board,
+                    Capability.MILESTONE_STATE,
+                    "milestone assignment",
+                    "this backend has no milestone state or due dates",
                 )
+                if not milestone_state_absent:
+                    print(
+                        f"  create one via `gh api repos/{board.repo}/milestones -f title=...` "
+                        "or pass --no-milestone to opt out.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "  pass --no-milestone to opt out.",
+                        file=sys.stderr,
+                    )
             return 2
         if args.milestone not in open_titles:
             print(
@@ -654,6 +696,15 @@ def _cmd_file(args: argparse.Namespace) -> int:
     issue_url = item.url or f"https://github.com/{board.repo}/issues/{item.number}"
     print(f"OK: filed #{item.number} → {status}, Priority={args.priority}")
     print(f"URL: {issue_url}")
+    # Phase 6: MARKDOWN_BODY — body content is preserved but rendered as plain text.
+    markdown_note = degraded_or_none(
+        board,
+        Capability.MARKDOWN_BODY,
+        "markdown body rendering",
+        "stored as plain text",
+    )
+    if markdown_note:
+        print(f"note: {markdown_note}")
     return 0
 
 
@@ -755,7 +806,16 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
     # from #52's body — any board-state mutation invalidates the cache.
     board.invalidate_items()
     action = "removed" if args.remove else "added"
-    print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}")
+    # Phase 6: when NATIVE_DEPENDENCIES is absent the provider uses label
+    # emulation — the operation still succeeds, but the output notes it.
+    native_absent = degraded_or_none(
+        board,
+        Capability.NATIVE_DEPENDENCIES,
+        "native blocked-by edges",
+        "NATIVE_DEPENDENCIES not supported on this backend",
+    )
+    suffix = " (label emulation — NATIVE_DEPENDENCIES not supported on this backend)" if native_absent else ""
+    print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}{suffix}")
     return 0
 
 
@@ -774,6 +834,15 @@ def _cmd_comment(args: argparse.Namespace) -> int:
     # and returns the URL.
     comment_url = board.provider.comment(args.issue_number, body)
     print(f"OK: commented on #{args.issue_number} ({comment_url})")
+    # Phase 6: MARKDOWN_BODY — content is preserved but rendered as plain text.
+    markdown_note = degraded_or_none(
+        board,
+        Capability.MARKDOWN_BODY,
+        "markdown body rendering",
+        "stored as plain text",
+    )
+    if markdown_note:
+        print(f"note: {markdown_note}")
     return 0
 
 
@@ -965,7 +1034,22 @@ def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, An
     swallow the error, print a one-line stderr notice, and return [].
     `jared summary` should keep working — sweep has the full picture and
     catches the older drift anyway.
+
+    Phase 6: when CLOSED_STATE is absent, the Done column is the sole closed
+    signal — there's no separate "closed" state to diverge from. Returns []
+    with a note on stderr.
     """
+    # Phase 6: CLOSED_STATE gate — the detector requires a real closed state.
+    stuck_note = degraded_or_none(
+        board,
+        Capability.CLOSED_STATE,
+        "stuck-closed check",
+        "Done column is the sole closed signal on this backend",
+    )
+    if stuck_note:
+        print(f"  {stuck_note}", file=sys.stderr)
+        return []
+
     try:
         closed = _fetch_recently_closed(board, days=days)
     except GhInvocationError as e:
@@ -1083,7 +1167,13 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             item for item in items if item.status == "Backlog" and label in item.labels
         ]
     up_next = up_next_all[:3]
-    closed = _fetch_recently_closed(board, days=7)
+    recently_closed_note = degraded_or_none(
+        board,
+        Capability.VELOCITY_TIMESTAMPS,
+        "recently-closed (7d)",
+        "no closed-at timestamps on this backend",
+    )
+    closed = [] if recently_closed_note else _fetch_recently_closed(board, days=7)
 
     print(f"# Session handoff — {board.repo} — {_now_local_iso()}")
     print()
@@ -1125,7 +1215,9 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
         print()
     print("## Recently closed (last 7 days)")
     print()
-    if closed:
+    if recently_closed_note:
+        print(f"  {recently_closed_note}")
+    elif closed:
         for c in closed:
             date = c.closed_at[:10]
             print(f"- #{c.number} {c.title}  ({date})")
@@ -1189,6 +1281,17 @@ def _cmd_ties(args: argparse.Namespace) -> int:
         )
     )
 
+    # Phase 6: surface the NATIVE_DEPENDENCIES degradation note as an additional
+    # diagnostic line (the fetch still succeeds, but blocked_by fields are empty).
+    native_dep_note = degraded_or_none(
+        board,
+        Capability.NATIVE_DEPENDENCIES,
+        "native blocked-by edges for ties",
+        "blocked_by fields will be empty — ties analysis uses body-ref signals only",
+    )
+    if native_dep_note:
+        diagnostic = f"{diagnostic}\n{native_dep_note}" if diagnostic else native_dep_note
+
     # Single batched fetch, then resolve target by walking the result.
     # Replaces the older Board.get_issue + fetch_open_issues_for_ties pair
     # which paid for body bytes even in partial mode (#81).
@@ -1244,12 +1347,31 @@ def _cmd_audit_fetch(args: argparse.Namespace) -> int:
     from lib.board import fetch_audit_window  # type: ignore[import-not-found]
 
     board = _load_board(args.board)
+
+    # Phase 6: MILESTONE_STATE whole-scope-absent refusal. When --type milestones
+    # or --type both is requested but the backend lacks MILESTONE_STATE, refuse
+    # (milestones-only) or downgrade to issues-only (both) — per spec §2.
+    entity_type = args.entity_type
+    milestone_note = degraded_or_none(
+        board,
+        Capability.MILESTONE_STATE,
+        "milestone audit",
+        "this backend has no milestone state or due dates",
+    )
+    if milestone_note and entity_type in ("milestones", "both"):
+        if entity_type == "milestones":
+            print(f"error: {milestone_note}", file=sys.stderr)
+            return 2
+        # --type both: warn and continue issues-only.
+        print(f"warning: {milestone_note}; continuing with issues only", file=sys.stderr)
+        entity_type = "issues"
+
     result = fetch_audit_window(
         board,
         count=args.count,
         age_days=args.age_days,
         issues=args.issues,
-        entity_type=args.entity_type,
+        entity_type=entity_type,
         cache=args.cache,
     )
     print(json.dumps(result, indent=2, default=str))

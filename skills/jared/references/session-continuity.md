@@ -170,6 +170,8 @@ Retro Session notes are marked as such in the header: `## Session 2026-04-19 (re
 
 ## The posture assembly
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, the **Recently closed (last 7 days)** section of the posture is omitted — closed-at timestamps are unavailable on this backend: `degraded: VELOCITY_TIMESTAMPS unavailable — recently-closed section omitted from session posture` (VELOCITY_TIMESTAMPS absent). The In flight and Top of Up Next sections are unaffected.
+
 `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt` emits the board-derived posture deterministically: In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Recently closed (last 7 days), and a `## Quick health check` block iff the board has `## Session start checks` configured.
 
 The CLI is the single canonical assembly point — both `/jared-start` (session begin) and ad-hoc orientation calls invoke it the same way. There is no synthesis layer above it, no human-authored "Frame" prose. The cross-issue narrative that prose used to carry now lives where it belongs:
