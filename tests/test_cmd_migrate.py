@@ -1121,3 +1121,84 @@ def test_apply_ledger_write_survives_a_torn_write(
     assert not _Path(str(out_path) + ".tmp").exists()
     # Re-reading still parses (no truncation leaked through).
     _json.loads(out_path.read_text())
+
+
+def test_apply_ledger_mark_happens_after_full_config_not_after_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """The ledger mark+persist for an item must happen AFTER file()+set_field()+
+    set_milestone(), never right after file().
+
+    Scenario: 2-item GH->KF migration. #1 configures fully (file + set_field).
+    #2 file() succeeds but set_field raises. On crash, the persisted ledger must
+    record #1 as done (is_done(1) True) but NOT #2 (is_done(2) False).
+
+    Discriminating invariant: if a future refactor moves ledger.mark+_atomic_write
+    to immediately after file() (before the field loop), #2's mark would be
+    persisted before the crash. The ledger would then show is_done(2) True and
+    this test would turn RED.
+    """
+    from pathlib import Path as _Path
+
+    from skills.jared.scripts.lib.migrate import MigrationLedger as _Ledger
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+
+    src = _StubProvider(
+        items=[
+            BoardItem(
+                number=1,
+                title="a",
+                status="Up Next",
+                priority="High",
+                body="x",
+                fields={"Area": "backend"},
+            ),
+            BoardItem(
+                number=2,
+                title="b",
+                status="Backlog",
+                priority="Low",
+                body="y",
+                fields={"Area": "frontend"},
+            ),
+        ],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+
+    # Crash on set_field for #2 only. #1's set_field is allowed through.
+    real_set_field = tgt.set_field
+
+    def _exploding_set_field(ref: int, name: str, value: str) -> None:
+        if ref == 2:
+            raise RuntimeError("simulated crash during #2 set_field")
+        real_set_field(ref, name, value)
+
+    monkeypatch.setattr(tgt, "set_field", _exploding_set_field)
+
+    cli = _patch_boards(monkeypatch, src, tgt)
+    with pytest.raises(RuntimeError, match="simulated crash during #2 set_field"):
+        cli.main(
+            [
+                "migrate",
+                "--to",
+                "kanbanflow",
+                "--target-doc",
+                "t.md",
+                "--apply",
+                "--yes",
+                "--out",
+                str(out_path),
+            ]
+        )
+
+    # #1 was fully configured before the crash: its mark+persist happened AFTER
+    # set_field, so is_done(1) must be True on disk.
+    # #2's file() succeeded but set_field raised before mark+persist could run,
+    # so is_done(2) must be False — the item is half-configured and must be
+    # re-created (not skipped) on resume.
+    ledger = _Ledger.from_json(out_path.read_text())
+    assert ledger.is_done(1) is True
+    assert ledger.is_done(2) is False
