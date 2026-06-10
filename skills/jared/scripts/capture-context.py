@@ -70,9 +70,10 @@ def _make_provider(repo: str) -> GitHubProjectsProvider:
 
 
 def fetch_body(repo: str, number: int) -> str:
-    # REST `core` bucket with ETag/conditional GET (#216): delegates to
-    # provider.get_body → lib.board.fetch_issue_body_rest, the body-read twin
-    # of fetch_issue_state_rest, so repeat reads can short-circuit to a 304.
+    # Delegates to provider.get_body, a REST `core`-bucket read. As of #342 that
+    # read retries transient GitHub failures and raises a persistent one (rather
+    # than masquerading as an empty body); it no longer uses the ETag/304 layer,
+    # since capture-context reads each body once and the cache bought nothing.
     # cast: GitHubProjectsProvider imported with type: ignore[import-not-found]
     # is opaque to mypy, so .get_body() is typed Any; we know it returns str.
     return cast("str", _make_provider(repo).get_body(number))

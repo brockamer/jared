@@ -7,17 +7,21 @@ patching is preserved.
 
 from __future__ import annotations
 
+import re
+import sys
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from .board import (
+    _TOKEN_SCOPE_ERROR_SIGNATURE,
     FieldNotFound,
     GhInvocationError,
     ItemNotFound,
     OptionNotFound,
     _flatten_project_item_for_project,
-    fetch_issue_body_rest,
     run_gh,
     run_gh_raw,
     run_graphql,
@@ -82,6 +86,103 @@ class IssueResolutionError(GhInvocationError):
     carries that GitHub-specific phrasing so the CLI can print it verbatim
     without itself referencing node-ids.
     """
+
+
+# --------------------------------------------------------------------------- #
+# Transient-read retry (#342)                                                   #
+#                                                                               #
+# `jared migrate`'s GitHub source reads (list_open_items / fetch_blocked_by_    #
+# edges / list_comments) abort the whole migration when GitHub returns a        #
+# transient failure — most often its intermittent `read:project` scope          #
+# enforcement on ProjectV2 fields, which 401s on one call and succeeds seconds  #
+# later. These reads are idempotent, so a bounded retry is always write-safe.   #
+# A genuinely persistent failure (a token actually missing `project` scope)     #
+# still surfaces clearly: every retry fails and the original error re-raises    #
+# after exhaustion — persistence, not pattern-matching, separates transient     #
+# from terminal. Mirrors the kanbanflow_client retry shape (`_sleep`/`_backoff` #
+# module-level seams; tests patch `_sleep` so the suite never really waits).    #
+# --------------------------------------------------------------------------- #
+
+_T = TypeVar("_T")
+
+# initial attempt + this many retries (4 total attempts: backoffs of 1s, 2s, 4s).
+_MAX_READ_RETRIES = 3
+
+# GitHub's flaky read:project scope enforcement surfaces in TWO wire forms, and
+# the classifier must catch both:
+#   1. transport 401 — `gh: Bad credentials (HTTP 401)` / `HTTP 401: ...`: a
+#      status line the regex below reads. (This is the form observed in PR #341.)
+#   2. GraphQL errors[] (HTTP 200, NO status line) — `gh: Your token has not
+#      been granted the required scopes to execute this query. ... ['read:project']`:
+#      gh exits 1 on any GraphQL errors[] and writes only that message, so the
+#      signature list is the only thing that can catch it.
+#
+# HTTP statuses GitHub returns on a transient blip: 401 (transport scope
+# rejection / "Requires authentication"), 429 + 5xx (rate / server). 403 is
+# deliberately EXCLUDED — a genuine permission 403 stays terminal, and a primary
+# rate-limit 403's reset window far exceeds the bounded 1/2/4s backoff.
+_TRANSIENT_HTTP_STATUSES = frozenset({401, 429, 500, 502, 503, 504})
+
+# Substring signatures (matched case-insensitively) for transient failures that
+# don't carry an HTTP status line in gh's stderr — notably the GraphQL
+# insufficient-scopes form (wire form 2 above). The token-scope signature is
+# imported from board.py so the two stay in lockstep if GitHub's phrasing shifts.
+_TRANSIENT_SIGNATURES = (
+    "requires authentication",
+    "secondary rate limit",
+    "not been granted the required scopes",  # GraphQL INSUFFICIENT_SCOPES (read:project)
+    _TOKEN_SCOPE_ERROR_SIGNATURE.lower(),
+)
+
+_HTTP_STATUS_IN_MESSAGE_RE = re.compile(r"HTTP(?:/[\d.]+)?\s+(\d{3})")
+
+
+def _sleep(seconds: float) -> None:
+    """Module-level sleep seam — patched in tests so retries don't really wait."""
+    time.sleep(seconds)
+
+
+def _backoff(attempt: int) -> float:
+    """Exponential backoff in seconds, capped at 30 (mirrors kanbanflow_client)."""
+    return float(min(2**attempt, 30))
+
+
+def _is_transient_gh_error(exc: GhInvocationError) -> bool:
+    """True when a gh read failure is the retryable kind (flaky scope / 401 / 5xx /
+    secondary rate limit). Everything else — 404, 422, genuine 403, non-JSON
+    output, the list_open_items pagination guard — is terminal and raised at once.
+
+    Classification is a positive allowlist over the error message: a status code
+    in `_TRANSIENT_HTTP_STATUSES`, or one of `_TRANSIENT_SIGNATURES`.
+    """
+    message = str(exc)
+    for match in _HTTP_STATUS_IN_MESSAGE_RE.finditer(message):
+        if int(match.group(1)) in _TRANSIENT_HTTP_STATUSES:
+            return True
+    lowered = message.lower()
+    return any(sig in lowered for sig in _TRANSIENT_SIGNATURES)
+
+
+def _retry_transient_read(fn: Callable[[], _T]) -> _T:
+    """Call `fn`, retrying transient GhInvocationErrors with bounded backoff.
+
+    Terminal errors (and the final exhausted retry) propagate unchanged, so a
+    real auth misconfiguration is never masked — only delayed by the backoffs.
+    """
+    for attempt in range(_MAX_READ_RETRIES + 1):
+        try:
+            return fn()
+        except GhInvocationError as exc:
+            if attempt >= _MAX_READ_RETRIES or not _is_transient_gh_error(exc):
+                raise
+            delay = _backoff(attempt)
+            print(
+                f"note: transient GitHub read failure, retrying in {delay:.0f}s "
+                f"(attempt {attempt + 2}/{_MAX_READ_RETRIES + 1}): {exc}",
+                file=sys.stderr,
+            )
+            _sleep(delay)
+    raise AssertionError("unreachable: retry loop must return or raise")  # pragma: no cover
 
 
 _OPEN_ITEMS_QUERY = """
@@ -246,10 +347,8 @@ class GitHubProjectsProvider:
           keyed by lowercased field name.
         """
         owner, repo_name = self.repo.split("/", 1)
-        data = run_graphql(
-            _OPEN_ITEMS_QUERY,
-            owner=owner,
-            repo=repo_name,
+        data = _retry_transient_read(
+            lambda: run_graphql(_OPEN_ITEMS_QUERY, owner=owner, repo=repo_name)
         )
         issues_node = (data.get("data") or {}).get("repository", {}).get("issues") or {}
         if (issues_node.get("pageInfo") or {}).get("hasNextPage"):
@@ -306,8 +405,26 @@ class GitHubProjectsProvider:
         return item
 
     def get_body(self, ref: IssueRef) -> str:
-        """Return the issue's Markdown body via REST (with ETag/conditional GET)."""
-        return fetch_issue_body_rest(self.repo, ref)
+        """Return the issue's Markdown body via REST, retrying transient failures.
+
+        Reads the body through a *raising* `gh api` call wrapped in
+        `_retry_transient_read` (#342) — NOT the shared `fetch_issue_body_rest`,
+        which swallows every failure to "". That swallow matters because
+        `_OPEN_ITEMS_QUERY` omits the body, so migrate's pass-2 `get_body` is the
+        SOLE body-transfer step: a transient blip there used to silently port an
+        empty body and durably mark it done. Now a transient failure retries and
+        a genuinely persistent one surfaces clearly after exhaustion (criterion 3),
+        while a 200 whose `body` field is absent/empty still returns "".
+
+        Trade-off (accepted, #342 review): this bypasses the ETag/conditional-GET
+        layer, so repeat reads of the same body no longer short-circuit to a 304.
+        get_body's callers — migrate and capture-context — read each body once,
+        so the cache bought nothing here; and a persistently-failing read now
+        raises rather than masquerading as an empty body.
+        """
+        data = _retry_transient_read(lambda: run_gh(["api", f"repos/{self.repo}/issues/{ref}"]))
+        body = data.get("body") if isinstance(data, dict) else None
+        return body or ""
 
     def fetch_blocked_by_edges(self) -> list[Edge]:
         """Return all blocked-by edges for open issues in this repo.
@@ -317,7 +434,7 @@ class GitHubProjectsProvider:
         `state` is discarded. cache=None (no advisory caching at the provider
         level — callers that want caching pass their own cache kwarg via Board).
         """
-        raw = _fetch_blocked_by_edges(self.repo)
+        raw = _retry_transient_read(lambda: _fetch_blocked_by_edges(self.repo))
         edges: list[Edge] = []
         for dependent_num, blockers in raw.items():
             for blocker_node in blockers:
@@ -337,7 +454,9 @@ class GitHubProjectsProvider:
         `createdAt` is mapped to Comment.created_at here so it never crosses
         the neutral boundary.
         """
-        data = run_gh(["issue", "view", str(ref), "--repo", self.repo, "--json", "comments"])
+        data = _retry_transient_read(
+            lambda: run_gh(["issue", "view", str(ref), "--repo", self.repo, "--json", "comments"])
+        )
         raw = data.get("comments", []) if isinstance(data, dict) else []
         return [
             Comment(
