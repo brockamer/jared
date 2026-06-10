@@ -1680,6 +1680,16 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
 
     src = source_board.provider
     tgt = target_board.provider
+    if args.include_closed:
+        # No provider exposes a closed-items reader (only recently_closed, which
+        # KanbanFlow degrades to []), so --include-closed is inert. Warn loudly
+        # rather than silently migrate only open items; closed-history migration
+        # is a named follow-up. Fires in both dry-run and apply modes.
+        print(
+            "warning: closed-item migration not yet supported on this backend; "
+            "ignoring --include-closed (only open items will be migrated).",
+            file=sys.stderr,
+        )
     items = src.list_open_items()
     edges = src.fetch_blocked_by_edges()
     axes = compute_loss_axes(
