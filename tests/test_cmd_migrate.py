@@ -49,6 +49,7 @@ class _StubProvider:
         self.set_field_calls: list[tuple[int, str, str]] = []
         self.set_milestone_calls: list[tuple[int, str]] = []
         self.move_calls: list[tuple[int, str]] = []
+        self.add_blocked_by_calls: list[tuple[int, int]] = []
 
     def capabilities(self) -> frozenset[Capability]:
         return self._caps
@@ -105,7 +106,7 @@ class _StubProvider:
         self.set_milestone_calls.append((ref, name))
 
     def add_blocked_by(self, ref: int, blocker: int) -> None:
-        return None
+        self.add_blocked_by_calls.append((ref, blocker))
 
     def comment(self, ref: int, body: str) -> str:
         return ""
@@ -356,6 +357,34 @@ def test_apply_without_yes_proceeds_on_y(monkeypatch: pytest.MonkeyPatch) -> Non
     rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply"])
     assert rc == 0
     assert [i.number for i in tgt.created] == [1]
+
+
+# ---------------------------------------------------------------------------
+# Task 3.2 — second-pass blocked-by edges
+# ---------------------------------------------------------------------------
+
+
+def test_apply_translates_edges_through_number_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After item creation, source edges are re-keyed through the ledger's number
+    map and replayed via add_blocked_by. A KF->GitHub renumber case is used so the
+    assertion actually pins translate_edges: GitHub auto-assigns (stub: 100, 101),
+    so the source edge (dependent=8, blocker=7) must surface as (101, 100) — an
+    identity GH->KF map could not distinguish translation from raw passthrough."""
+    src = _StubProvider(
+        items=[
+            BoardItem(number=7, title="a", status="Backlog", priority="High", body=""),
+            BoardItem(number=8, title="b", status="Backlog", priority="Low", body=""),
+        ],
+        edges=[Edge(dependent=8, blocker=7)],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=_all_capabilities())
+    cli = _patch_boards(monkeypatch, src, tgt, source_backend="kanbanflow", target_backend="github")
+    rc = cli.main(["migrate", "--to", "github", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    # Stub assigns 100 to #7 and 101 to #8; the edge re-keys to (101, 100).
+    assert [i.number for i in tgt.created] == [100, 101]
+    assert tgt.add_blocked_by_calls == [(101, 100)]
 
 
 def test_include_closed_warns_it_is_inert(
