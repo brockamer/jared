@@ -656,3 +656,206 @@ def test_apply_resumes_from_existing_ledger_skips_done_items(
     # The ledger persisted back to --out now covers both items.
     data = _json.loads(out_path.read_text())
     assert data["completed"] == {"1": 1, "2": 2}
+
+
+def test_apply_against_completed_artifact_replays_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """Pointing --apply at a FULLY-completed artifact is a total no-op: no item is
+    re-created and — critically — the second pass does not replay.
+
+    The sharpest duplication case. The pre-seed records both items created AND
+    their second-pass work done (ported + edges_applied). Because tgt.comment() is
+    not idempotent on a live backend (neither GitHub nor KanbanFlow dedups), a
+    second pass that ran here would duplicate every ported comment. Source #1
+    carries a comment (the opposite of the skip-done-items test's deliberately
+    comment-free item) so a replay is observable: the guard must make
+    comment_calls / set_body_calls / add_blocked_by_calls all empty.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+    out_path.write_text(
+        _json.dumps(
+            {
+                "direction": "github->kanbanflow",
+                "completed": {"1": 1, "2": 2},
+                "losses": [],
+                "ported": [1, 2],
+                "edges_applied": [[2, 1]],
+            }
+        )
+    )
+
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="see #1"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="y"),
+        ],
+        edges=[Edge(dependent=2, blocker=1)],
+        caps=_all_capabilities(),
+        comments={1: [_Comment(author="alice", body="a note", created_at="2026-01-02")]},
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            "t.md",
+            "--apply",
+            "--yes",
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert rc == 0
+    # Nothing re-created; nothing re-ported; no edge replayed.
+    assert tgt.file_calls == []
+    assert tgt.set_body_calls == []
+    assert tgt.comment_calls == []
+    assert tgt.add_blocked_by_calls == []
+
+
+def test_apply_resumes_partial_second_pass_without_duplicating(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A run that crashed mid-second-pass resumes without re-porting done items.
+
+    This pins the per-item / per-edge persistence the guard relies on: the
+    ledger.is_ported / is_edge_applied flags only protect a resume if they were
+    written to disk before the crash. Pre-seed both items created and #1 already
+    ported (ported=[1]) but the edge NOT yet applied (edges_applied=[]). With #1
+    and #2 both comment-bearing and edge (2,1):
+      - #1's body+comments are NOT replayed (already ported) — no duplicate.
+      - #2's body+comments ARE ported this run (it was the crash point).
+      - the edge applies this run (it had not been recorded done).
+    A guard that didn't persist per-item would re-port #1 and duplicate its
+    comment; a guard that didn't persist per-edge is exercised by the
+    completed-artifact test above.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+    out_path.write_text(
+        _json.dumps(
+            {
+                "direction": "github->kanbanflow",
+                "completed": {"1": 1, "2": 2},
+                "losses": [],
+                "ported": [1],
+                "edges_applied": [],
+            }
+        )
+    )
+
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="b1"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="b2"),
+        ],
+        edges=[Edge(dependent=2, blocker=1)],
+        caps=_all_capabilities(),
+        comments={
+            1: [_Comment(author="alice", body="note one", created_at="2026-01-01")],
+            2: [_Comment(author="bob", body="note two", created_at="2026-01-02")],
+        },
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            "t.md",
+            "--apply",
+            "--yes",
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert rc == 0
+    # Both items already created — nothing re-created.
+    assert tgt.file_calls == []
+    # #1 (already ported) is NOT re-ported; only #2's body + comment land.
+    assert tgt.set_body_calls == [(2, "b2")]
+    assert tgt.comment_calls == [(2, "(originally @bob, 2026-01-02)\n\nnote two")]
+    # The edge applies this run (it was not recorded as done).
+    assert tgt.add_blocked_by_calls == [(2, 1)]
+    # The persisted ledger now records both items ported and the edge applied.
+    data = _json.loads(out_path.read_text())
+    assert data["ported"] == [1, 2]
+    assert data["edges_applied"] == [[2, 1]]
+
+
+def test_apply_persists_second_pass_progress_before_a_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A crash mid-second-pass leaves the already-ported items recorded on disk.
+
+    This is what makes the resume guard load-bearing rather than cosmetic: the
+    is_ported flag only protects a re-run if it was persisted BEFORE the crash.
+    Without the per-item write_text inside the loop, a crash after porting #1 but
+    before the run's final write would leave `ported` empty on disk, and the
+    resume would replay #1's comment (duplicating it).
+
+    Inject a crash on the SECOND item's comment write (#2), then read the artifact
+    back: #1 must already be recorded as ported. (Items sort #1 before #2, so #1
+    is fully ported and persisted before #2's comment is attempted.)
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="b1"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="b2"),
+        ],
+        edges=[],
+        caps=_all_capabilities(),
+        comments={
+            1: [_Comment(author="alice", body="note one", created_at="2026-01-01")],
+            2: [_Comment(author="bob", body="note two", created_at="2026-01-02")],
+        },
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+
+    # Crash on #2's comment (new number == 2 GH->KF identity), after #1 is fully
+    # ported and its progress persisted.
+    real_comment = tgt.comment
+
+    def _exploding_comment(ref: int, body: str) -> str:
+        if ref == 2:
+            raise RuntimeError("simulated crash during #2 comment portage")
+        return real_comment(ref, body)
+
+    monkeypatch.setattr(tgt, "comment", _exploding_comment)
+
+    cli = _patch_boards(monkeypatch, src, tgt)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        cli.main(
+            [
+                "migrate",
+                "--to",
+                "kanbanflow",
+                "--target-doc",
+                "t.md",
+                "--apply",
+                "--yes",
+                "--out",
+                str(out_path),
+            ]
+        )
+
+    # #1's second-pass progress was persisted BEFORE the crash on #2. A resume
+    # reads this and skips #1, so its comment is not duplicated.
+    data = _json.loads(out_path.read_text())
+    assert data["ported"] == [1]
