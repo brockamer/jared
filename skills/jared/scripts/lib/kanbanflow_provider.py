@@ -142,6 +142,11 @@ class KanbanFlowProvider:
             )
 
     # --- introspection ---
+    @classmethod
+    def default_capabilities(cls) -> frozenset[Capability]:
+        """The backend's static capability set, resolved without an instance."""
+        return cls._CAPABILITIES
+
     def capabilities(self) -> frozenset[Capability]:
         return self._CAPABILITIES
 

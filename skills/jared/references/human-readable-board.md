@@ -1,5 +1,10 @@
 # Human-Readable Board Surface
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Issue bodies are plain text; `<details>` HTML is not rendered, `##` headings are literal text: `degraded: MARKDOWN_BODY unavailable — <details> blocks and markdown heading rendering not available on this backend. Use plain text for body content` (MARKDOWN_BODY absent).
+- Heading depth constraints (`## ` only, no `###`) become moot — plain-text structure should be used instead: `degraded: MARKDOWN_BODY unavailable — heading depth constraints do not apply; use plain text` (MARKDOWN_BODY absent).
+- The structured markdown sections and `<details>` blocks described below are GitHub-specific: `degraded: MARKDOWN_BODY unavailable — structured markdown sections and <details> blocks are GitHub-only. Use plain-text sections on this backend` (MARKDOWN_BODY absent).
+
 The board's value is that a human glancing at it understands the state of the world. Detailed content belongs in the issue body's living sections or in collapsed `<details>` blocks; the *surface* (column views, titles, first visible lines) must be scannable without expanding.
 
 ## Title templates

@@ -4,6 +4,10 @@ description: Begin work on an issue — move to In Progress, load full context (
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 8) is written in voice; render it as written rather than translating at runtime. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms (no "gosh," no warmth softeners, no autobiographical asides).
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Step 5 (load context): MCP tools are not available for board operations on this backend — skip Tier 1 MCP tool suggestions: `degraded: MCP tier unavailable on kanbanflow — GitHub MCP plugin not applicable; use jared CLI for all board operations` (MCP_TIER absent).
+- Step 3 (pullable check): `## Acceptance criteria` section relies on plain-text parsing, not `##` header detection: `degraded: markdown body rendering unavailable on kanbanflow — pullable check parses plain text` (MARKDOWN_BODY absent).
+
 Invoke the Jared skill to start work on an issue. Takes an optional argument: the issue reference (number or URL).
 
 Argument parsing: `$ARGUMENTS` may contain `#14`, `14`, a URL, a short string like "the excluded employers issue", or be empty. Resolve to a specific issue number, asking to clarify if ambiguous.

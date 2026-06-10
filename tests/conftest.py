@@ -127,6 +127,43 @@ def import_dep() -> ModuleType:
     return mod
 
 
+def restrict_capabilities(
+    monkeypatch: pytest.MonkeyPatch, *, keep: set[object] | None = None
+) -> None:
+    """Force `Board.capabilities()` to return only `keep` (default: nothing).
+
+    Patches the static by-backend resolver so a normal GitHub-backed Board
+    behaves as a capability-restricted backend — letting surface tests exercise
+    the degraded path without a live KanbanFlow board.
+
+    Because the codebase has two Board class objects in sys.modules (see the
+    dual-import-path note at the top of this file), we patch capabilities()
+    on both: the test-import path (skills.jared.scripts.lib.board) and the
+    CLI/script path (lib.board, loaded after sys.path.insert in each script).
+    """
+    from skills.jared.scripts.lib.board import Board as _SkillBoard
+
+    frozen = frozenset(keep or set())
+    monkeypatch.setattr(_SkillBoard, "capabilities", lambda self: frozen)
+
+    # Also patch the lib.board path that CLI/scripts use. It may not be in
+    # sys.modules yet if no script has been imported in this test; that's fine
+    # — when the script later inserts scripts/ on sys.path and does
+    # `from lib.board import Board`, we need to cover that Board class too.
+    # We do this by patching both the already-loaded module (if present) and
+    # the class object reachable via the skills path (same file, different
+    # module object).
+    import importlib
+
+    try:
+        lib_board = importlib.import_module("lib.board")
+        lib_board_cls = getattr(lib_board, "Board", None)
+        if lib_board_cls is not None and lib_board_cls is not _SkillBoard:
+            monkeypatch.setattr(lib_board_cls, "capabilities", lambda self: frozen)
+    except ModuleNotFoundError:
+        pass  # lib.board not yet loaded — scripts/ not on sys.path yet
+
+
 def write_minimal_board(tmp_path: Path) -> Path:
     """Write a minimal valid docs/project-board.md into tmp_path/docs/.
 

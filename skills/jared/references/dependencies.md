@@ -1,10 +1,16 @@
 # Dependency Mapping
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- **Primary: native GitHub issue dependencies** — not available: `degraded: NATIVE_DEPENDENCIES unavailable — native blockedBy edges are GitHub-only; dependency tracking uses label-marker emulation on this backend` (NATIVE_DEPENDENCIES absent).
+- **`jared blocked-by` CLI subcommand** — uses label emulation instead of GraphQL mutation: `degraded: NATIVE_DEPENDENCIES unavailable — jared blocked-by uses label emulation on this backend; edges do not render natively in the board` (NATIVE_DEPENDENCIES absent).
+- **`gh api graphql blockedBy/blocking` queries** — unavailable: `degraded: NATIVE_DEPENDENCIES unavailable — gh api graphql dependency queries are GitHub-only` (NATIVE_DEPENDENCIES absent).
+- **`dependency-graph.py` native edges** — reads label-emulation: `degraded: NATIVE_DEPENDENCIES unavailable — dependency-graph.py reads label emulation; output is advisory only, not backed by native relation edges` (NATIVE_DEPENDENCIES absent).
+
 Dependencies between issues — "A must ship before B can start" — are first-class planning concerns. When buried in prose, blocking chains aren't obvious and work starts on implicitly-blocked items.
 
 ## Primary: native GitHub issue dependencies
 
-GitHub issue dependencies are GA. Prefer them over body conventions — they render natively in issue timelines and Projects views, and the `jared` CLI manages them atomically.
+GitHub issue dependencies are GA. Prefer them over body conventions — they render natively in issue timelines and Projects views, and the `jared` CLI manages them atomically. *(GitHub backend only — see backend gate above.)*
 
 ### Creating a dependency
 
