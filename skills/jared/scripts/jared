@@ -1631,10 +1631,15 @@ def _apply_migration(
     (non-identity map). Status and Priority ride on file() (the file() contract
     sets both atomically, so no redundant move()). Extra custom fields go through
     set_field; a milestone (validated to pre-exist) through set_milestone. Bodies
-    are written raw here; cross-ref rewrite + comment portage land in Task 3.3,
-    second-pass edges in Task 3.2.
+    are written raw here; cross-ref rewrite + comment portage land in Task 3.3.
+
+    Phase 3.2: after every item exists, a second pass re-keys the source
+    blocked-by edges through the complete number map (translate_edges) and
+    replays each via add_blocked_by(dependent, blocker). Edges whose endpoints
+    were not migrated are dropped inside translate_edges. The pass runs after the
+    full creation loop so the map is complete before any edge is translated.
     """
-    from lib.migrate import MigrationLedger  # type: ignore[import-not-found]
+    from lib.migrate import MigrationLedger, translate_edges  # type: ignore[import-not-found]
 
     if not args.yes:
         answer = input("Apply this migration? Type 'y' to proceed: ")
@@ -1661,6 +1666,9 @@ def _apply_migration(
             tgt.set_field(created.number, field_name, value)
         if item.milestone:
             tgt.set_milestone(created.number, item.milestone)
+
+    for edge in translate_edges(edges, ledger.number_map()):
+        tgt.add_blocked_by(edge.dependent, edge.blocker)
 
     return 0
 
