@@ -1638,8 +1638,20 @@ def _apply_migration(
     replays each via add_blocked_by(dependent, blocker). Edges whose endpoints
     were not migrated are dropped inside translate_edges. The pass runs after the
     full creation loop so the map is complete before any edge is translated.
+
+    Phase 3.3: a second pass over the migrated items rewrites cross-references in
+    bodies and comments through the complete number map. For each item, the
+    source body is rewritten (rewrite_cross_refs) and written via set_body(new);
+    each source comment's refs are rewritten and, on GH->KF only, prefixed with
+    "(originally @{author}, {created_at})\n\n" attribution before being replayed
+    via comment(new). Both the body/comment pass and the edge pass run after the
+    creation loop so the number map is complete before any rewrite.
     """
-    from lib.migrate import MigrationLedger, translate_edges  # type: ignore[import-not-found]
+    from lib.migrate import (  # type: ignore[import-not-found]
+        MigrationLedger,
+        rewrite_cross_refs,
+        translate_edges,
+    )
 
     if not args.yes:
         answer = input("Apply this migration? Type 'y' to proceed: ")
@@ -1647,9 +1659,11 @@ def _apply_migration(
             print("Aborted; no writes performed.")
             return 0
 
+    src = source_board.provider
     tgt = target_board.provider
     ledger = MigrationLedger(direction=direction)
     preserve_number = direction == "github->kanbanflow"
+    attribute_comments = direction == "github->kanbanflow"
 
     for item in items:
         if ledger.is_done(item.number):
@@ -1667,7 +1681,21 @@ def _apply_migration(
         if item.milestone:
             tgt.set_milestone(created.number, item.milestone)
 
-    for edge in translate_edges(edges, ledger.number_map()):
+    number_map = ledger.number_map()
+
+    # Second pass: rewrite body + comment cross-refs through the complete map.
+    for item in items:
+        new = number_map.to_new(item.number)
+        if new is None:
+            continue
+        tgt.set_body(new, rewrite_cross_refs(src.get_body(item.number), number_map))
+        for note in src.list_comments(item.number):
+            body = rewrite_cross_refs(note.body, number_map)
+            if attribute_comments:
+                body = f"(originally @{note.author}, {note.created_at})\n\n{body}"
+            tgt.comment(new, body)
+
+    for edge in translate_edges(edges, number_map):
         tgt.add_blocked_by(edge.dependent, edge.blocker)
 
     return 0
