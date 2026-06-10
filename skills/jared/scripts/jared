@@ -1618,10 +1618,14 @@ def _flip_backend_selector(source_doc_path: Path, target_doc_path: Path) -> None
     a byte-for-byte copy of that doc onto the source doc path: the project's
     docs/project-board.md now describes the migrated board (its `- backend:`,
     Repo/Board ID, Status column map — everything `jared init` emits), with no
-    dependence on the bootstrap doc-writer. A plain write is correct here: the
-    source doc is never re-read during the run, so atomicity is not load-bearing.
+    dependence on the bootstrap doc-writer. The write is atomic for the NEXT
+    process's sake, not this run's: docs/project-board.md is re-parsed by every
+    subsequent jared command, so a torn write here leaves it half-written and
+    every later command fails with BoardConfigError until a manual recopy. The
+    corruption target is the worst-possible file, so it goes through the same
+    _atomic_write_text helper as the four ledger persist sites.
     """
-    source_doc_path.write_text(target_doc_path.read_text())
+    _atomic_write_text(source_doc_path, target_doc_path.read_text())
 
 
 def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
