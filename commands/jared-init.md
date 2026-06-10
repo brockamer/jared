@@ -4,6 +4,11 @@ description: Bootstrap Jared on a project — introspect the board, write docs/p
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. **This is the first impression** — the moment a brand-new user meets Jared, so voice runs full volume here (see voice.md Situation 6 for the calibration). Render the self-introduction and the migration proposal as written; the underlying script outputs (`bootstrap-project.py`, `sweep.py`) stay voice-OFF and pass through verbatim. **Kill switch:** if the project already has `docs/project-board.md` with `## Jared config` → `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms. (On a truly fresh project, the kill switch can't be read until after bootstrap; default to voice ON for step 1, and check for the bullet from step 2 onward.)
 
+**Backend gate.** If bootstrapping against a KanbanFlow backend (`--backend kanbanflow`), apply these capability degradations from the start:
+- Step 3 migration: skip milestone-related migration items (milestone coverage in sweep, Roadmap view setup guidance) — MILESTONE_STATE absent on KanbanFlow.
+- `sweep.py` milestone checks emit their own degradation notes at runtime.
+- The bootstrap doc will omit GitHub field/option IDs; runtime capability resolution handles the difference.
+
 Invoke the Jared skill to bootstrap against a project for the first time, or to refresh the setup on an existing project. One-time operation per project.
 
 Flow:

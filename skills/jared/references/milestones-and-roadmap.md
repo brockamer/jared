@@ -1,5 +1,7 @@
 # Milestones and the Roadmap View
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, this entire document does not apply: `degraded: MILESTONE_STATE unavailable on this backend — milestone creation, due dates, Roadmap view, and gh milestone PATCH commands do not apply`. KanbanFlow has no native milestone open/close state or due dates, and no Projects v2 Roadmap view. On KanbanFlow, skip all milestone operations, Roadmap view setup instructions, and the milestone hygiene checklist.
+
 GitHub Projects v2 has a **Roadmap view** that visualizes issues on a time axis by milestone. Used well, it gives you a roadmap visualization for free — no Gantt tool, no separate PM app. Used poorly, milestones are noise.
 
 ## When to create a milestone

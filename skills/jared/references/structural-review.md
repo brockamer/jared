@@ -1,5 +1,10 @@
 # Structural Review — The Seven Questions
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Q3 (Milestones / Roadmap view) — skip: `degraded: MILESTONE_STATE unavailable — Q3 milestone/Roadmap checks do not apply` (MILESTONE_STATE absent).
+- Q4 (Dependency graph) — reads label-emulation only: `degraded: NATIVE_DEPENDENCIES unavailable — dependency graph is label-emulation only; cycles/inversions may not be detected if blockers are not labeled correctly` (NATIVE_DEPENDENCIES absent).
+- Q6 (Deliverables / milestone done-state) — omit milestone-state references; retain prose discipline as advisory: `degraded: MILESTONE_STATE unavailable — milestone done-state gating is not mechanically enforceable; deliverable sentence discipline remains advisory` (MILESTONE_STATE absent).
+
 Use this when the board may have drifted from the project's actual trajectory — after a major release, a pivot, a new strategic horizon opening up, or when a routine sweep (`references/board-sweep.md`) keeps turning up issues that feel more foundational than tactical. Also the routine invoked by `/jared-reshape`.
 
 This is heavier than a sweep. It's the 10,000-foot pass. Plan for 30–60 minutes and expect to propose substantive changes: new milestones, possible board splits, dependency graph rebuilds, strategic issues to file.

@@ -4,6 +4,10 @@ description: Propose Backlog → Up Next promotions and Blocked revisits. Adviso
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The `stage.py` script's output is voice-OFF (operator diagnostic, per the lane rule) — print it verbatim, wrapped in one warm voice intro and one warm closing line. The approval dialogue itself is voice-ON. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Milestone-proximity ranking is unavailable: `degraded: milestone proximity unavailable on kanbanflow — staging ranked by Priority and age only` (MILESTONE_STATE absent).
+- Native blocked-by edges are unavailable — the script runs with body-ref detection only: `degraded: native blocked-by edges unavailable on kanbanflow — blocker detection relies on ## Blocked by body sections only` (NATIVE_DEPENDENCIES absent).
+
 Invoke the Jared skill to evaluate the board and propose staging changes. The flow is advisory — Jared proposes; you approve per item or as a batch before any `jared move` runs.
 
 Flow:
