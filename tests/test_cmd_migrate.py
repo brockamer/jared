@@ -592,6 +592,127 @@ def test_include_closed_warns_it_is_inert(
 
 
 # ---------------------------------------------------------------------------
+# Task 5.1 — flip the source backend selector on success
+# ---------------------------------------------------------------------------
+
+
+def test_apply_flips_source_doc_to_target_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """After a fully-successful --apply, the source project-board.md is overwritten
+    with the target-doc's content, so the project now points at the migrated board.
+
+    The target-doc supplied via --target-doc is already a valid jared-init
+    convention doc for the target backend; flipping the selector is a byte-copy of
+    that doc onto the source doc path (resolved from --board). Asserted by reading
+    the source doc back: it must now carry '- backend: kanbanflow' (it started
+    '- backend: github')."""
+    from pathlib import Path as _Path
+
+    source_doc = _Path(str(tmp_path)) / "source-board.md"
+    source_doc.write_text(
+        "# Project board\n\n## Jared config\n- backend: github\n\n"
+        "Project URL: https://github.com/users/brockamer/projects/4\n"
+    )
+    target_doc = _Path(str(tmp_path)) / "target-board.md"
+    target_doc.write_text(
+        "# Project board\n\n## Jared config\n- backend: kanbanflow\n"
+        "- Repo: brockamer/jared\n- Board ID: abc123\n\n"
+        "### Status column map\n- Backlog: Backlog\n- In Progress: In Progress\n"
+    )
+
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="x")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "--board",
+            str(source_doc),
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            str(target_doc),
+            "--apply",
+            "--yes",
+        ]
+    )
+    assert rc == 0
+    flipped = source_doc.read_text()
+    assert "- backend: kanbanflow" in flipped
+    assert "- backend: github" not in flipped
+    # The flip is a byte-for-byte copy of the target convention doc.
+    assert flipped == target_doc.read_text()
+
+
+def test_apply_does_not_flip_when_no_source_doc_resolves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """When no source doc can be resolved (no --board and no discoverable
+    project-board.md), the flip is skipped silently — the apply still succeeds.
+
+    This is the guard that keeps the flip from raising on every test that patches
+    _load_board without a real doc on disk. The autouse _isolate_cwd chdir's to a
+    fresh tmp with no project-board.md, so find_default_path() returns None."""
+    from pathlib import Path as _Path
+
+    target_doc = _Path(str(tmp_path)) / "target-board.md"
+    target_doc.write_text("## Jared config\n- backend: kanbanflow\n")
+
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="x")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    # No --board: source_doc_path resolves via find_default_path() -> None -> skip.
+    rc = cli.main(
+        ["migrate", "--to", "kanbanflow", "--target-doc", str(target_doc), "--apply", "--yes"]
+    )
+    assert rc == 0
+
+
+def test_abort_does_not_flip_source_doc(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """A user-aborted apply (answer != 'y') must NOT flip the source doc — the flip
+    is reached only after the full apply succeeds, past the abort early-return."""
+    from pathlib import Path as _Path
+
+    source_doc = _Path(str(tmp_path)) / "source-board.md"
+    source_doc.write_text("## Jared config\n- backend: github\n")
+    target_doc = _Path(str(tmp_path)) / "target-board.md"
+    target_doc.write_text("## Jared config\n- backend: kanbanflow\n")
+
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="x")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    monkeypatch.setattr("builtins.input", lambda *_a: "n")
+    rc = cli.main(
+        [
+            "--board",
+            str(source_doc),
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            str(target_doc),
+            "--apply",
+        ]
+    )
+    assert rc == 0
+    # Aborted: source doc is untouched, still github.
+    assert "- backend: github" in source_doc.read_text()
+
+
+# ---------------------------------------------------------------------------
 # Task 4.1 — resume from an existing ledger
 # ---------------------------------------------------------------------------
 

@@ -1609,6 +1609,21 @@ def _atomic_write_text(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _flip_backend_selector(source_doc_path: Path, target_doc_path: Path) -> None:
+    """Point the project's convention doc at the now-authoritative target board.
+
+    Called only after a fully-successful --apply. --target-doc is already a valid
+    jared-init convention doc for the target backend (it was produced by running
+    `jared init` against the target), so flipping the source project's selector is
+    a byte-for-byte copy of that doc onto the source doc path: the project's
+    docs/project-board.md now describes the migrated board (its `- backend:`,
+    Repo/Board ID, Status column map — everything `jared init` emits), with no
+    dependence on the bootstrap doc-writer. A plain write is correct here: the
+    source doc is never re-read during the run, so atomicity is not load-bearing.
+    """
+    source_doc_path.write_text(target_doc_path.read_text())
+
+
 def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
     """Return a list of missing-structure error strings.
 
@@ -1697,6 +1712,12 @@ def _apply_migration(
     comment()/add_blocked_by() are not idempotent on either live backend, duplicate
     every ported comment. The number map is still built from the full completed set
     so the translation re-keys against earlier-run items too.
+
+    Phase 5.1: on full success only, flip the source project's convention doc to
+    the target backend (_flip_backend_selector). The flip is the last statement,
+    after the final artifact write — the abort gate and any mid-run exception both
+    bypass it, so a partial/aborted run never flips. The source doc path resolves
+    from --board (else autodiscovery); a None resolution skips the flip silently.
     """
     from lib.migrate import (  # type: ignore[import-not-found]
         MigrationLedger,
@@ -1796,6 +1817,17 @@ def _apply_migration(
     # confirmation gate above) nothing is written.
     _atomic_write_text(out_path, ledger.to_json())
     print(f"Wrote run artifact to {out_path}")
+
+    # Phase 5.1: flip the source backend selector on full success only. Reaching
+    # here means every item + pass completed without exception — the abort gate
+    # returns before any write, and any mid-run crash propagates before this
+    # line, so a partial/aborted run never flips. Resolve the source doc path the
+    # same way _load_board does (the --board arg, else autodiscovery); when no doc
+    # resolves (None) the flip is skipped silently — the migration still succeeded.
+    source_doc_path = Path(args.board) if args.board else Board.find_default_path()
+    if source_doc_path is not None:
+        _flip_backend_selector(source_doc_path, Path(args.target_doc))
+        print(f"Flipped {source_doc_path} to the {args.to} backend.")
 
     return 0
 
