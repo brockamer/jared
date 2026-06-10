@@ -1580,6 +1580,18 @@ def _backend_direction(source_backend: str, to: str) -> str:
     return f"{source_backend}->{to}"
 
 
+def _default_artifact_path(direction: str) -> Path:
+    """Resolve the default run-artifact path: tmp/migrate-<src>-to-<dst>-<stamp>.json.
+
+    The timestamp is generated here (the impure CLI layer); lib/migrate.py stays
+    timestamp-free. src/dst are derived from the direction so the filename matches
+    the run without re-threading the backend args.
+    """
+    src, dst = direction.split("->")
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    return Path("tmp") / f"migrate-{src}-to-{dst}-{stamp}.json"
+
+
 def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
     """Return a list of missing-structure error strings.
 
@@ -1646,6 +1658,11 @@ def _apply_migration(
     "(originally @{author}, {created_at})\n\n" attribution before being replayed
     via comment(new). Both the body/comment pass and the edge pass run after the
     creation loop so the number map is complete before any rewrite.
+
+    Phase 3.4: after every pass succeeds, the ledger is serialized to a run
+    artifact (MigrationLedger.to_json) — the durable old->new number map a later
+    run consumes to resume (Phase 4.1). --out names the destination; the default
+    is a timestamped tmp/ file. An abort writes nothing.
     """
     from lib.migrate import (  # type: ignore[import-not-found]
         MigrationLedger,
@@ -1697,6 +1714,15 @@ def _apply_migration(
 
     for edge in translate_edges(edges, number_map):
         tgt.add_blocked_by(edge.dependent, edge.blocker)
+
+    # Emit the run artifact / resume ledger after all writes succeed. --out names
+    # the path; default is a timestamped tmp/ file (stamp generated in the CLI,
+    # never in pure code). The artifact is the durable old->new map a later run
+    # consumes to resume (Phase 4.1). On abort (above) nothing is written.
+    out_path = Path(args.out) if args.out else _default_artifact_path(direction)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(ledger.to_json())
+    print(f"Wrote run artifact to {out_path}")
 
     return 0
 

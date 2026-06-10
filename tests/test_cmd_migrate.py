@@ -27,6 +27,15 @@ def _all_capabilities() -> frozenset[Capability]:
     return frozenset(CliCap)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Every migrate test runs from a fresh tmp dir. `--apply` writes a run
+    artifact to a default tmp/ path (Phase 3.4); without this, apply tests that
+    omit --out would litter the worktree's tmp/ on each pytest run. Module-local:
+    only migrate tests exercise the artifact write."""
+    monkeypatch.chdir(str(tmp_path))
+
+
 class _StubProvider:
     """Minimal in-memory BoardProvider for migrate CLI tests."""
 
@@ -459,6 +468,106 @@ def test_apply_ports_comments_without_attribution_kf_to_github(
     assert rc == 0
     # No attribution prefix; '#1' rewritten to '#100' via the renumber map.
     assert tgt.comment_calls == [(100, "depends on #100")]
+
+
+# ---------------------------------------------------------------------------
+# Task 3.4 — emit run artifact / resume ledger
+# ---------------------------------------------------------------------------
+
+
+def test_apply_writes_ledger_to_explicit_out(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """--out <path> writes MigrationLedger.to_json() after the run: a JSON artifact
+    recording the direction and the complete old->new number map. GH->KF identity
+    map (1->1, 2->2) is asserted by reading the file back."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="x"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="see #1"),
+        ],
+        edges=[Edge(dependent=2, blocker=1)],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            "t.md",
+            "--apply",
+            "--yes",
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert rc == 0
+    assert out_path.exists()
+    data = _json.loads(out_path.read_text())
+    assert data["direction"] == "github->kanbanflow"
+    assert data["completed"] == {"1": 1, "2": 2}
+
+
+def test_apply_default_out_is_timestamped_file(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With no --out, the artifact lands at a default timestamped path under tmp/.
+    The resolved path is printed so the user (and this test) can find it; the test
+    extracts it from stdout, asserts the file exists, and checks the recorded map."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    # CWD is already a fresh tmp dir via the autouse _isolate_cwd fixture.
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # The resolved artifact path is announced; parse it back out of stdout.
+    marker = "Wrote run artifact to "
+    line = next(line for line in out.splitlines() if line.startswith(marker))
+    written = line[len(marker) :].strip()
+    written_path = _Path(written)
+    assert written_path.parts[0] == "tmp"
+    assert written_path.name.startswith("migrate-github-to-kanbanflow-")
+    assert written_path.suffix == ".json"
+    assert written_path.exists()
+    data = _json.loads(written_path.read_text())
+    assert data["direction"] == "github->kanbanflow"
+    assert data["completed"] == {"1": 1}
+
+
+def test_apply_abort_writes_no_artifact(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """A 'n' answer at the confirmation prompt aborts before any work; no artifact
+    is written even though --out is supplied (nothing happened to record)."""
+    from pathlib import Path as _Path
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    monkeypatch.setattr("builtins.input", lambda *_a: "n")
+    rc = cli.main(
+        ["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply", "--out", str(out_path)]
+    )
+    assert rc == 0
+    assert not out_path.exists()
 
 
 def test_include_closed_warns_it_is_inert(
