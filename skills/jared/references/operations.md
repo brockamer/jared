@@ -185,7 +185,7 @@ Copies a project's open items from the current backend (GitHub Projects v2 or Ka
 jared migrate --to <github|kanbanflow> --target-doc PATH [--apply] [--include-closed] [--out FILE] [--yes]
 ```
 
-**Dry-run is the default.** Without `--apply`, the command reads the source board, validates the target, computes the full loss report and (for KanbanFlow targets) a write-call estimate, prints the report, and stops. No writes are performed.
+**Dry-run is the default.** Without `--apply`, the command reads the source board, computes the full loss report and (for KanbanFlow targets) a write-call estimate, prints the report, and stops. No writes are performed.
 
 **`--apply` performs writes** after an interactive confirmation prompt ("Type 'y' to proceed"). Pass `--yes` to skip the prompt for non-interactive use.
 
