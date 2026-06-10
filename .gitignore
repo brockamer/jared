@@ -48,3 +48,6 @@ uv.lock
 
 # Editable install metadata
 *.egg-info/
+
+# Playwright MCP browser-session artifacts
+.playwright-mcp/
