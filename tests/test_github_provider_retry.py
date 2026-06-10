@@ -56,8 +56,9 @@ def _no_real_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         "gh issue view 5 exited 1: You have exceeded a secondary rate limit",
         "gh api graphql exited 1: HTTP 429: too many requests",
         # GraphQL insufficient-scopes wire form: HTTP 200 + errors[], so gh's
-        # stderr carries NO status line — only the message text. This is the
-        # second wire form of the exact #342 read:project trigger (#342 review).
+        # stderr carries NO status line — only the message text. NOT locally
+        # observed (the PR #341 occurrence was the 401 form); added defensively
+        # from GitHub's documented GraphQL error phrasing per the #342 review.
         "gh api graphql exited 1: gh: Your token has not been granted the required "
         "scopes to execute this query. The 'id' field requires one of the following "
         "scopes: ['read:project'], but your token has only been granted the: [] scopes.",
@@ -259,3 +260,56 @@ def test_fetch_blocked_by_edges_recovers_from_a_transient_read(
 
     assert _provider().fetch_blocked_by_edges() == []
     assert calls["n"] == 2
+
+
+def test_get_body_recovers_from_a_transient_read(
+    monkeypatch: pytest.MonkeyPatch, _no_real_sleep: list[float]
+) -> None:
+    calls = {"n": 0}
+
+    def fake_run_gh(args: list[str], **kwargs: object) -> object:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise GhInvocationError(
+                "gh api repos/o/r/issues/5 exited 1: gh: Bad gateway (HTTP 502)"
+            )
+        return {"body": "the real body"}
+
+    monkeypatch.setattr(gp, "run_gh", fake_run_gh)
+
+    assert _provider().get_body(5) == "the real body"
+    assert calls["n"] == 2  # one transient failure, then the real body
+
+
+def test_get_body_surfaces_a_persistent_read_failure(
+    monkeypatch: pytest.MonkeyPatch, _no_real_sleep: list[float]
+) -> None:
+    """A persistent body-read failure must RAISE (criterion 3), never silently
+    port an empty body — the migrate data-loss vector the #342 review found."""
+
+    def always_fail(args: list[str], **kwargs: object) -> object:
+        raise GhInvocationError(
+            "gh api repos/o/r/issues/5 exited 1: gh: Bad credentials (HTTP 401)"
+        )
+
+    monkeypatch.setattr(gp, "run_gh", always_fail)
+
+    with pytest.raises(GhInvocationError, match="HTTP 401"):
+        _provider().get_body(5)
+
+
+def test_get_body_returns_empty_for_a_genuinely_absent_body(
+    monkeypatch: pytest.MonkeyPatch, _no_real_sleep: list[float]
+) -> None:
+    """A 200 with no body field is a real empty body, not a failure: return ""
+    immediately, no retry (preserves the pre-existing empty-body contract)."""
+    calls = {"n": 0}
+
+    def fake_run_gh(args: list[str], **kwargs: object) -> object:
+        calls["n"] += 1
+        return {"number": 5}  # valid response, body field absent
+
+    monkeypatch.setattr(gp, "run_gh", fake_run_gh)
+
+    assert _provider().get_body(5) == ""
+    assert calls["n"] == 1  # no retry on a genuine empty body
