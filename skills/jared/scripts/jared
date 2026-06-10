@@ -1622,8 +1622,47 @@ def _apply_migration(
     items: list[BoardItem],
     edges: Any,
 ) -> int:
-    # Phase 3 — not yet implemented.
-    raise NotImplementedError("_apply_migration: Phase 3 not yet implemented")
+    """Perform the migration writes (Phase 3).
+
+    Phase 3.1: the confirmation gate plus first-pass item creation. For each
+    source item not already recorded in the resume ledger, create a target item
+    via file() — threading number=item.number on GH->KF so #N is preserved
+    (identity number map); KF->GitHub passes no number and lets GitHub assign one
+    (non-identity map). Status and Priority ride on file() (the file() contract
+    sets both atomically, so no redundant move()). Extra custom fields go through
+    set_field; a milestone (validated to pre-exist) through set_milestone. Bodies
+    are written raw here; cross-ref rewrite + comment portage land in Task 3.3,
+    second-pass edges in Task 3.2.
+    """
+    from lib.migrate import MigrationLedger  # type: ignore[import-not-found]
+
+    if not args.yes:
+        answer = input("Apply this migration? Type 'y' to proceed: ")
+        if answer.strip().lower() != "y":
+            print("Aborted; no writes performed.")
+            return 0
+
+    tgt = target_board.provider
+    ledger = MigrationLedger(direction=direction)
+    preserve_number = direction == "github->kanbanflow"
+
+    for item in items:
+        if ledger.is_done(item.number):
+            continue
+        created = tgt.file(
+            title=item.title,
+            body=item.body,
+            priority=item.priority,
+            status=item.status,
+            number=item.number if preserve_number else None,
+        )
+        ledger.mark(old=item.number, new=created.number)
+        for field_name, value in item.fields.items():
+            tgt.set_field(created.number, field_name, value)
+        if item.milestone:
+            tgt.set_milestone(created.number, item.milestone)
+
+    return 0
 
 
 def _cmd_migrate(args: argparse.Namespace) -> int:
