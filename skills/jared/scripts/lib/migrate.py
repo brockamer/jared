@@ -162,11 +162,32 @@ def render_report(
 
 @dataclass
 class MigrationLedger:
-    """Durable resume ledger + run artifact. completed maps old#->new#."""
+    """Durable resume ledger + run artifact.
+
+    Tracks two distinct kinds of progress so a resume re-run is duplication-free:
+
+    - `completed` maps old#->new# — the first-pass record that an item was
+      *created* on the target. `number_map()` is built from the full set, so the
+      second pass can re-key cross-refs/edges against items created in earlier
+      runs too.
+    - `ported` / `edges_applied` record *second-pass* progress (body+comment
+      portage per item, and blocked-by edges by source endpoint pair). The second
+      pass is NOT idempotent on a live backend — comment() duplicates on every
+      replay — so these guards are what make a resume (or a re-run against a
+      finished artifact) a no-op rather than a comment-duplicator. They are
+      separate from `completed` because an item can be created in one run and have
+      its body/comments ported in a later one.
+    """
 
     direction: Direction
     completed: dict[int, int] = field(default_factory=dict)
     losses: list[str] = field(default_factory=list)
+    # Second-pass progress. `ported` holds source numbers whose body + comments
+    # are done; `edges_applied` holds source (dependent, blocker) pairs already
+    # replayed. Keyed on SOURCE numbers/pairs (stable across runs, independent of
+    # the number map).
+    ported: set[int] = field(default_factory=set)
+    edges_applied: set[tuple[int, int]] = field(default_factory=set)
 
     def mark(self, *, old: int, new: int) -> None:
         self.completed[old] = new
@@ -177,12 +198,26 @@ class MigrationLedger:
     def number_map(self) -> NumberMap:
         return NumberMap(dict(self.completed))
 
+    def mark_ported(self, old: int) -> None:
+        self.ported.add(old)
+
+    def is_ported(self, old: int) -> bool:
+        return old in self.ported
+
+    def mark_edge(self, *, dependent: int, blocker: int) -> None:
+        self.edges_applied.add((dependent, blocker))
+
+    def is_edge_applied(self, *, dependent: int, blocker: int) -> bool:
+        return (dependent, blocker) in self.edges_applied
+
     def to_json(self) -> str:
         return json.dumps(
             {
                 "direction": self.direction,
                 "completed": {str(k): v for k, v in self.completed.items()},
                 "losses": self.losses,
+                "ported": sorted(self.ported),
+                "edges_applied": [[d, b] for d, b in sorted(self.edges_applied)],
             },
             indent=2,
         )
@@ -194,4 +229,6 @@ class MigrationLedger:
             direction=str(data["direction"]),
             completed={int(k): int(v) for k, v in (data.get("completed") or {}).items()},
             losses=[str(x) for x in (data.get("losses") or [])],
+            ported={int(x) for x in (data.get("ported") or [])},
+            edges_applied={(int(d), int(b)) for d, b in (data.get("edges_applied") or [])},
         )

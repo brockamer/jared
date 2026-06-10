@@ -95,3 +95,38 @@ def test_ledger_round_trips_and_marks_completed() -> None:
     assert back.is_done(1) and back.is_done(2)
     assert not back.is_done(3)
     assert back.number_map().to_new(2) == 2
+
+
+def test_ledger_tracks_second_pass_completion_separately_from_creation() -> None:
+    """Creation (completed) and second-pass completion (ported/edges) are distinct.
+
+    The second pass (body+comment portage, blocked-by edges) is NOT idempotent on
+    a live backend — comment() duplicates on every replay. So the ledger records
+    second-pass progress separately from creation, and that progress round-trips
+    through JSON so a resume re-run skips already-ported items and already-applied
+    edges. Creation tracking (completed/is_done/number_map) is untouched.
+    """
+    led = MigrationLedger(direction="github->kanbanflow")
+    led.mark(old=1, new=1)
+    led.mark(old=2, new=2)
+    led.mark_ported(1)
+    led.mark_edge(dependent=2, blocker=1)
+    back = MigrationLedger.from_json(led.to_json())
+    # Second-pass flags round-trip and are independent of creation.
+    assert back.is_ported(1)
+    assert not back.is_ported(2)
+    assert back.is_edge_applied(dependent=2, blocker=1)
+    assert not back.is_edge_applied(dependent=1, blocker=2)
+    # Creation tracking is unchanged: both items are still "done" / mapped.
+    assert back.is_done(1) and back.is_done(2)
+    assert back.number_map().to_new(2) == 2
+
+
+def test_ledger_from_json_defaults_second_pass_fields_empty() -> None:
+    """A pre-4.x artifact (no ported/edges_applied keys) loads with both empty, so
+    a resume against it runs the second pass exactly once (the regression guard for
+    the existing skip-done-items resume test)."""
+    blob = '{"direction": "github->kanbanflow", "completed": {"1": 1}, "losses": []}'
+    back = MigrationLedger.from_json(blob)
+    assert not back.is_ported(1)
+    assert not back.is_edge_applied(dependent=1, blocker=1)

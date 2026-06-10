@@ -1671,6 +1671,15 @@ def _apply_migration(
     fully-configured item, so an aborted run leaves a re-runnable artifact. mark()
     and that persist both happen AFTER set_field/set_milestone — a crash between
     file() and the field loop must not record the item done with its fields unset.
+
+    Second-pass resumability: creation done (ledger.completed) is NOT the same as
+    second-pass done. The body+comment pass is guarded on ledger.is_ported and the
+    edge pass on ledger.is_edge_applied (keyed by the stable source endpoint pair),
+    each marked + persisted after its writes. Without these guards a resume — or a
+    re-run against a finished artifact — would replay the second pass and, because
+    comment()/add_blocked_by() are not idempotent on either live backend, duplicate
+    every ported comment. The number map is still built from the full completed set
+    so the translation re-keys against earlier-run items too.
     """
     from lib.migrate import (  # type: ignore[import-not-found]
         MigrationLedger,
@@ -1730,9 +1739,16 @@ def _apply_migration(
     number_map = ledger.number_map()
 
     # Second pass: rewrite body + comment cross-refs through the complete map.
+    # Guarded on ledger.is_ported so a resume (or a re-run against a finished
+    # artifact) does not replay it. comment() is NOT idempotent on either live
+    # backend — an unguarded replay duplicates every ported comment. Body +
+    # comments are marked done together (matching the first-pass mark-after-writes
+    # model): a mid-item crash re-ports that one item, the same accepted residual
+    # as a re-created item. Persist after each so an abort leaves a resumable
+    # ledger.
     for item in items:
         new = number_map.to_new(item.number)
-        if new is None:
+        if new is None or ledger.is_ported(item.number):
             continue
         tgt.set_body(new, rewrite_cross_refs(src.get_body(item.number), number_map))
         for note in src.list_comments(item.number):
@@ -1740,9 +1756,21 @@ def _apply_migration(
             if attribute_comments:
                 body = f"(originally @{note.author}, {note.created_at})\n\n{body}"
             tgt.comment(new, body)
+        ledger.mark_ported(item.number)
+        out_path.write_text(ledger.to_json())
 
-    for edge in translate_edges(edges, number_map):
-        tgt.add_blocked_by(edge.dependent, edge.blocker)
+    # Second-pass edges, guarded per SOURCE (dependent, blocker) pair so a resume
+    # doesn't re-fire add_blocked_by (GitHub's addBlockedBy is not a guaranteed
+    # idempotent no-op). Translate one edge at a time so the guard key stays the
+    # stable source pair; an edge whose endpoints are unmapped translates to empty
+    # and is left droppable on every run (never marked).
+    for edge in edges:
+        if ledger.is_edge_applied(dependent=edge.dependent, blocker=edge.blocker):
+            continue
+        for translated in translate_edges([edge], number_map):
+            tgt.add_blocked_by(translated.dependent, translated.blocker)
+            ledger.mark_edge(dependent=edge.dependent, blocker=edge.blocker)
+            out_path.write_text(ledger.to_json())
 
     # Re-emit the run artifact / resume ledger after all passes succeed. The
     # ledger is also persisted after each created item (above) so an aborted run
