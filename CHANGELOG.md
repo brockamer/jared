@@ -7,6 +7,11 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## Unreleased
+
+**Features**
+- `jared migrate` copies a board between GitHub Projects and KanbanFlow with named, accepted lossiness; dry-run by default, resumable, flips the convention doc on success (#318).
+
 ## v0.29.0 — 2026-06-05
 
 **Features**

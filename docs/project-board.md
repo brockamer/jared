@@ -207,3 +207,55 @@ Project-level knobs that change Jared's behavior on this board. Each bullet is `
 - `voice: enabled` — controls whether the Jared character voice is rendered in slash-command dialogue (`/jared`, `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default), `disabled`. When `disabled`, every slash-command stub renders user-facing output in plain technical prose — same structural content, Jared-isms stripped. Used by every slash-command stub. The voice activation lives entirely in the plugin (no user-local Claude Code settings, no SessionStart hooks, no memory entries required); this bullet is the only way to opt out. See SKILL.md § "Project-level kill switch" (under the voice doctrine) and `references/voice.md` for the full spec.
 
 - `admin-merge: --merge` — sanctions the `blocked_on_review` escape path in `/jared-wrap`. When a PR is `mergeable` but blocked by required review / branch protection (the common solo-author case on a protected `main`), wrap may offer an operator-confirmed `gh pr merge <N> --admin --merge`. `--admin` bypasses branch protection, so this is opt-in per project; the value pins the merge strategy (`--merge` preserves the phase-commit trail per CLAUDE.md — do not set `--squash`). Omit this line to leave admin-merge unsanctioned, in which case wrap only surfaces the block. Used by `/jared-wrap` (`blocked_on_review` step).
+
+## Backend switching via `jared migrate`
+
+`jared migrate` copies a board's open items from the project's current backend (GitHub Projects v2 or KanbanFlow) to the other, surfacing every named, accepted loss before the first write.
+
+```
+jared migrate --to <github|kanbanflow> --target-doc PATH [--apply] [--include-closed] [--out FILE] [--yes]
+```
+
+Dry-run is the default. Pass `--apply` to perform writes; the command asks for interactive confirmation unless `--yes` is also passed.
+
+### KanbanFlow target prerequisite
+
+`jared migrate` cannot create columns, dropdown options, or swimlanes on a KanbanFlow board — the API is read-only for board structure. Before running `--apply` targeting KanbanFlow, the target board must already have:
+
+- A column for every source Status value that maps to the board's `### Status column map` (the convention doc handles the mapping; `jared init` verifies it at setup time).
+- A `Priority` dropdown custom field with options matching the source Priority values.
+- A swimlane for every source milestone name used by the items being migrated.
+
+`jared migrate` validates this structure up front and lists every missing element before any write.
+
+### `--target-doc` is the target backend's convention doc
+
+`--target-doc PATH` takes the path to the target project's `docs/project-board.md` — the convention doc produced by running `jared init` against the target backend. It identifies the target board (project number + owner + repo for GitHub; board ID + `KANBANFLOW_API_TOKEN` for KanbanFlow) and the Status column map.
+
+### Named lossiness per direction
+
+The dry-run report lists every named loss before any write. Loss axes are fixed by the backends' capability sets:
+
+**GitHub → KanbanFlow (GH→KF):**
+- `native_dependencies` — native GitHub blocked-by edges become `blocked-by:<N>` label markers and the Blocked column on the target; the dependency graph is preserved but not as a first-class graph construct.
+- `milestone_state` — milestone open/close state and due dates are dropped; swimlanes carry name and description only.
+- `velocity_timestamps` — created/closed/transition timestamps are not portable.
+- `markdown_body` — markdown rendering is lost (text round-trips; only rendering, not data).
+- `closed_state` — there is no real closed state on KanbanFlow (Done column only).
+- `sub_issues` — sub-issue hierarchy is not portable.
+- `mcp_tier` — MCP-tier operations are unavailable on KanbanFlow.
+
+GH→KF **preserves `#N`** exactly: `file()` passes `number=item.number` so each task lands with the same number it had on GitHub (KanbanFlow supports explicit `number_value` on create). Cross-references in bodies and comments are unchanged.
+
+**KanbanFlow → GitHub (KF→GH):**
+- `renumber` — GitHub auto-assigns issue numbers; every `#N` is reassigned and cross-references in bodies and comments are rewritten via the old→new number map.
+
+KF→GitHub is otherwise structurally lossless: GitHub advertises the full capability set.
+
+### Resume via `--out` ledger
+
+After each created item the run artifact is written atomically to `--out FILE` (default: `tmp/migrate-<src>-to-<dst>-<timestamp>.json`). The artifact doubles as a resume ledger: re-running `--apply --out <same-file>` skips already-created items and resumes from the last completed state. Both the second-pass edge translation and the comment-portage pass are guarded on the ledger as well, so a resumed run does not duplicate comments or blocked-by edges.
+
+### On-success doc flip
+
+After a fully-successful `--apply`, `jared migrate` replaces the source project's `docs/project-board.md` with the target's convention doc, pointing all subsequent `jared` invocations at the new backend. The flip is atomic and only happens after every item, edge, and comment pass completes without error — a partial or aborted run never flips.
