@@ -236,6 +236,68 @@ def test_apply_refuses_on_missing_target_structure(
     assert tgt.created == []  # no writes performed
 
 
+def test_dry_run_refuses_on_missing_target_structure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The dry-run (no --apply) must validate the target structure and refuse with a
+    precise list — not print a rosy report and exit 0. Validation now runs AHEAD of
+    the report, so a missing column/field/option is an honest pre-flight refusal and
+    is never discovered mid-apply (#318 — the live-verification regression)."""
+    cli = _import_cli()
+    FieldNotFound = cli.FieldNotFound
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Up Next", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(
+        items=[],
+        edges=[],
+        caps=frozenset(),
+        validate_raises=FieldNotFound("Field 'Work Stream' not on the board. Available: Priority"),
+    )
+    _patch_boards(monkeypatch, src, tgt, cli_override=cli)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md"])  # no --apply
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "missing target structure:" in out
+    assert "github->kanbanflow" not in out  # refused BEFORE the report is printed
+    assert tgt.created == []
+
+
+def test_validate_target_structure_validates_item_extra_fields() -> None:
+    """_validate_target_structure passes each item's extra custom fields
+    (BoardItem.fields) to validate_fields, not just (Priority, Status) — so a
+    missing custom field/option (e.g. Work Stream) is caught in the pre-flight
+    instead of crashing mid-apply after a partial write (#318)."""
+    cli = _import_cli()
+    FieldNotFound = cli.FieldNotFound
+    received: list[list[tuple[str, str]] | None] = []
+
+    class _T:
+        def validate_fields(
+            self, *, priority: str, status: str, fields: list[tuple[str, str]] | None = None
+        ) -> None:
+            received.append(fields)
+            if fields and any(name == "Work Stream" for name, _ in fields):
+                raise FieldNotFound("Field 'Work Stream' not on the board. Available: Priority")
+
+        def list_milestones(self) -> list[Milestone]:
+            return []
+
+    item = BoardItem(
+        number=1,
+        title="t",
+        status="Backlog",
+        priority="High",
+        body="",
+        fields={"Work Stream": "Perception"},
+    )
+    misses = cli._validate_target_structure(_T(), [item])
+    assert received == [[("Work Stream", "Perception")]]  # extra field reached validate_fields
+    assert any("Work Stream" in m for m in misses)  # and its absence is reported
+
+
 def test_apply_refuses_on_missing_target_swimlane(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
