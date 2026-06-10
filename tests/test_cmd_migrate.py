@@ -38,18 +38,22 @@ class _StubProvider:
         caps: frozenset[Capability],
         milestones: list[Milestone] | None = None,
         validate_raises: Exception | None = None,
+        comments: dict[int, list[_Comment]] | None = None,
     ) -> None:
         self._items = items
         self._edges = edges
         self._caps = caps
         self._milestones = milestones or []
         self._validate_raises = validate_raises
+        self._comments = comments or {}
         self.created: list[BoardItem] = []
         self.file_calls: list[dict[str, object]] = []
         self.set_field_calls: list[tuple[int, str, str]] = []
         self.set_milestone_calls: list[tuple[int, str]] = []
         self.move_calls: list[tuple[int, str]] = []
         self.add_blocked_by_calls: list[tuple[int, int]] = []
+        self.set_body_calls: list[tuple[int, str]] = []
+        self.comment_calls: list[tuple[int, str]] = []
 
     def capabilities(self) -> frozenset[Capability]:
         return self._caps
@@ -67,7 +71,7 @@ class _StubProvider:
         return list(self._milestones)
 
     def list_comments(self, ref: int) -> list[_Comment]:
-        return []
+        return list(self._comments.get(ref, []))
 
     def validate_fields(
         self,
@@ -108,7 +112,11 @@ class _StubProvider:
     def add_blocked_by(self, ref: int, blocker: int) -> None:
         self.add_blocked_by_calls.append((ref, blocker))
 
+    def set_body(self, ref: int, text: str) -> None:
+        self.set_body_calls.append((ref, text))
+
     def comment(self, ref: int, body: str) -> str:
+        self.comment_calls.append((ref, body))
         return ""
 
 
@@ -385,6 +393,72 @@ def test_apply_translates_edges_through_number_map(monkeypatch: pytest.MonkeyPat
     # Stub assigns 100 to #7 and 101 to #8; the edge re-keys to (101, 100).
     assert [i.number for i in tgt.created] == [100, 101]
     assert tgt.add_blocked_by_calls == [(101, 100)]
+
+
+# ---------------------------------------------------------------------------
+# Task 3.3 — body cross-ref rewrite + comment portage with attribution
+# ---------------------------------------------------------------------------
+
+
+def test_apply_rewrites_body_cross_refs_kf_to_github(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second pass rewrites '#<old>' -> '#<new>' in each migrated body via
+    rewrite_cross_refs(get_body(old), nm) and writes it with set_body(new, ...).
+    A KF->GitHub renumber is used so the map is non-identity (source #1 -> stub's
+    100): the body 'see #1' must surface as set_body(100, 'see #100'). An identity
+    GH->KF map could not distinguish a real rewrite from a raw echo."""
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="see #1")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=_all_capabilities())
+    cli = _patch_boards(monkeypatch, src, tgt, source_backend="kanbanflow", target_backend="github")
+    rc = cli.main(["migrate", "--to", "github", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    # Source #1 maps to the stub's 100; the self-ref '#1' re-keys to '#100'.
+    assert tgt.set_body_calls == [(100, "see #100")]
+
+
+def test_apply_ports_comments_with_attribution_gh_to_kf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GH->KF: each source comment is read via list_comments, its refs rewritten,
+    an attribution prefix '(originally @{author}, {created_at})\\n\\n' prepended,
+    then written via tgt.comment. The map is identity here (so the attribution
+    prefix is the load-bearing assertion); a comment body referencing #1 is left
+    as '#1' since the identity map maps 1->1."""
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Backlog", priority="High", body=""),
+        ],
+        edges=[],
+        caps=_all_capabilities(),
+        comments={1: [_Comment(author="alice", body="see #1 also", created_at="2026-01-02")]},
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    assert tgt.comment_calls == [(1, "(originally @alice, 2026-01-02)\n\nsee #1 also")]
+
+
+def test_apply_ports_comments_without_attribution_kf_to_github(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KF->GitHub: the attribution prefix is NOT prepended (it is GH->KF-only).
+    The refs are still rewritten through the non-identity renumber map (source #1
+    -> stub's 100), pinning both the direction guard (no prefix) and that the
+    comment body passes through rewrite_cross_refs."""
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+        comments={1: [_Comment(author="bob", body="depends on #1", created_at="2026-01-03")]},
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=_all_capabilities())
+    cli = _patch_boards(monkeypatch, src, tgt, source_backend="kanbanflow", target_backend="github")
+    rc = cli.main(["migrate", "--to", "github", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    # No attribution prefix; '#1' rewritten to '#100' via the renumber map.
+    assert tgt.comment_calls == [(100, "depends on #100")]
 
 
 def test_include_closed_warns_it_is_inert(
