@@ -273,9 +273,10 @@ def test_list_open_items_routes_extra_single_selects_into_fields(
     item = items[0]
     assert item.status == "Up Next"
     assert item.priority == "High"
-    # Extra single-select keyed by lowercased field name; status/priority and
+    # Extra single-select keeps its ORIGINAL field-name casing (so it round-trips
+    # to the target backend's field name on migration — #318); status/priority and
     # the internal `id` key are NOT leaked into fields.
-    assert item.fields == {"size": "Large"}
+    assert item.fields == {"Size": "Large"}
 
 
 def test_list_open_items_raises_on_pagination(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -83,6 +83,7 @@ ALL_SUBCOMMANDS = [
     "session-lock-clear",
     "worktree-add",
     "wrap-state",
+    "migrate",
 ]
 
 
@@ -441,6 +442,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format (default: human).",
     )
     pp.set_defaults(func=_cmd_propose_partition)
+
+    migrate_p = sub.add_parser(
+        "migrate",
+        help="Copy this board to the other backend (GitHub <-> KanbanFlow). Dry-run by default.",
+        allow_abbrev=False,
+    )
+    migrate_p.add_argument(
+        "--to", required=True, choices=["github", "kanbanflow"],
+        help="Target backend. Must differ from the source (current) backend.",
+    )
+    migrate_p.add_argument(
+        "--target-doc", required=True,
+        help="Path to the target backend's project-board.md (produced by `jared init` on the target).",
+    )
+    migrate_p.add_argument("--apply", action="store_true", help="Perform writes (default: dry-run).")
+    migrate_p.add_argument("--include-closed", action="store_true", help="Also migrate Done/closed items.")
+    migrate_p.add_argument("--out", default=None, help="Path for the run artifact / resume ledger (JSON).")
+    migrate_p.add_argument("--yes", action="store_true", help="Skip the interactive confirmation on --apply.")
+    migrate_p.set_defaults(func=_cmd_migrate)
 
     return parser
 
@@ -1671,6 +1691,350 @@ def _cmd_propose_partition(args: argparse.Namespace) -> int:
 
     print("Approve? (y / edit / skip)")
     return 0
+
+
+def _load_target_board(target_doc: str) -> Board:
+    return Board.from_path(Path(target_doc))
+
+
+def _backend_direction(source_backend: str, to: str) -> str:
+    return f"{source_backend}->{to}"
+
+
+def _default_artifact_path(direction: str) -> Path:
+    """Resolve the default run-artifact path: tmp/migrate-<src>-to-<dst>-<stamp>.json.
+
+    The timestamp is generated here (the impure CLI layer); lib/migrate.py stays
+    timestamp-free. src/dst are derived from the direction so the filename matches
+    the run without re-threading the backend args.
+    """
+    src, dst = direction.split("->")
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    return Path("tmp") / f"migrate-{src}-to-{dst}-{stamp}.json"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text to path atomically: stage in a .tmp sibling, then os.replace.
+
+    The migrate resume-ledger is rewritten after every created item, ported
+    item, and applied edge (Phase 4.1), so a crash mid-write would otherwise
+    truncate the artifact — and the next resume's MigrationLedger.from_json
+    would raise on the partial JSON, forcing the operator to re-create every
+    item from zero. os.replace is atomic when source and destination share a
+    directory (the .tmp sibling does), so the artifact is only ever swapped in
+    whole. Matches the convention in lib/kf_number_index.py / cache.py /
+    session_lock.py. No fsync (YAGNI — neither does kf_number_index).
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def _flip_backend_selector(source_doc_path: Path, target_doc_path: Path) -> None:
+    """Point the project's convention doc at the now-authoritative target board.
+
+    Called only after a fully-successful --apply. --target-doc is already a valid
+    jared-init convention doc for the target backend (it was produced by running
+    `jared init` against the target), so flipping the source project's selector is
+    a byte-for-byte copy of that doc onto the source doc path: the project's
+    docs/project-board.md now describes the migrated board (its `- backend:`,
+    Repo/Board ID, Status column map — everything `jared init` emits), with no
+    dependence on the bootstrap doc-writer. The write is atomic for the NEXT
+    process's sake, not this run's: docs/project-board.md is re-parsed by every
+    subsequent jared command, so a torn write here leaves it half-written and
+    every later command fails with BoardConfigError until a manual recopy. The
+    corruption target is the worst-possible file, so it goes through the same
+    _atomic_write_text helper as the four ledger persist sites.
+    """
+    _atomic_write_text(source_doc_path, target_doc_path.read_text())
+
+
+def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
+    """Return a list of missing-structure error strings.
+
+    The target backend cannot create columns/options/swimlanes from the API, so
+    every structural element a source item needs must pre-exist. This probes two
+    dimensions before any write and aggregates all gaps (never raising on the
+    first miss); an empty list means all required structure is present:
+
+    - Status + Priority (+ extra fields): validate_fields() per distinct
+      (priority, status) pair, collecting FieldNotFound / OptionNotFound.
+    - Milestone (swimlane): validate_fields does NOT cover swimlanes — the
+      KanbanFlow provider resolves the swimlane separately inside file()/
+      set_milestone(), so a missing swimlane would otherwise explode mid-apply.
+      Every distinct source milestone name must be a known target milestone
+      (compared via the neutral list_milestones() names — no provider internals).
+    """
+    seen: set[tuple[str | None, str | None, tuple[tuple[str, str], ...]]] = set()
+    misses: list[str] = []
+    for item in items:
+        extra = tuple(sorted(item.fields.items()))
+        key = (item.priority, item.status, extra)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            tgt.validate_fields(
+                priority=item.priority,
+                status=item.status,
+                fields=list(extra) or None,
+            )
+        except (FieldNotFound, OptionNotFound) as exc:
+            misses.append(str(exc))
+    target_milestones = {m.name for m in tgt.list_milestones()}
+    source_milestones = {item.milestone for item in items if item.milestone}
+    for name in sorted(source_milestones - target_milestones):
+        misses.append(f"milestone (swimlane) '{name}' not on the target board")
+    # Collapse identical messages: many items can share one missing field/column,
+    # which would otherwise repeat the same line once per (priority, status,
+    # fields) combo. dict.fromkeys preserves first-seen order.
+    return list(dict.fromkeys(misses))
+
+
+def _apply_migration(
+    args: argparse.Namespace,
+    source_board: Any,
+    target_board: Any,
+    direction: str,
+    items: list[BoardItem],
+    edges: Any,
+) -> int:
+    """Perform the migration writes (Phase 3).
+
+    Phase 3.1: the confirmation gate plus first-pass item creation. For each
+    source item not already recorded in the resume ledger, create a target item
+    via file() — threading number=item.number on GH->KF so #N is preserved
+    (identity number map); KF->GitHub passes no number and lets GitHub assign one
+    (non-identity map). Status and Priority ride on file() (the file() contract
+    sets both atomically, so no redundant move()). Extra custom fields go through
+    set_field; a milestone (validated to pre-exist) through set_milestone. Bodies
+    are written raw here; cross-ref rewrite + comment portage land in Task 3.3.
+
+    Phase 3.2: after every item exists, a second pass re-keys the source
+    blocked-by edges through the complete number map (translate_edges) and
+    replays each via add_blocked_by(dependent, blocker). Edges whose endpoints
+    were not migrated are dropped inside translate_edges. The pass runs after the
+    full creation loop so the map is complete before any edge is translated.
+
+    Phase 3.3: a second pass over the migrated items rewrites cross-references in
+    bodies and comments through the complete number map. For each item, the
+    source body is rewritten (rewrite_cross_refs) and written via set_body(new);
+    each source comment's refs are rewritten and, on GH->KF only, prefixed with
+    "(originally @{author}, {created_at})\n\n" attribution before being replayed
+    via comment(new). Both the body/comment pass and the edge pass run after the
+    creation loop so the number map is complete before any rewrite.
+
+    Phase 3.4: after every pass succeeds, the ledger is serialized to a run
+    artifact (MigrationLedger.to_json) — the durable old->new number map a later
+    run consumes to resume (Phase 4.1). --out names the destination; the default
+    is a timestamped tmp/ file. An abort writes nothing.
+
+    Phase 4.1: resumability. If the resolved --out path already exists, it is
+    reloaded as the ledger so items it records as done are skipped (their file()
+    is not re-called) while their numbers still populate the map the second-pass
+    edge/cross-ref translation re-keys against. The ledger is persisted after each
+    fully-configured item, so an aborted run leaves a re-runnable artifact. mark()
+    and that persist both happen AFTER set_field/set_milestone — a crash between
+    file() and the field loop must not record the item done with its fields unset.
+
+    Second-pass resumability: creation done (ledger.completed) is NOT the same as
+    second-pass done. The body+comment pass is guarded on ledger.is_ported and the
+    edge pass on ledger.is_edge_applied (keyed by the stable source endpoint pair),
+    each marked + persisted after its writes. Without these guards a resume — or a
+    re-run against a finished artifact — would replay the second pass and, because
+    comment()/add_blocked_by() are not idempotent on either live backend, duplicate
+    every ported comment. The number map is still built from the full completed set
+    so the translation re-keys against earlier-run items too.
+
+    Phase 5.1: on full success only, flip the source project's convention doc to
+    the target backend (_flip_backend_selector). The flip is the last statement,
+    after the final artifact write — the abort gate and any mid-run exception both
+    bypass it, so a partial/aborted run never flips. The source doc path resolves
+    from --board (else autodiscovery); a None resolution skips the flip silently.
+    """
+    from lib.migrate import (  # type: ignore[import-not-found]
+        MigrationLedger,
+        rewrite_cross_refs,
+        translate_edges,
+    )
+
+    if not args.yes:
+        answer = input("Apply this migration? Type 'y' to proceed: ")
+        if answer.strip().lower() != "y":
+            print("Aborted; no writes performed.")
+            return 0
+
+    src = source_board.provider
+    tgt = target_board.provider
+    preserve_number = direction == "github->kanbanflow"
+    attribute_comments = direction == "github->kanbanflow"
+
+    # Resolve the artifact path once, up front: the default path embeds a fresh
+    # timestamp, so resolving it twice would yield two files. mkdir the parent now
+    # because the per-item persist inside the loop writes to it.
+    out_path = Path(args.out) if args.out else _default_artifact_path(direction)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Phase 4.1 resume: if the artifact already exists, reload it as the ledger so
+    # already-created items are skipped. The default timestamped path never exists,
+    # so resume only engages on an explicit, pre-existing --out — a re-run of an
+    # aborted migration. A fresh run starts with an empty ledger.
+    ledger = (
+        MigrationLedger.from_json(out_path.read_text())
+        if out_path.exists()
+        else MigrationLedger(direction=direction)
+    )
+
+    for item in items:
+        if ledger.is_done(item.number):
+            continue
+        created = tgt.file(
+            title=item.title,
+            body=item.body,
+            priority=item.priority,
+            status=item.status,
+            number=item.number if preserve_number else None,
+        )
+        for field_name, value in item.fields.items():
+            tgt.set_field(created.number, field_name, value)
+        if item.milestone:
+            tgt.set_milestone(created.number, item.milestone)
+        # Mark + persist only AFTER the item is fully configured (file() + all
+        # set_field + set_milestone). A crash between file() and the field loop
+        # would otherwise mark the item done, and a resume would skip its fields,
+        # leaving a half-configured target. Persisting after each item makes an
+        # aborted run leave a re-runnable ledger (Phase 4.1).
+        ledger.mark(old=item.number, new=created.number)
+        _atomic_write_text(out_path, ledger.to_json())
+
+    number_map = ledger.number_map()
+
+    # Second pass: rewrite body + comment cross-refs through the complete map.
+    # Guarded on ledger.is_ported so a resume (or a re-run against a finished
+    # artifact) does not replay it. comment() is NOT idempotent on either live
+    # backend — an unguarded replay duplicates every ported comment. Body +
+    # comments are marked done together (matching the first-pass mark-after-writes
+    # model): a mid-item crash re-ports that one item, the same accepted residual
+    # as a re-created item. Persist after each so an abort leaves a resumable
+    # ledger.
+    for item in items:
+        new = number_map.to_new(item.number)
+        if new is None or ledger.is_ported(item.number):
+            continue
+        tgt.set_body(new, rewrite_cross_refs(src.get_body(item.number), number_map))
+        for note in src.list_comments(item.number):
+            body = rewrite_cross_refs(note.body, number_map)
+            if attribute_comments:
+                body = f"(originally @{note.author}, {note.created_at})\n\n{body}"
+            tgt.comment(new, body)
+        ledger.mark_ported(item.number)
+        _atomic_write_text(out_path, ledger.to_json())
+
+    # Second-pass edges, guarded per SOURCE (dependent, blocker) pair so a resume
+    # doesn't re-fire add_blocked_by (GitHub's addBlockedBy is not a guaranteed
+    # idempotent no-op). Translate one edge at a time so the guard key stays the
+    # stable source pair; an edge whose endpoints are unmapped translates to empty
+    # and is left droppable on every run (never marked).
+    for edge in edges:
+        if ledger.is_edge_applied(dependent=edge.dependent, blocker=edge.blocker):
+            continue
+        for translated in translate_edges([edge], number_map):
+            tgt.add_blocked_by(translated.dependent, translated.blocker)
+            ledger.mark_edge(dependent=edge.dependent, blocker=edge.blocker)
+            _atomic_write_text(out_path, ledger.to_json())
+
+    # Re-emit the run artifact / resume ledger after all passes succeed. The
+    # ledger is also persisted after each created item (above) so an aborted run
+    # leaves a re-runnable artifact; this final write covers the empty-items case
+    # (the loop never ran) and announces the resolved path. On abort (the
+    # confirmation gate above) nothing is written.
+    _atomic_write_text(out_path, ledger.to_json())
+    print(f"Wrote run artifact to {out_path}")
+
+    # Phase 5.1: flip the source backend selector on full success only. Reaching
+    # here means every item + pass completed without exception — the abort gate
+    # returns before any write, and any mid-run crash propagates before this
+    # line, so a partial/aborted run never flips. Resolve the source doc path the
+    # same way _load_board does (the --board arg, else autodiscovery); when no doc
+    # resolves (None) the flip is skipped silently — the migration still succeeded.
+    source_doc_path = Path(args.board) if args.board else Board.find_default_path()
+    if source_doc_path is not None:
+        _flip_backend_selector(source_doc_path, Path(args.target_doc))
+        print(f"Flipped {source_doc_path} to the {args.to} backend.")
+
+    return 0
+
+
+def _cmd_migrate(args: argparse.Namespace) -> int:
+    from lib.migrate import compute_loss_axes, estimate_kf_calls, render_report  # type: ignore[import-not-found]
+
+    source_board = _load_board(args.board)
+    if args.to == source_board.backend:
+        print(
+            f"error: --to {args.to} equals the current backend; nothing to migrate.",
+            file=sys.stderr,
+        )
+        return 2
+    target_board = _load_target_board(args.target_doc)
+    direction = _backend_direction(source_board.backend, args.to)
+
+    src = source_board.provider
+    tgt = target_board.provider
+    if args.include_closed:
+        # No provider exposes a closed-items reader (only recently_closed, which
+        # KanbanFlow degrades to []), so --include-closed is inert. Warn loudly
+        # rather than silently migrate only open items; closed-history migration
+        # is a named follow-up. Fires in both dry-run and apply modes.
+        print(
+            "warning: closed-item migration not yet supported on this backend; "
+            "ignoring --include-closed (only open items will be migrated).",
+            file=sys.stderr,
+        )
+    items = src.list_open_items()
+    edges = src.fetch_blocked_by_edges()
+
+    # Validate the target structure up front — before the report and before any
+    # write — so a missing column / field / option / swimlane surfaces as a
+    # precise list in BOTH dry-run and apply, never discovered mid-apply (#318).
+    misses = _validate_target_structure(tgt, items)
+    if misses:
+        print("missing target structure:")
+        for m in misses:
+            print(f"  {m}")
+        return 1
+
+    axes = compute_loss_axes(
+        source_caps=src.capabilities(),
+        target_caps=tgt.capabilities(),
+        direction=direction,
+    )
+    # Annotate edge-count magnitude on the native_dependencies axis.
+    for a in axes:
+        if a.key == "native_dependencies":
+            a.count = len(edges)
+    kf_estimate = (
+        estimate_kf_calls(
+            item_count=len(items),
+            extra_fields_per_item=1,
+            edge_count=len(edges),
+            comment_count=0,
+        )
+        if args.to == "kanbanflow"
+        else 0
+    )
+    report = render_report(
+        direction=direction,
+        item_count=len(items),
+        axes=axes,
+        kf_call_estimate=kf_estimate,
+    )
+    print(report)
+
+    if not args.apply:
+        print("\nDry-run only. Re-run with --apply to perform the migration.")
+        return 0
+
+    return _apply_migration(args, source_board, target_board, direction, items, edges)
 
 
 def main(argv: list[str] | None = None) -> int:

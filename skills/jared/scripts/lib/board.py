@@ -1326,7 +1326,14 @@ def _flatten_project_item_for_project(
         for fv in (node.get("fieldValues") or {}).get("nodes", []) or []:
             field_name = (fv.get("field") or {}).get("name")
             if field_name:
-                flat[field_name.lower()] = fv.get("name")
+                # Status/Priority are read by their lowercased key throughout the
+                # codebase; every other custom field keeps its original casing so
+                # it round-trips to the target backend's field name on migration
+                # (#318 — "Work Stream" must not reach a provider as "work stream"
+                # and miss the target field).
+                lowered = field_name.lower()
+                key = lowered if lowered in ("status", "priority") else field_name
+                flat[key] = fv.get("name")
         return flat
     return None
 

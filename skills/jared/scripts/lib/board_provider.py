@@ -79,6 +79,22 @@ class ClosedItem:
     closed_at: str
 
 
+@dataclass
+class Comment:
+    """A single comment/session-note, in neutral terms.
+
+    `author` is the GitHub login or the KanbanFlow user's display name ("" if
+    unresolved). `created_at` is an opaque timestamp string (ISO 8601 on both
+    backends); the interface promises nothing about its format beyond
+    lexicographic sortability — callers sort/slice, never parse it (same
+    contract as ClosedItem.closed_at).
+    """
+
+    author: str
+    body: str
+    created_at: str
+
+
 @runtime_checkable
 class BoardProvider(Protocol):
     # --- reads ---
@@ -87,6 +103,7 @@ class BoardProvider(Protocol):
     def get_body(self, ref: IssueRef) -> str: ...
     def fetch_blocked_by_edges(self) -> list[Edge]: ...
     def recently_closed(self, *, days: int) -> list[ClosedItem]: ...
+    def list_comments(self, ref: IssueRef) -> list[Comment]: ...
 
     # --- writes ---
     def validate_fields(
@@ -106,6 +123,7 @@ class BoardProvider(Protocol):
         labels: list[str] | None = None,
         milestone: str | None = None,
         fields: list[tuple[str, str]] | None = None,
+        number: int | None = None,
     ) -> BoardItem: ...
     def add_to_board(
         self,

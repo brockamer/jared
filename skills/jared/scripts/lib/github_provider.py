@@ -29,6 +29,7 @@ from .board_provider import (
     BoardItem,
     Capability,
     ClosedItem,
+    Comment,
     Edge,
     IssueRef,
     Milestone,
@@ -328,6 +329,25 @@ class GitHubProjectsProvider:
                 )
         return edges
 
+    def list_comments(self, ref: IssueRef) -> list[Comment]:
+        """Return an issue's comments oldest→newest as neutral Comments.
+
+        Uses `gh issue view <n> --json comments`, which returns each comment's
+        author.login, body (markdown), and createdAt. The GitHub-camelCase
+        `createdAt` is mapped to Comment.created_at here so it never crosses
+        the neutral boundary.
+        """
+        data = run_gh(["issue", "view", str(ref), "--repo", self.repo, "--json", "comments"])
+        raw = data.get("comments", []) if isinstance(data, dict) else []
+        return [
+            Comment(
+                author=str((c.get("author") or {}).get("login") or ""),
+                body=str(c.get("body", "")),
+                created_at=str(c.get("createdAt") or ""),
+            )
+            for c in raw
+        ]
+
     # ------------------------------------------------------------------ #
     # Private write helpers                                               #
     # ------------------------------------------------------------------ #
@@ -579,6 +599,7 @@ class GitHubProjectsProvider:
         labels: list[str] | None = None,
         milestone: str | None = None,
         fields: list[tuple[str, str]] | None = None,
+        number: int | None = None,
     ) -> BoardItem:
         """Atomic: create issue, add to project, set Priority + Status + extras.
 
@@ -597,6 +618,8 @@ class GitHubProjectsProvider:
         responsible for validation — same as how the CLI validates before calling
         this method).
         """
+        # number= is honored only on backends that allow setting it (KanbanFlow);
+        # GitHub auto-assigns issue numbers and this kwarg is intentionally ignored.
         effective_status = status or "Backlog"
 
         # Pre-resolve field/option IDs before ANY gh call so misconfiguration
