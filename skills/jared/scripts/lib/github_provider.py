@@ -22,7 +22,6 @@ from .board import (
     ItemNotFound,
     OptionNotFound,
     _flatten_project_item_for_project,
-    fetch_issue_body_rest,
     run_gh,
     run_gh_raw,
     run_graphql,
@@ -406,20 +405,26 @@ class GitHubProjectsProvider:
         return item
 
     def get_body(self, ref: IssueRef) -> str:
-        """Return the issue's Markdown body via REST (with ETag/conditional GET).
+        """Return the issue's Markdown body via REST, retrying transient failures.
 
-        NOT wrapped in `_retry_transient_read` (#342): `fetch_issue_body_rest`
-        already swallows a transient failure to "" rather than raising, so a
-        naive wrap is a no-op and it never *aborts* a migration. KNOWN GAP, not
-        a clean carve-out: because `_OPEN_ITEMS_QUERY` omits the body, migrate's
-        pass-2 `get_body` is the SOLE body-transfer step — so a transient blip
-        there silently ports an empty body and durably marks it done (tension
-        with #342 criterion 3, "persistent failure must surface"). The fix is a
-        raising read under retry, but it changes get_body's failure contract for
-        the other consumer (capture-context) and its ETag caching — surfaced for
-        an explicit decision rather than folded into the scoped retry change.
+        Reads the body through a *raising* `gh api` call wrapped in
+        `_retry_transient_read` (#342) — NOT the shared `fetch_issue_body_rest`,
+        which swallows every failure to "". That swallow matters because
+        `_OPEN_ITEMS_QUERY` omits the body, so migrate's pass-2 `get_body` is the
+        SOLE body-transfer step: a transient blip there used to silently port an
+        empty body and durably mark it done. Now a transient failure retries and
+        a genuinely persistent one surfaces clearly after exhaustion (criterion 3),
+        while a 200 whose `body` field is absent/empty still returns "".
+
+        Trade-off (accepted, #342 review): this bypasses the ETag/conditional-GET
+        layer, so repeat reads of the same body no longer short-circuit to a 304.
+        get_body's callers — migrate and capture-context — read each body once,
+        so the cache bought nothing here; and a persistently-failing read now
+        raises rather than masquerading as an empty body.
         """
-        return fetch_issue_body_rest(self.repo, ref)
+        data = _retry_transient_read(lambda: run_gh(["api", f"repos/{self.repo}/issues/{ref}"]))
+        body = data.get("body") if isinstance(data, dict) else None
+        return body or ""
 
     def fetch_blocked_by_edges(self) -> list[Edge]:
         """Return all blocked-by edges for open issues in this repo.
