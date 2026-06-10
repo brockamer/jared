@@ -1,6 +1,12 @@
+---
+**Shipped in #319 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # Phase 6 capability-surface inventory (completeness proof)
 
 > Generated 2026-06-09 from the `phase6-design-resolution` workflow (four-region fan-out, sonnet). This is the exhaustive enumeration the spec's acceptance criterion #1 requires ("a grep/inventory proves no capability-assuming surface was missed"). **84 surfaces / 24 files / 47 misleading-if-shown.** `SUB_ISSUES` rows are deliberate non-findings (phantom capability — see plan Task 0 / spec Resolved decision 4). The implementation plan ([2026-06-09-phase6-capability-degradation.md](2026-06-09-phase6-capability-degradation.md)) groups these into tasks; each row's `degrade_to` is the per-surface spec.
+
+**Issue:** #319
 
 ## CLOSED_STATE — 13 surface(s), 5 misleading
 

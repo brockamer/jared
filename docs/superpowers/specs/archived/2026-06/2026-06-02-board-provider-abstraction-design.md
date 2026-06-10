@@ -1,3 +1,7 @@
+---
+**Shipped in #313, #314 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # Board provider abstraction — Phase 1: interface extraction
 
 **Issue:** #314 (Phase 1). Parent epic: #313.

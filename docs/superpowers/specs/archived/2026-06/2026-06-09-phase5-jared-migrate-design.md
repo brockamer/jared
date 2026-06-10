@@ -1,3 +1,7 @@
+---
+**Shipped in #313, #318 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # `jared migrate` between backends — Phase 5: migration command (design)
 
 **Issue:** #318 (Phase 5). Parent epic: #313.
