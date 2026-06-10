@@ -589,3 +589,70 @@ def test_include_closed_warns_it_is_inert(
     err = capsys.readouterr().err
     assert "closed-item migration not yet supported" in err
     assert "--include-closed" in err
+
+
+# ---------------------------------------------------------------------------
+# Task 4.1 — resume from an existing ledger
+# ---------------------------------------------------------------------------
+
+
+def test_apply_resumes_from_existing_ledger_skips_done_items(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """When --out already holds a ledger, --apply resumes: items the ledger marks
+    done are NOT re-created (their file() is skipped), and the second-pass edges
+    still re-key through the FULL map (the pre-seeded entry + the newly-created
+    one), not just the items created this run.
+
+    Pre-seed --out with a ledger marking source #1 done (1->1). With source #1+#2
+    and edge (dependent=2, blocker=1), GH->KF:
+      - #1's file() is skipped (ledger.is_done(1)); only #2 is created.
+      - ledger.number_map() == {1: 1, 2: 2}, so the edge survives as
+        add_blocked_by(2, 1) — proving the second pass used the full map (the
+        pre-seeded #1), not just this run's created items. A broken resume would
+        re-create #1 (created == [1, 2]) and is caught by the created-list assert.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+    out_path.write_text(
+        _json.dumps({"direction": "github->kanbanflow", "completed": {"1": 1}, "losses": []})
+    )
+
+    src = _StubProvider(
+        items=[
+            # #1 carries no ref-bearing body and no comments, so its second-pass
+            # set_body/comment writes are unasserted noise — the test pins resume,
+            # not the (already-covered) rewrite path.
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="x"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="y"),
+        ],
+        edges=[Edge(dependent=2, blocker=1)],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            "t.md",
+            "--apply",
+            "--yes",
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert rc == 0
+    # #1 was skipped (only its file() call is recorded if re-created); only #2
+    # should have been created this run.
+    assert [c["number"] for c in tgt.file_calls] == [2]
+    assert [i.number for i in tgt.created] == [2]
+    # The edge re-keys through the FULL map {1:1, 2:2}, surviving as (2, 1).
+    assert tgt.add_blocked_by_calls == [(2, 1)]
+    # The ledger persisted back to --out now covers both items.
+    data = _json.loads(out_path.read_text())
+    assert data["completed"] == {"1": 1, "2": 2}

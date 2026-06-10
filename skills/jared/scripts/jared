@@ -1663,6 +1663,14 @@ def _apply_migration(
     artifact (MigrationLedger.to_json) — the durable old->new number map a later
     run consumes to resume (Phase 4.1). --out names the destination; the default
     is a timestamped tmp/ file. An abort writes nothing.
+
+    Phase 4.1: resumability. If the resolved --out path already exists, it is
+    reloaded as the ledger so items it records as done are skipped (their file()
+    is not re-called) while their numbers still populate the map the second-pass
+    edge/cross-ref translation re-keys against. The ledger is persisted after each
+    fully-configured item, so an aborted run leaves a re-runnable artifact. mark()
+    and that persist both happen AFTER set_field/set_milestone — a crash between
+    file() and the field loop must not record the item done with its fields unset.
     """
     from lib.migrate import (  # type: ignore[import-not-found]
         MigrationLedger,
@@ -1678,9 +1686,24 @@ def _apply_migration(
 
     src = source_board.provider
     tgt = target_board.provider
-    ledger = MigrationLedger(direction=direction)
     preserve_number = direction == "github->kanbanflow"
     attribute_comments = direction == "github->kanbanflow"
+
+    # Resolve the artifact path once, up front: the default path embeds a fresh
+    # timestamp, so resolving it twice would yield two files. mkdir the parent now
+    # because the per-item persist inside the loop writes to it.
+    out_path = Path(args.out) if args.out else _default_artifact_path(direction)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Phase 4.1 resume: if the artifact already exists, reload it as the ledger so
+    # already-created items are skipped. The default timestamped path never exists,
+    # so resume only engages on an explicit, pre-existing --out — a re-run of an
+    # aborted migration. A fresh run starts with an empty ledger.
+    ledger = (
+        MigrationLedger.from_json(out_path.read_text())
+        if out_path.exists()
+        else MigrationLedger(direction=direction)
+    )
 
     for item in items:
         if ledger.is_done(item.number):
@@ -1692,11 +1715,17 @@ def _apply_migration(
             status=item.status,
             number=item.number if preserve_number else None,
         )
-        ledger.mark(old=item.number, new=created.number)
         for field_name, value in item.fields.items():
             tgt.set_field(created.number, field_name, value)
         if item.milestone:
             tgt.set_milestone(created.number, item.milestone)
+        # Mark + persist only AFTER the item is fully configured (file() + all
+        # set_field + set_milestone). A crash between file() and the field loop
+        # would otherwise mark the item done, and a resume would skip its fields,
+        # leaving a half-configured target. Persisting after each item makes an
+        # aborted run leave a re-runnable ledger (Phase 4.1).
+        ledger.mark(old=item.number, new=created.number)
+        out_path.write_text(ledger.to_json())
 
     number_map = ledger.number_map()
 
@@ -1715,12 +1744,11 @@ def _apply_migration(
     for edge in translate_edges(edges, number_map):
         tgt.add_blocked_by(edge.dependent, edge.blocker)
 
-    # Emit the run artifact / resume ledger after all writes succeed. --out names
-    # the path; default is a timestamped tmp/ file (stamp generated in the CLI,
-    # never in pure code). The artifact is the durable old->new map a later run
-    # consumes to resume (Phase 4.1). On abort (above) nothing is written.
-    out_path = Path(args.out) if args.out else _default_artifact_path(direction)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Re-emit the run artifact / resume ledger after all passes succeed. The
+    # ledger is also persisted after each created item (above) so an aborted run
+    # leaves a re-runnable artifact; this final write covers the empty-items case
+    # (the loop never ran) and announces the resolved path. On abort (the
+    # confirmation gate above) nothing is written.
     out_path.write_text(ledger.to_json())
     print(f"Wrote run artifact to {out_path}")
 
