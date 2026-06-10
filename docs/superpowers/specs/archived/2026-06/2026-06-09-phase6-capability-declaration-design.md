@@ -1,3 +1,7 @@
+---
+**Shipped in #313, #319 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # Capability declaration + graceful degradation — Phase 6 (design)
 
 **Issue:** #319 (Phase 6). Parent epic: #313.

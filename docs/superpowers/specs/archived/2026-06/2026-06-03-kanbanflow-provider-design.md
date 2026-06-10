@@ -1,3 +1,7 @@
+---
+**Shipped in #313, #316 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # KanbanFlowProvider — Phase 3: implement the BoardProvider contract over KanbanFlow
 
 **Issue:** #316 (Phase 3). Parent epic: #313.

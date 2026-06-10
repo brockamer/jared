@@ -1,8 +1,12 @@
+---
+**Shipped in #319 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # Phase 6 — Capability Declaration + Graceful Degradation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-## Issue: #319
+**Issue:** #319
 
 **Goal:** Make every jared surface that assumes a GitHub-only board capability instead check `board.capabilities()` and degrade with a single consistent note (or, on KanbanFlow, omit a misleading value / refuse a whole-scope-absent invocation) — so the core board loop works on both backends and GitHub-only richness degrades gracefully instead of erroring or lying.
 

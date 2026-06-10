@@ -1,3 +1,7 @@
+---
+**Shipped in #313, #315, #316 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # KanbanFlow REST client — Phase 2 (#315)
 
 **Issue:** #315 (Phase 2). Parent epic: #313. Consumed by: #316 (`KanbanFlowProvider`).
