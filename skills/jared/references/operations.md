@@ -1,5 +1,14 @@
 # Board Operations — Raw `gh` Escape Hatch
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, the following sections are GitHub-only and do not apply:
+- **Cache discipline / GraphQL budget rules** — `gh`/GraphQL budget concepts do not apply on KanbanFlow: `degraded: MCP_TIER and GraphQL budget not available on this backend — cache-discipline rules are GitHub-only` (MCP_TIER absent).
+- **GitHub API mechanism selection** (three-tier model, MCP tier, GraphQL budget routing) — all GitHub-specific: `degraded: MCP_TIER and GitHub API tiers unavailable — operations route through KanbanFlow provider only` (MCP_TIER absent).
+- **Native blocked-by edges query** (GraphQL `blockedBy` field) — unavailable: `degraded: NATIVE_DEPENDENCIES unavailable — gh api graphql blockedBy query is GitHub-only` (NATIVE_DEPENDENCIES absent).
+- **MCP equivalents table** — entire table is inapplicable: `degraded: MCP_TIER not available on this backend — MCP equivalents table is GitHub-only` (MCP_TIER absent).
+- **`/jared-audit` velocity block** — closed/merged timestamps unavailable: `degraded: VELOCITY_TIMESTAMPS unavailable — velocity block and milestone-date calibration omitted` (VELOCITY_TIMESTAMPS absent).
+
+On KanbanFlow, all board operations route through the `jared` CLI (Tier 2) using the KanbanFlow provider — no `gh`, no GraphQL, no MCP.
+
 Primary reference is `references/jared-cli.md` — use the `jared` CLI for any
 board operation it covers (file, move, set, close, comment, blocked-by,
 get-item, summary). This file is the **escape hatch**: commands for things
@@ -23,6 +32,8 @@ it.
   with `PVTI_`)
 
 ## Cache discipline
+
+*(GitHub backend only — the `gh`/GraphQL budget concepts here do not apply on KanbanFlow; see the backend gate at the top.)*
 
 Almost every `gh` invocation Jared makes is GraphQL-billed against the same
 5000-point/hour bucket — `gh project ...`, `gh issue view --json ...`, `gh
@@ -66,6 +77,8 @@ To avoid re-pulling the full mature-board history every sweep cycle, sweep maint
 The 60s `--cache` discipline above is unaffected: it governs `gh` HTTP-response caching, which is keyed by request shape; the 24h closed-cache governs Jared's own on-disk snapshot.
 
 ## GitHub API mechanism selection
+
+*(GitHub backend only — the three-tier model, MCP tier, and GraphQL-budget routing below are GitHub-specific; on KanbanFlow all board ops route through the `jared` CLI / KanbanFlow provider. See the backend gate at the top.)*
 
 `gh` exposes four mechanisms for talking to GitHub: subcommands (`gh issue view`, `gh project item-list`, …), raw REST (`gh api repos/…`), raw GraphQL (`gh api graphql`), and — only in the conversational layer — the GitHub MCP plugin (`mcp__plugin_github_github__*`). Each draws from a different rate-limit bucket. Routing matters most when the graphql bucket is pressured (`gh project item-list` on a large board can burn ~5000 graphql points in one call).
 
@@ -162,6 +175,8 @@ These remain raw-gh territory; none are used often enough to pull into the CLI.
 - **Issue delete** — `gh issue delete` (rare; typically close instead).
 
 ## MCP equivalents
+
+*(GitHub backend only — this entire table is inapplicable on KanbanFlow, which has no MCP path; see the backend gate at the top.)*
 
 For issue + PR work, the GitHub MCP plugin's typed tools are a viable alternative to `gh` — see "GitHub API mechanism selection" above for when to prefer one over the other. The actual tool surface (as enumerated in `docs/github-api-tool-selection.md` § "MCP plugin tool surface"):
 

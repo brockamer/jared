@@ -4,6 +4,12 @@ description: Routine board sweep — metadata, WIP, aging, pullable check, plan/
 
 **Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 3) is written in voice; render it as written rather than translating at runtime. **Important boundary:** the `sweep.py` script's own stdout is voice-OFF (operator diagnostic, per the lane rule) — the voice wraps around its findings in the proposal Jared presents. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations before starting:
+- Skip the `Aging` section entirely: `degraded: timestamps unavailable on kanbanflow — aging checks omitted`. Do not render the aging block (VELOCITY_TIMESTAMPS absent).
+- Skip `Milestone coverage` judgment check: `degraded: milestone state unavailable on kanbanflow — milestone hygiene check omitted` (MILESTONE_STATE absent).
+- Dependency hygiene runs on emulated label-edges, not native ones: `degraded: native dependency edges unavailable on kanbanflow — dependency hygiene based on emulated label markers`.
+- Skip the `Closed ≠ Done` section: `degraded: closed-state unavailable on kanbanflow — Done column is the sole closed signal; no separate closed-state check needed`.
+
 Invoke the Jared skill to run a routine grooming pass. See `references/board-sweep.md` for the full checklist.
 
 Flow:

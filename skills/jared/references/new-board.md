@@ -53,7 +53,9 @@ All prose, custom sections, code fences, and links are preserved verbatim; only 
 
 ### Auto-move workflow dependency
 
-GitHub Projects v2 has a built-in workflow called "Item closed" that moves items to the Done status whenever their underlying issue/PR closes. Jared's close discipline assumes it's enabled — and `bootstrap-project.py` now queries the project's workflows on init and emits a loud stderr warning when the workflow is off.
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, the auto-move workflow does not exist — the Done column IS the closed state: `degraded: CLOSED_STATE unavailable — Item closed auto-move workflow is GitHub Projects v2-specific; not applicable on this backend`. On KanbanFlow, `jared close` sets the Done column directly without polling (CLOSED_STATE absent). The Stuck closed divergence detector in `jared summary` is also omitted on this backend.
+
+GitHub Projects v2 has a built-in workflow called "Item closed" that moves items to the Done status whenever their underlying issue/PR closes. Jared's close discipline assumes it's enabled — and `bootstrap-project.py` now queries the project's workflows on init and emits a loud stderr warning when the workflow is off. *(GitHub backend only.)*
 
 Three close paths, one of them safe either way:
 
