@@ -1592,6 +1592,23 @@ def _default_artifact_path(direction: str) -> Path:
     return Path("tmp") / f"migrate-{src}-to-{dst}-{stamp}.json"
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text to path atomically: stage in a .tmp sibling, then os.replace.
+
+    The migrate resume-ledger is rewritten after every created item, ported
+    item, and applied edge (Phase 4.1), so a crash mid-write would otherwise
+    truncate the artifact — and the next resume's MigrationLedger.from_json
+    would raise on the partial JSON, forcing the operator to re-create every
+    item from zero. os.replace is atomic when source and destination share a
+    directory (the .tmp sibling does), so the artifact is only ever swapped in
+    whole. Matches the convention in lib/kf_number_index.py / cache.py /
+    session_lock.py. No fsync (YAGNI — neither does kf_number_index).
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
     """Return a list of missing-structure error strings.
 
@@ -1734,7 +1751,7 @@ def _apply_migration(
         # leaving a half-configured target. Persisting after each item makes an
         # aborted run leave a re-runnable ledger (Phase 4.1).
         ledger.mark(old=item.number, new=created.number)
-        out_path.write_text(ledger.to_json())
+        _atomic_write_text(out_path, ledger.to_json())
 
     number_map = ledger.number_map()
 
@@ -1757,7 +1774,7 @@ def _apply_migration(
                 body = f"(originally @{note.author}, {note.created_at})\n\n{body}"
             tgt.comment(new, body)
         ledger.mark_ported(item.number)
-        out_path.write_text(ledger.to_json())
+        _atomic_write_text(out_path, ledger.to_json())
 
     # Second-pass edges, guarded per SOURCE (dependent, blocker) pair so a resume
     # doesn't re-fire add_blocked_by (GitHub's addBlockedBy is not a guaranteed
@@ -1770,14 +1787,14 @@ def _apply_migration(
         for translated in translate_edges([edge], number_map):
             tgt.add_blocked_by(translated.dependent, translated.blocker)
             ledger.mark_edge(dependent=edge.dependent, blocker=edge.blocker)
-            out_path.write_text(ledger.to_json())
+            _atomic_write_text(out_path, ledger.to_json())
 
     # Re-emit the run artifact / resume ledger after all passes succeed. The
     # ledger is also persisted after each created item (above) so an aborted run
     # leaves a re-runnable artifact; this final write covers the empty-items case
     # (the loop never ran) and announces the resolved path. On abort (the
     # confirmation gate above) nothing is written.
-    out_path.write_text(ledger.to_json())
+    _atomic_write_text(out_path, ledger.to_json())
     print(f"Wrote run artifact to {out_path}")
 
     return 0
