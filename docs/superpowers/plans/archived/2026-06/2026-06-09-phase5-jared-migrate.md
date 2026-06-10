@@ -1,8 +1,12 @@
+---
+**Shipped in #318 on 2026-06-10. Final decisions captured in issue body.**
+---
+
 # `jared migrate` Between Backends — Implementation Plan (Phase 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-## Issue: #318
+**Issue:** #318
 
 **Goal:** Add a one-shot, operator-confirmed `jared migrate` command that copies a project's board from its current backend (GitHub Projects v2 or KanbanFlow) to the other, surfacing every named, accepted loss before the first write.
 
