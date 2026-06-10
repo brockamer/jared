@@ -712,6 +712,79 @@ def test_abort_does_not_flip_source_doc(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert "- backend: github" in source_doc.read_text()
 
 
+def test_apply_flip_survives_a_torn_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A torn write while flipping the source doc must never corrupt it.
+
+    docs/project-board.md is parsed by EVERY subsequent jared command, so a
+    half-written flip leaves the whole project unusable (BoardConfigError) until
+    a manual recopy. The flip must therefore use the atomic helper (stage in a
+    `.tmp` sibling, then os.replace) like the four ledger persist sites do.
+
+    Proven the same way as test_apply_ledger_write_survives_a_torn_write: make
+    every write whose target IS the source doc land truncated garbage, while the
+    `.tmp` sibling (a different path) gets the real content. With atomic-rename
+    the source doc is produced only by os.replace from the intact `.tmp`, so the
+    byte-for-byte flip lands whole. A bare `write_text(source_doc)` would write
+    the garbage straight onto docs/project-board.md."""
+    from pathlib import Path as _Path
+
+    source_doc = _Path(str(tmp_path)) / "source-board.md"
+    source_doc.write_text(
+        "# Project board\n\n## Jared config\n- backend: github\n\n"
+        "Project URL: https://github.com/users/brockamer/projects/4\n"
+    )
+    target_doc = _Path(str(tmp_path)) / "target-board.md"
+    target_doc.write_text(
+        "# Project board\n\n## Jared config\n- backend: kanbanflow\n"
+        "- Repo: brockamer/jared\n- Board ID: abc123\n\n"
+        "### Status column map\n- Backlog: Backlog\n- In Progress: In Progress\n"
+    )
+
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="x")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+
+    real_write_text = _Path.write_text
+
+    def _torn_write_text(self: _Path, data: str, *a: object, **k: object) -> int:
+        # A direct write to the source doc tears (truncated garbage); the .tmp
+        # sibling — a different path — gets the whole content.
+        if self == source_doc:
+            return real_write_text(self, "- backend: gith", *a, **k)  # type: ignore[arg-type]
+        return real_write_text(self, data, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_Path, "write_text", _torn_write_text)
+
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "--board",
+            str(source_doc),
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            str(target_doc),
+            "--apply",
+            "--yes",
+        ]
+    )
+    assert rc == 0
+
+    # The source doc survives intact: the flip is the byte-for-byte target doc,
+    # not the truncated garbage a direct write_text would have left.
+    flipped = source_doc.read_text()
+    assert flipped == target_doc.read_text()
+    assert "- backend: kanbanflow" in flipped
+    # No `.tmp` sibling is left behind after the final os.replace.
+    assert not _Path(str(source_doc) + ".tmp").exists()
+
+
 # ---------------------------------------------------------------------------
 # Task 4.1 — resume from an existing ledger
 # ---------------------------------------------------------------------------
