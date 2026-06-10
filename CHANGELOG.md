@@ -7,15 +7,16 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
-## Unreleased
+## v0.30.0 — 2026-06-10
 
-**Features**
-- `jared migrate` copies a board between GitHub Projects and KanbanFlow with named, accepted lossiness; dry-run by default, resumable, flips the convention doc on success (#318).
-
-## v0.30.0 — 2026-06-09
+Completes epic #313 — jared's board backend is now fully pluggable (GitHub Projects v2 or KanbanFlow), end to end.
 
 **Features**
 - **Capability-aware graceful degradation.** Every jared surface that assumed a GitHub-only board capability now checks the active backend's static `Capability` set and degrades with a single consistent note (`degraded: <feature> unavailable on <backend> — <instead>`) instead of erroring or emitting a misleading value. One leaf helper (`lib/capabilities.py`) is the consistency anchor; `Board.capabilities()` resolves the per-backend set network-free (no live provider construction). Python surfaces gate in-process per rendered section; prose surfaces (slash-command stubs, `SKILL.md`, references) branch on the `- backend:` bullet. Whole-scope-absent invocations exit nonzero (`jared audit fetch --type milestones`, `jared file --milestone NAME` on a milestone-less backend; `--type both` warns and continues issues-only). GitHub advertises the full set, so nothing degrades there — zero behavior change is the regression bar. Verified live against a real KanbanFlow board. (#319)
+- **`jared migrate` between backends.** Copies a board between GitHub Projects and KanbanFlow with named, accepted lossiness; dry-run by default, resumable via a ledger, flips the convention doc's backend selector on success. Live-verified GitHub↔KanbanFlow round-trip. (#318)
+
+**Bug fixes**
+- `migrate` retries transient GitHub `read:project` 401s on source reads instead of aborting, and surfaces persistent failures. (#342)
 
 ## v0.29.0 — 2026-06-05
 
