@@ -1644,15 +1644,20 @@ def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
       Every distinct source milestone name must be a known target milestone
       (compared via the neutral list_milestones() names — no provider internals).
     """
-    seen: set[tuple[str | None, str | None]] = set()
+    seen: set[tuple[str | None, str | None, tuple[tuple[str, str], ...]]] = set()
     misses: list[str] = []
     for item in items:
-        key = (item.priority, item.status)
+        extra = tuple(sorted(item.fields.items()))
+        key = (item.priority, item.status, extra)
         if key in seen:
             continue
         seen.add(key)
         try:
-            tgt.validate_fields(priority=item.priority, status=item.status)
+            tgt.validate_fields(
+                priority=item.priority,
+                status=item.status,
+                fields=list(extra) or None,
+            )
         except (FieldNotFound, OptionNotFound) as exc:
             misses.append(str(exc))
     target_milestones = {m.name for m in tgt.list_milestones()}
@@ -1863,6 +1868,17 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
         )
     items = src.list_open_items()
     edges = src.fetch_blocked_by_edges()
+
+    # Validate the target structure up front — before the report and before any
+    # write — so a missing column / field / option / swimlane surfaces as a
+    # precise list in BOTH dry-run and apply, never discovered mid-apply (#318).
+    misses = _validate_target_structure(tgt, items)
+    if misses:
+        print("missing target structure:")
+        for m in misses:
+            print(f"  {m}")
+        return 1
+
     axes = compute_loss_axes(
         source_caps=src.capabilities(),
         target_caps=tgt.capabilities(),
@@ -1893,14 +1909,6 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
     if not args.apply:
         print("\nDry-run only. Re-run with --apply to perform the migration.")
         return 0
-
-    # Validate target structure before any writes.
-    misses = _validate_target_structure(tgt, items)
-    if misses:
-        print("missing target structure:")
-        for m in misses:
-            print(f"  {m}")
-        return 1
 
     return _apply_migration(args, source_board, target_board, direction, items, edges)
 
