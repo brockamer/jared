@@ -6,6 +6,9 @@ _load_board and _load_target_board so no filesystem or gh calls occur.
 
 from __future__ import annotations
 
+import ast
+import re as re_mod
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -1202,3 +1205,159 @@ def test_apply_ledger_mark_happens_after_full_config_not_after_file(
     ledger = _Ledger.from_json(out_path.read_text())
     assert ledger.is_done(1) is True
     assert ledger.is_done(2) is False
+
+
+# ---------------------------------------------------------------------------
+# Task 6.1 — provider-purity acceptance gate (grep-clean)
+# ---------------------------------------------------------------------------
+#
+# lib/migrate.py is a pure translation core — it must never reach into provider
+# internals (gh CLI invocations, GraphQL, field_id/option_id lookups, or
+# KanbanFlow's internal _id fields). The four migrate functions in the CLI must
+# be equally provider-pure: all provider interaction goes through the neutral
+# BoardProvider contract, not raw gh/GraphQL/field identifiers.
+#
+# This test reads the source files, strips docstrings and comments (via the AST
+# so prose containing "though" or "through" does not fire), and asserts zero
+# hits for the five banned tokens. It also asserts that migrate.py's imports
+# are restricted to stdlib (json, re, dataclasses, __future__) and the neutral
+# board_provider module — no provider-internal import can sneak in.
+#
+# Negative control: confirm the scanner fires for injected violations (not
+# vacuously green). Positive control: confirm the real sources are clean.
+
+
+def _strip_docstrings(tree: ast.AST) -> ast.AST:
+    """Remove module/function/class docstring nodes in-place. ast.unparse then
+    produces code-only text; comments are already absent from the AST."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        ):
+            node.body.pop(0)
+    return tree
+
+
+_BANNED_RE = re_mod.compile(r"gh |graphql|field_id|option_id|_id\b", re_mod.IGNORECASE)
+
+_MIGRATE_FUNC_NAMES = [
+    "_cmd_migrate",
+    "_apply_migration",
+    "_validate_target_structure",
+    "_flip_backend_selector",
+]
+
+
+def _scan_source(source: str) -> list[str]:
+    """Return a list of banned-token matches found in the non-docstring code."""
+    tree = _strip_docstrings(ast.parse(source))
+    code_only = ast.unparse(tree)
+    return [m.group() for m in _BANNED_RE.finditer(code_only)]
+
+
+def _extract_function_source(path: Path, func_name: str) -> str:
+    """Return the source text of a top-level function by name."""
+    source = path.read_text()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+            seg = ast.get_source_segment(source, node)
+            assert seg is not None, f"{func_name} not found in {path}"
+            return seg
+    raise AssertionError(f"function {func_name!r} not found in {path}")
+
+
+def test_provider_purity_negative_control() -> None:
+    """The scanner must fire for injected violations (not vacuously green)."""
+    dirty = (
+        "def _cmd_migrate(args):\n"
+        "    x = item.field_id\n"
+        "    y = item._id\n"
+        "    run_graphql('query { … }')\n"
+        "    option_id = 'opt_xyz'\n"
+    )
+    hits = _scan_source(dirty)
+    assert "field_id" in hits, "scanner must detect field_id"
+    assert "_id" in hits, "scanner must detect _id"
+    assert "graphql" in hits.copy() or any("graphql" in h.lower() for h in hits), (
+        "scanner must detect graphql"
+    )
+    assert "option_id" in hits, "scanner must detect option_id"
+
+
+def test_migrate_py_is_provider_pure() -> None:
+    """lib/migrate.py contains zero provider-internal tokens in executable code."""
+    migrate_path = (
+        Path(__file__).parent.parent / "skills" / "jared" / "scripts" / "lib" / "migrate.py"
+    )
+    assert migrate_path.exists(), f"migrate.py not found at {migrate_path}"
+    hits = _scan_source(migrate_path.read_text())
+    assert hits == [], (
+        f"lib/migrate.py contains provider-internal tokens: {hits}. "
+        "Pure core must not call gh/GraphQL/field_id/option_id/_id directly."
+    )
+
+
+def test_migrate_py_imports_only_stdlib_and_board_provider() -> None:
+    """lib/migrate.py imports nothing beyond stdlib and board_provider neutral types.
+
+    A stray 'from .github_provider import ...' or 'from .board import run_gh' would
+    not be caught by the token scan; this assertion closes that gap.
+    """
+    migrate_path = (
+        Path(__file__).parent.parent / "skills" / "jared" / "scripts" / "lib" / "migrate.py"
+    )
+    source = migrate_path.read_text()
+    tree = ast.parse(source)
+
+    allowed_modules = frozenset(
+        {
+            "__future__",
+            "json",
+            "re",
+            "dataclasses",
+            # Neutral provider contract — no provider-internal modules.
+            "board_provider",
+            ".board_provider",
+        }
+    )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert alias.name in allowed_modules, (
+                    f"lib/migrate.py must not import {alias.name!r}; "
+                    "only stdlib + board_provider neutral types are allowed."
+                )
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            # Relative imports: module is e.g. 'board_provider' with level=1
+            key = f"{'.' * node.level}{mod}" if node.level else mod
+            assert key in allowed_modules, (
+                f"lib/migrate.py must not import from {key!r}; "
+                "only stdlib + board_provider neutral types are allowed."
+            )
+
+
+def test_cli_migrate_functions_are_provider_pure() -> None:
+    """The four migrate functions in skills/jared/scripts/jared contain zero
+    provider-internal tokens.
+
+    The rest of the CLI legitimately uses gh/GraphQL/field_id/option_id; this
+    test scopes the assertion to the migrate-specific functions only, reading
+    each one by name via ast.get_source_segment so the boundary is precise.
+    """
+    jared_path = Path(__file__).parent.parent / "skills" / "jared" / "scripts" / "jared"
+    assert jared_path.exists(), f"jared CLI not found at {jared_path}"
+
+    for func_name in _MIGRATE_FUNC_NAMES:
+        func_source = _extract_function_source(jared_path, func_name)
+        hits = _scan_source(func_source)
+        assert hits == [], (
+            f"{func_name}() contains provider-internal tokens: {hits}. "
+            "Migrate functions must use only neutral BoardProvider contract methods."
+        )
