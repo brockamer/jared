@@ -1661,3 +1661,34 @@ def test_kanbanflow_doc_missing_status_map_fails(tmp_path: Path) -> None:
     p.write_text(body)
     with pytest.raises(BoardConfigError, match="Status column map"):
         Board.from_path(p)
+
+
+def test_flatten_preserves_custom_field_casing_lowercases_status_priority() -> None:
+    """_flatten_project_item_for_project lowercases ONLY Status/Priority (the two
+    keys read by their lowercased name throughout the codebase) and preserves the
+    original casing of every other custom field, so a field like 'Work Stream'
+    round-trips to the target backend's field name on migration instead of
+    arriving at the provider as 'work stream' and missing the field (#318)."""
+    from skills.jared.scripts.lib.board import _flatten_project_item_for_project
+
+    node = {
+        "nodes": [
+            {
+                "id": "PVTI_x",
+                "project": {"number": 7},
+                "fieldValues": {
+                    "nodes": [
+                        {"name": "In Progress", "field": {"name": "Status"}},
+                        {"name": "High", "field": {"name": "Priority"}},
+                        {"name": "Perception", "field": {"name": "Work Stream"}},
+                    ]
+                },
+            }
+        ]
+    }
+    flat = _flatten_project_item_for_project(node, 7)
+    assert flat is not None
+    assert flat["status"] == "In Progress"  # lowercased key — existing readers
+    assert flat["priority"] == "High"
+    assert flat["Work Stream"] == "Perception"  # original casing preserved (the fix)
+    assert "work stream" not in flat

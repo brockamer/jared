@@ -202,3 +202,32 @@ For issue + PR work, the GitHub MCP plugin's typed tools are a viable alternativ
 | **ProjectV2 ops** (`item-add`, `item-edit`, field reads, blocked-by edges, …) | `gh project …` / `gh api graphql` | **Not available — the MCP plugin exposes no ProjectV2 tools.** Use `jared` (which wraps the graphql calls) or raw `gh api graphql`. |
 
 Tool names can shift across MCP server versions. Use `tool_search` to confirm what's actually loaded rather than assuming.
+
+## `jared migrate`
+
+Copies a project's open items from the current backend (GitHub Projects v2 or KanbanFlow) to the other, surfacing every named, accepted loss before the first write.
+
+```
+jared migrate --to <github|kanbanflow> --target-doc PATH [--apply] [--include-closed] [--out FILE] [--yes]
+```
+
+**Dry-run is the default.** Without `--apply`, the command reads the source board, computes the full loss report and (for KanbanFlow targets) a write-call estimate, prints the report, and stops. No writes are performed.
+
+**`--apply` performs writes** after an interactive confirmation prompt ("Type 'y' to proceed"). Pass `--yes` to skip the prompt for non-interactive use.
+
+**`--target-doc PATH`** is the path to the target project's `docs/project-board.md` — the convention doc produced by running `jared init` against the target backend. It identifies the target board and the Status column map. The target backend must differ from the source; `jared migrate` refuses with exit 2 if `--to` equals the current backend.
+
+**Target-structure validation** runs before any write for any target: every distinct Status + Priority pair across source items is probed via `validate_fields()`; every distinct source milestone name is checked against the target's swimlane list (KanbanFlow) or milestone list (GitHub). All missing elements are printed together; the command exits 1 if any are absent. KanbanFlow cannot create missing columns, dropdown options, or swimlanes via the API, so every miss must be resolved manually before `--apply`. GitHub targets must pre-create any missing Priority/Status single-select option on the target Project before `--apply`.
+
+**`--out FILE`** names the run artifact (default: `tmp/migrate-<src>-to-<dst>-<timestamp>.json`). The artifact is an old→new number map that doubles as a resume ledger. It is written atomically after each created item and after each second-pass port (body/comment rewrite, edge translation). Re-running `--apply --out <same-file>` against an existing artifact resumes from the last completed state without duplicating items, comments, or blocked-by edges — comment() and add_blocked_by() are not idempotent on either live backend, so the ledger guards both passes.
+
+**`--include-closed`** is accepted but currently inoperative — no provider exposes a closed-items reader beyond `recently_closed` (which KanbanFlow degrades to `[]`). The command warns and migrates only open items. Closed-history migration is a named follow-up.
+
+**On-success backend-selector flip.** After a fully-successful `--apply`, `jared migrate` overwrites the source project's `docs/project-board.md` with the target's convention doc (an atomic copy). All subsequent `jared` invocations against that project then route to the new backend. The flip is the last statement in the apply path; an abort, a confirmation refusal, or any mid-run exception bypasses it so a partial run never flips.
+
+**KanbanFlow write-call quota guidance.** KanbanFlow's free tier allows approximately 1,000 API requests per hour. The dry-run report prints a write-call estimate: `1 create + 1 Priority POST + 1 extra-field POST` per item, plus 1 label POST per blocked-by edge. Comment portage is not counted in this estimate (`comment_count=0`), so boards with many comments will exceed it. For a board with many items, check this estimate before running `--apply`; a KF-rate-limited run is safe to resume via `--out` after the quota resets.
+
+**Loss axes.** The dry-run report itemizes every named loss for the direction:
+
+- GH→KF: `native_dependencies` (edges become `blocked-by:<N>` label markers), `milestone_state` (due dates and open/close state dropped), `velocity_timestamps`, `markdown_body` (rendering only — text round-trips), `closed_state` (Done column only), `sub_issues`, `mcp_tier`. GH→KF **preserves `#N`** exactly.
+- KF→GH: `renumber` only — GitHub auto-assigns issue numbers; every `#N` is reassigned and cross-references in bodies and comments are rewritten through the old→new number map. KF→GitHub is otherwise structurally lossless.
