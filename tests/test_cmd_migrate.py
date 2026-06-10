@@ -859,3 +859,71 @@ def test_apply_persists_second_pass_progress_before_a_crash(
     # reads this and skips #1, so its comment is not duplicated.
     data = _json.loads(out_path.read_text())
     assert data["ported"] == [1]
+
+
+def test_apply_ledger_write_survives_a_torn_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A ledger write torn mid-flight must never leave the artifact corrupt.
+
+    The persist sites write to a `.tmp` sibling and `os.replace` it onto the
+    artifact path, so the artifact is only ever swapped in whole. To prove it,
+    simulate a torn write: make every write whose target IS the artifact path
+    land truncated garbage, while the `.tmp` sibling receives the real content.
+    With atomic-rename, the artifact is produced only by `os.replace` from the
+    intact `.tmp`, so it stays parseable. A bare `write_text(out_path)` would
+    write the garbage straight to the artifact, and the resume's
+    `MigrationLedger.from_json` would raise on the truncated JSON.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    from skills.jared.scripts.lib.migrate import MigrationLedger as _Ledger
+
+    out_path = _Path(str(tmp_path)) / "map.json"
+
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="x"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="see #1"),
+        ],
+        edges=[Edge(dependent=2, blocker=1)],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+
+    real_write_text = _Path.write_text
+
+    def _torn_write_text(self: _Path, data: str, *a: object, **k: object) -> int:
+        # A direct write to the artifact path tears (truncated JSON); the .tmp
+        # sibling — a different path — gets the whole content.
+        if self == out_path:
+            return real_write_text(self, '{"direction"', *a, **k)  # type: ignore[arg-type]
+        return real_write_text(self, data, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_Path, "write_text", _torn_write_text)
+
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(
+        [
+            "migrate",
+            "--to",
+            "kanbanflow",
+            "--target-doc",
+            "t.md",
+            "--apply",
+            "--yes",
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert rc == 0
+
+    # The artifact survives intact: a resume can reload it without a JSONDecodeError.
+    ledger = _Ledger.from_json(out_path.read_text())
+    assert ledger.number_map().to_new(1) == 1
+    assert ledger.number_map().to_new(2) == 2
+    # No `.tmp` sibling is left behind after the final os.replace.
+    assert not _Path(str(out_path) + ".tmp").exists()
+    # Re-reading still parses (no truncation leaked through).
+    _json.loads(out_path.read_text())
