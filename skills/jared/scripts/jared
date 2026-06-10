@@ -1664,7 +1664,10 @@ def _validate_target_structure(tgt: Any, items: list[BoardItem]) -> list[str]:
     source_milestones = {item.milestone for item in items if item.milestone}
     for name in sorted(source_milestones - target_milestones):
         misses.append(f"milestone (swimlane) '{name}' not on the target board")
-    return misses
+    # Collapse identical messages: many items can share one missing field/column,
+    # which would otherwise repeat the same line once per (priority, status,
+    # fields) combo. dict.fromkeys preserves first-seen order.
+    return list(dict.fromkeys(misses))
 
 
 def _apply_migration(
