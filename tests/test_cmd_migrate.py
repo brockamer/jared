@@ -45,6 +45,10 @@ class _StubProvider:
         self._milestones = milestones or []
         self._validate_raises = validate_raises
         self.created: list[BoardItem] = []
+        self.file_calls: list[dict[str, object]] = []
+        self.set_field_calls: list[tuple[int, str, str]] = []
+        self.set_milestone_calls: list[tuple[int, str]] = []
+        self.move_calls: list[tuple[int, str]] = []
 
     def capabilities(self) -> frozenset[Capability]:
         return self._caps
@@ -76,8 +80,13 @@ class _StubProvider:
 
     # write side recorded for apply tests (Phase 3)
     def file(self, **kw: object) -> BoardItem:
+        self.file_calls.append(dict(kw))
+        # Honor a caller-supplied number (GH->KF #N preservation); otherwise
+        # auto-assign like the real backends do when number is None (KF->GH).
+        explicit = kw.get("number")
+        number = explicit if isinstance(explicit, int) else 100 + len(self.created)
         item = BoardItem(
-            number=100 + len(self.created),
+            number=number,
             title=str(kw.get("title", "")),
             status=str(kw.get("status", "")),
             priority=str(kw.get("priority", "")),
@@ -87,13 +96,13 @@ class _StubProvider:
         return item
 
     def move(self, ref: int, status: str) -> None:
-        return None
+        self.move_calls.append((ref, status))
 
     def set_field(self, ref: int, name: str, value: str) -> None:
-        return None
+        self.set_field_calls.append((ref, name, value))
 
     def set_milestone(self, ref: int, name: str) -> None:
-        return None
+        self.set_milestone_calls.append((ref, name))
 
     def add_blocked_by(self, ref: int, blocker: int) -> None:
         return None
@@ -237,3 +246,113 @@ def test_apply_refuses_on_missing_target_swimlane(
     assert "missing target structure:" in out
     assert "M1" in out
     assert tgt.created == []  # no writes performed
+
+
+# ---------------------------------------------------------------------------
+# Task 3.1 — confirmation gate + item creation with number map
+# ---------------------------------------------------------------------------
+
+
+def test_apply_creates_items_with_preserved_numbers_gh_to_kf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GH->KF --apply --yes creates one target item per source item, threading
+    number=item.number so #N is preserved (identity number map)."""
+    src = _StubProvider(
+        items=[
+            BoardItem(number=1, title="a", status="Up Next", priority="High", body="x"),
+            BoardItem(number=2, title="b", status="Backlog", priority="Low", body="see #1"),
+        ],
+        edges=[Edge(dependent=2, blocker=1)],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    # #N preserved exactly: identity map 1->1, 2->2 (not 100, 101).
+    assert [i.number for i in tgt.created] == [1, 2]
+    # Status + priority ride on file() (no redundant move() write).
+    assert tgt.move_calls == []
+    assert tgt.file_calls[0]["title"] == "a"
+    assert tgt.file_calls[0]["status"] == "Up Next"
+    assert tgt.file_calls[0]["priority"] == "High"
+    assert tgt.file_calls[0]["number"] == 1
+    # Raw body on first creation; cross-ref rewrite is deferred to Task 3.3.
+    assert tgt.file_calls[1]["body"] == "see #1"
+
+
+def test_apply_renumbers_kf_to_github(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KF->GitHub passes no number; GitHub auto-assigns, so the map is
+    non-identity. The stub's fallback (100 + len) stands in for GitHub's
+    assignment, proving number=None was threaded for this direction."""
+    src = _StubProvider(
+        items=[BoardItem(number=7, title="a", status="Backlog", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=_all_capabilities())
+    cli = _patch_boards(monkeypatch, src, tgt, source_backend="kanbanflow", target_backend="github")
+    rc = cli.main(["migrate", "--to", "github", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    # number=None was passed (renumber), so the source #7 maps to the stub's 100.
+    assert tgt.file_calls[0]["number"] is None
+    assert tgt.created[0].number == 100
+
+
+def test_apply_applies_fields_and_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Extra custom fields go through set_field; milestone through set_milestone."""
+    src = _StubProvider(
+        items=[
+            BoardItem(
+                number=5,
+                title="c",
+                status="Backlog",
+                priority="High",
+                body="",
+                milestone="M1",
+                fields={"Area": "backend"},
+            ),
+        ],
+        edges=[],
+        caps=_all_capabilities(),
+        milestones=[Milestone(name="M1")],
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset(), milestones=[Milestone(name="M1")])
+    cli = _patch_boards(monkeypatch, src, tgt)
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply", "--yes"])
+    assert rc == 0
+    assert [i.number for i in tgt.created] == [5]
+    assert tgt.set_field_calls == [(5, "Area", "backend")]
+    assert tgt.set_milestone_calls == [(5, "M1")]
+
+
+def test_apply_without_yes_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without --yes, a non-'y' answer at the confirmation prompt writes nothing."""
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    monkeypatch.setattr("builtins.input", lambda *_a: "n")
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply"])
+    assert rc == 0
+    assert tgt.created == []
+    assert tgt.file_calls == []
+
+
+def test_apply_without_yes_proceeds_on_y(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without --yes, a 'y' answer at the prompt performs the writes."""
+    src = _StubProvider(
+        items=[BoardItem(number=1, title="a", status="Backlog", priority="High", body="")],
+        edges=[],
+        caps=_all_capabilities(),
+    )
+    tgt = _StubProvider(items=[], edges=[], caps=frozenset())
+    cli = _patch_boards(monkeypatch, src, tgt)
+    monkeypatch.setattr("builtins.input", lambda *_a: "y")
+    rc = cli.main(["migrate", "--to", "kanbanflow", "--target-doc", "t.md", "--apply"])
+    assert rc == 0
+    assert [i.number for i in tgt.created] == [1]
