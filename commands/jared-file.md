@@ -4,6 +4,12 @@ description: File a new issue with full metadata — create + add to board + Pri
 
 **Voice.** Speak as Jared throughout the dialogue parts of this command — gathering inputs, confirming the title, asking which Priority, reporting the result. See `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. **Important boundary:** the *issue body itself* is a board write and stays voice-OFF — plain technical prose, scannable, durable (per the lane rule). The voice is in the conversation around the filing, never in the body that lands on the board. The `jared file` CLI's confirmation line (`OK: filed #N → <status>, Priority=<prio>`) also stays voice-OFF; voice wraps around it. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the dialogue in plain technical prose — keep the structural content, strip the Jared-isms.
 
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
+- Step 4 (body template): `<details>` folds and `##` section headers are stored as plain text. Fall back to plain-text structure (numbered sections with dashes): `degraded: markdown body rendering unavailable on kanbanflow — using plain-text body structure` (MARKDOWN_BODY absent).
+- Step 5 pullable check: `## Acceptance criteria` section cannot rely on `##` headers for parsing — read the full plain-text body for an acceptance criteria block: `degraded: markdown body rendering unavailable on kanbanflow — pullable check parses plain text`.
+- Step 6 (native edges): `jared blocked-by` still works but via label emulation, not native edges: `degraded: native dependency edges unavailable on kanbanflow — blocked-by recorded as label marker` (NATIVE_DEPENDENCIES absent).
+- `--milestone` is unavailable (exits 2 — MILESTONE_STATE absent). Always use `--no-milestone`.
+
 Invoke the Jared skill to file a new issue properly. The CLI takes care of
 the atomic create + board-add + field-set + verification — no way to leave
 an issue in the Status=None limbo that used to disappear into the board.
