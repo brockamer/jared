@@ -108,6 +108,17 @@ P0 / P1 / P2:
 Following **only public docs**, in dependency order:
 - **Marketplace + install UX** (main session): `/plugin marketplace add` → `/plugin install` →
   `/reload-plugins`. Every reach for undocumented operator knowledge = a logged blocker.
+- **Harness-state honesty — the inverted blind spot.** This main session is *not* a default
+  stranger's: it has the **github MCP server loaded**, the plugin already installed, `gh`
+  pre-authed, and a reflexive `env -u GH_TOKEN` workaround for the operator's scopeless PAT. A
+  marketplace `/plugin install` bundles **no MCP server**, so jared's conversational "prefer MCP
+  if loaded" path is exercised here but *absent* for the stranger, who falls through to the `gh`
+  tier. **Mitigation:** run at least one full walkthrough with the **github MCP server disabled**
+  (the `gh`-fallback tier the stranger actually depends on), and treat every harness-state
+  assumption (MCP presence, prior install, `gh` auth, `GH_TOKEN`) as a **logged stranger-blocker**
+  — these are the dependencies one does *not* consciously reach for, so they are the dangerous
+  ones. Concrete doc check it forces: do README/getting-started state that the MCP server is
+  optional and that authenticated `gh` is the floor?
 - **Slash commands** end-to-end against the sandbox, both backends where applicable:
   `/jared-init → /jared-file → /jared (status) → /jared-start → /jared-stage → /jared-groom →
   /jared-audit → /jared-reshape → /jared-wrap`, plus the multi-session / worktree path.
