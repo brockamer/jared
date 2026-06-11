@@ -209,6 +209,47 @@ def test_parse_referenced_issues_bold_form_does_not_match_mid_line_prose() -> No
     assert ap.parse_referenced_issues(text) == [408, 310]
 
 
+def test_parse_referenced_issues_inline_header_form() -> None:
+    """#346 — the documented `## Issue: #N` convention carries the ref ON the
+    heading line. The #318/#319 plans wrote exactly this form (`## Issue: #318`,
+    verified in git at a53249b) and silently skipped archival until #345
+    hand-converted them to `**Issue:**`. The scanner must recognize the
+    documented header form directly.
+    """
+    text = "# Phase 5 plan\n\n## Issue: #318\n\n## Goal\n\nStuff.\n"
+    assert ap.parse_referenced_issues(text) == [318]
+
+
+def test_parse_referenced_issues_inline_header_with_trailing_description() -> None:
+    """The inline header may carry a trailing em-dash description after the
+    ref — findall ignores the prose, same as the `**Issue:**` bold line."""
+    text = "# Plan\n\n## Issue: #318 — Phase 5 migrate\n\n## Goal\n"
+    assert ap.parse_referenced_issues(text) == [318]
+
+
+def test_parse_referenced_issues_inline_header_plural_multiple_refs() -> None:
+    """`## Issues: #12, #13` — plural heading with multiple inline refs,
+    mirroring the bold-line plural case."""
+    text = "# Plan\n\n## Issues: #12, #13\n\n## Goal\n"
+    assert ap.parse_referenced_issues(text) == [12, 13]
+
+
+def test_parse_referenced_issues_inline_header_at_eof_no_trailing_newline() -> None:
+    """A plan whose file ends exactly at the inline header — no body, no
+    trailing newline. The body sub-match must allow empty (`*?`, not `+?`),
+    or the heading match fails outright and the ref is lost to the `[]` path.
+    """
+    text = "# Plan\n\n## Issue: #346"
+    assert ap.parse_referenced_issues(text) == [346]
+
+
+def test_parse_referenced_issues_inline_header_wins_over_bold_line() -> None:
+    """Precedence holds for the inline form too: a `## Issue: #N` header wins
+    over a `**Issue:**` bold line, same as the bare `## Issue` section does."""
+    text = "# Plan\n\n**Issue:** #99\n\n## Issue: #1\n\n## Body\n"
+    assert ap.parse_referenced_issues(text) == [1]
+
+
 def test_parse_shipped_section_returns_pr_numbers() -> None:
     """The `## Shipped` section is the same shape as `## Issue` — list-item
     refs whose meaningful content starts with `#NNN` or a URL.
@@ -230,6 +271,15 @@ def test_parse_shipped_section_ignores_inline_prose_refs() -> None:
         "Adapter #2 was the first one merged.\n"
         "**Note:** also see #888 follow-up.\n\n## Body\n"
     )
+    assert ap.parse_shipped_section(text) == [415]
+
+
+def test_parse_shipped_section_inline_header_form() -> None:
+    """#346 — the shared `_parse_plan_section` change makes the inline-header
+    form parse for `## Shipped:` too. This test owns that blast-radius change
+    explicitly rather than letting the shared-helper behavior shift silently.
+    """
+    text = "# Plan\n\n## Shipped: #415\n\n## Body\n"
     assert ap.parse_shipped_section(text) == [415]
 
 
