@@ -149,8 +149,11 @@ Every defect lands in the same ledger.
 - A **curated-submission readiness checklist**.
 
 Findings become fixes in this effort or writeup entries — **not** a pile of filed issues. The
-effort as a whole should, per jared's own discipline, be tracked as a single epic on Project #4
-so the work is visible (confirm at plan-transition).
+effort is tracked, per jared's own discipline, as epic **#348** on Project #4, with one phase
+issue each (Phase 0 → #349, Phase 1 → #350, Phase 2 → #351, Phase 3 → #352, Phase 4 → #353,
+Phase 5 → #354), wired as the DAG `0 → {1,2} → 3 → 4 → 5` under the **"Marketplace readiness"**
+milestone (due 2026-06-23). Phase 3's concrete fix issues are filed as its children as findings
+land.
 
 ## Risks & open items
 
