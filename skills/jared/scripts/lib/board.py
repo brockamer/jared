@@ -1233,21 +1233,38 @@ _PLAN_LINE_REF_RE = re.compile(
 
 
 def _parse_plan_section(plan_text: str, heading_pattern: str) -> list[int] | None:
-    """Find a heading-bounded section and return line-start refs from its body.
+    """Find a heading-bounded section and return refs from it.
 
     Returns None if the heading is absent — distinguishes "section missing"
     from "section present but empty" so callers can fall back to alternate
     parsers (e.g. the `**Issue:**` bold-line fallback).
+
+    Two ref-bearing positions count (#346):
+
+    1. **Inline on the heading line** — the documented `## Issue: #N` plan
+       convention (CLAUDE.md, plan/spec templates). The heading line is itself
+       a designated ref carrier, like the `**Issue:**` bold line, so *all*
+       refs in the inline content count (`## Issues: #12, #13` → both).
+    2. **Body lines below the heading** — only lines whose meaningful content
+       STARTS with a ref (the stricter line-start rule that skips mid-line
+       prose refs, guarding against the #86/#87 false positives).
+
+    The body sub-match is `*?` (allows empty) so a file ending exactly at an
+    inline header — `## Issue: #N` with no body, no trailing newline — still
+    parses rather than failing the whole match.
     """
     section_match = re.search(
-        rf"^{heading_pattern}\s*$([\s\S]+?)(?=^#{{1,3}}\s|\Z)",
+        rf"^{heading_pattern}\s*(?::\s*(?P<inline>.*))?$(?P<body>[\s\S]*?)(?=^#{{1,3}}\s|\Z)",
         plan_text,
         re.MULTILINE,
     )
     if not section_match:
         return None
     refs: list[int] = []
-    for line in section_match.group(1).splitlines():
+    inline = section_match.group("inline")
+    if inline:
+        refs.extend(int(n) for ref in _PLAN_ISSUE_REF_RE.findall(inline) for n in ref if n)
+    for line in section_match.group("body").splitlines():
         m = _PLAN_LINE_REF_RE.match(line)
         if not m:
             continue
@@ -1261,11 +1278,14 @@ def _parse_plan_section(plan_text: str, heading_pattern: str) -> list[int] | Non
 def parse_referenced_issues(plan_text: str) -> list[int]:
     """Extract issue numbers from a plan/spec.
 
-    Primary source: a `## Issue` / `## Issues` / `## Issue(s)` section. Inside
-    that section, only lines whose meaningful content STARTS with a ref count
-    — list-item form (`- #42`, `* https://github.com/.../issues/42`) and
-    bare line-start form (`#229 — Metric Layer C.0`) both qualify.
-    Mid-line refs in prose, blockquotes, or bold lines are skipped.
+    Primary source: a `## Issue` / `## Issues` / `## Issue(s)` section. The ref
+    may sit either inline on the heading line itself — the documented
+    `## Issue: #N` convention (#346) — or on body lines below the heading. For
+    body lines, only those whose meaningful content STARTS with a ref count:
+    list-item form (`- #42`, `* https://github.com/.../issues/42`) and bare
+    line-start form (`#229 — Metric Layer C.0`) both qualify; mid-line refs in
+    prose, blockquotes, or bold lines are skipped. The inline-heading carrier
+    is less restrictive (all refs in it count), like the `**Issue:**` line.
 
     Fallback (when no `## Issue` heading is present): a `**Issue:**` /
     `**Issues:**` / `**Tracking issue:**` bold line near the top of the file
