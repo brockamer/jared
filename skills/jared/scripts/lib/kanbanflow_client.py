@@ -187,6 +187,28 @@ class KfUser:
     name: str = ""
 
 
+@dataclass
+class KfChangedProperty:
+    property: str
+    old_value: str | None = None
+    new_value: str | None = None
+
+
+@dataclass
+class KfDetailedEvent:
+    event_type: str
+    task_id: str | None = None
+    changed_properties: list[KfChangedProperty] = field(default_factory=list)
+
+
+@dataclass
+class KfEvent:
+    id: str
+    timestamp: str
+    user_id: str = ""
+    detailed_events: list[KfDetailedEvent] = field(default_factory=list)
+
+
 def _parse_label(raw: dict[str, Any]) -> KfLabel:
     return KfLabel(name=str(raw["name"]), pinned=bool(raw.get("pinned", False)))
 
@@ -275,6 +297,33 @@ def _parse_relation(raw: dict[str, Any]) -> KfRelation:
 
 def _parse_user(raw: dict[str, Any]) -> KfUser:
     return KfUser(id=str(raw["_id"]), name=str(raw.get("name", "")))
+
+
+def _parse_changed_property(raw: dict[str, Any]) -> KfChangedProperty:
+    return KfChangedProperty(
+        property=str(raw.get("property", "")),
+        old_value=str(raw["oldValue"]) if raw.get("oldValue") is not None else None,
+        new_value=str(raw["newValue"]) if raw.get("newValue") is not None else None,
+    )
+
+
+def _parse_detailed_event(raw: dict[str, Any]) -> KfDetailedEvent:
+    return KfDetailedEvent(
+        event_type=str(raw.get("eventType", "")),
+        task_id=str(raw["taskId"]) if raw.get("taskId") is not None else None,
+        changed_properties=[
+            _parse_changed_property(cp) for cp in raw.get("changedProperties", [])
+        ],
+    )
+
+
+def _parse_event(raw: dict[str, Any]) -> KfEvent:
+    return KfEvent(
+        id=str(raw.get("_id", "")),
+        timestamp=str(raw.get("timestamp", "")),
+        user_id=str(raw.get("userId", "")),
+        detailed_events=[_parse_detailed_event(de) for de in raw.get("detailedEvents", [])],
+    )
 
 
 class KanbanFlowClient:

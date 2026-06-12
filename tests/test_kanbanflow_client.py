@@ -645,3 +645,43 @@ def test_update_task_follows_up_with_get_after_null_post(monkeypatch: pytest.Mon
     assert methods == ["POST", "GET"], (
         "update_task must POST to /tasks/{id} then GET the updated task"
     )
+
+
+def test_parse_event_maps_nested_shape() -> None:
+    raw = {
+        "_id": "Nn1Xdp",
+        "timestamp": "2026-06-05T13:20:56.216Z",
+        "userId": "u-1",
+        "detailedEvents": [
+            {
+                "eventType": "taskChanged",
+                "taskId": "1eTJRipf",
+                "changedProperties": [
+                    {"property": "columnId", "oldValue": "col-inprog", "newValue": "col-done"}
+                ],
+            }
+        ],
+    }
+    ev = kf._parse_event(raw)
+    assert ev.id == "Nn1Xdp"
+    assert ev.timestamp == "2026-06-05T13:20:56.216Z"
+    assert ev.user_id == "u-1"
+    assert len(ev.detailed_events) == 1
+    de = ev.detailed_events[0]
+    assert de.event_type == "taskChanged"
+    assert de.task_id == "1eTJRipf"
+    assert de.changed_properties[0].property == "columnId"
+    assert de.changed_properties[0].old_value == "col-inprog"
+    assert de.changed_properties[0].new_value == "col-done"
+
+
+def test_parse_event_taskcreated_has_no_changed_properties() -> None:
+    ev = kf._parse_event(
+        {
+            "_id": "e2",
+            "timestamp": "t",
+            "detailedEvents": [{"eventType": "taskCreated", "taskId": "x"}],
+        }
+    )
+    assert ev.detailed_events[0].changed_properties == []
+    assert ev.user_id == ""
