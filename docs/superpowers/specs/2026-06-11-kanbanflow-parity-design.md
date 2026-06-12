@@ -221,3 +221,27 @@ value anchor; Phase 5 (MCP) is the heaviest and gets its own sub-spec.
 - **Optional absence-probe** (not yet run): `POST /tasks/<id>/relations` → expect `404/405`
   to harden the NATIVE_DEPENDENCIES write-impossible verdict beyond doc-absence. Low-risk
   (a 404 mutates nothing); offer before Phase 2.
+
+## 12. Phase 1a live-verify findings (2026-06-11, read-only on `p9vK6cR`)
+
+Run after Phase 1a code landed, via the real client+provider (not the fake):
+
+- **Mechanism confirmed.** `get_board_events` returned the real `columnId`→Done transition
+  (`1eTJRipf → Done @ 2026-06-05T13:20:56Z`). The event scan + Done-column-id match works on
+  live data — the inferred mechanism is now doubly confirmed (probe + provider path).
+- **`recently_closed(days=60)` returned `[]` — correct for the board's current state.** The
+  test board has **no task currently in Done carrying a jared `#N`** (the moved task is no
+  longer a numbered Done item), so the `#N`-resolution step correctly skips it
+  (`test_recently_closed_skips_unresolvable_task`). The empty result is a board-data artifact,
+  not a code defect; the resolved-task path is covered by `test_recently_closed_maps_columnid_into_done`.
+  A full end-to-end demo would require a jared-numbered task moved to Done on the board (a
+  write — deferred, not in the read-only verify scope).
+- **ISO `from`/`to` filters server-side, and `to` is INCLUSIVE.** A `to == oldest_timestamp`
+  query returned 1 event vs 12 for the full history. Inclusivity means backward paging re-fetches
+  the boundary event — which **validates the cross-page `seen`-set dedup** added in Phase 1a.2.
+- **Retention floor ≥ 6 days** (events back to the board's 2026-06-05 creation); the deep
+  retention ceiling is still unprobed (board too young). Confirms §6/§11: the VELOCITY_TIMESTAMPS
+  flag flip stays retention-gated for Phase 1c.
+- **next-session-prompt integration** was not exercised against a KanbanFlow-backed
+  `docs/project-board.md` (none is configured), but the provider call it depends on
+  (`recently_closed`) is verified above.
