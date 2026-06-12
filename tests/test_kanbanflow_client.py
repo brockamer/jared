@@ -685,3 +685,89 @@ def test_parse_event_taskcreated_has_no_changed_properties() -> None:
     )
     assert ev.detailed_events[0].changed_properties == []
     assert ev.user_id == ""
+
+
+def test_get_board_events_single_call_returns_parsed_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = json.dumps(
+        {
+            "eventsLimited": False,
+            "events": [
+                {
+                    "_id": "e1",
+                    "timestamp": "2026-06-05T13:20:56.216Z",
+                    "detailedEvents": [
+                        {
+                            "eventType": "taskChanged",
+                            "taskId": "t1",
+                            "changedProperties": [
+                                {"property": "columnId", "oldValue": "a", "newValue": "b"}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    calls = patch_kf(monkeypatch, status=200, body=body)
+    events = _client().get_board_events(limit=100, order="descending")
+    assert len(events) == 1
+    assert events[0].id == "e1"
+    assert events[0].detailed_events[0].changed_properties[0].new_value == "b"
+    assert "/board/events" in cast(str, calls[0]["url"])
+    assert "limit=100" in cast(str, calls[0]["url"])
+    assert "order=descending" in cast(str, calls[0]["url"])
+
+
+def test_get_board_events_pages_backward_when_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seq: list[tuple[int, dict[str, str], bytes]] = [
+        (
+            200,
+            {},
+            json.dumps(
+                {
+                    "eventsLimited": True,
+                    "events": [
+                        {
+                            "_id": "e2",
+                            "timestamp": "2026-06-05T13:00:00.000Z",
+                            "detailedEvents": [],
+                        },
+                        {
+                            "_id": "e1",
+                            "timestamp": "2026-06-05T12:00:00.000Z",
+                            "detailedEvents": [],
+                        },
+                    ],
+                }
+            ).encode(),
+        ),
+        (
+            200,
+            {},
+            json.dumps(
+                {
+                    "eventsLimited": False,
+                    "events": [
+                        {"_id": "e0", "timestamp": "2026-06-05T11:00:00.000Z", "detailedEvents": []}
+                    ],
+                }
+            ).encode(),
+        ),
+    ]
+    urls: list[str] = []
+
+    def fake(
+        method: str, url: str, headers: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        urls.append(url)
+        return seq.pop(0)
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    events = _client().get_board_events(order="descending")
+    assert [e.id for e in events] == ["e2", "e1", "e0"]
+    assert len(urls) == 2
+    assert "to=2026-06-05T12%3A00%3A00.000Z" in urls[1] or "to=2026-06-05T12:00:00.000Z" in urls[1]

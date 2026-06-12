@@ -592,6 +592,47 @@ class KanbanFlowClient:
         raw = self._request("GET", f"/tasks/{task_id}/relations")
         return [_parse_relation(r) for r in raw]  # type: ignore[attr-defined]
 
+    def get_board_events(
+        self,
+        *,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+        limit: int = 100,
+        order: str = "descending",
+        max_pages: int = 20,
+    ) -> list[KfEvent]:
+        """Read board event history (GET /board/events).
+
+        Returns events newest-first (order='descending'). The endpoint has no
+        cursor — when the response sets `eventsLimited`, this walks the time
+        window backward by setting `to` to the oldest event seen, bounded by
+        `from_ts` (server-side floor) and `max_pages` (safety cap). The
+        `{eventsLimited, events}` envelope shape is confirmed live on p9vK6cR.
+        """
+        out: list[KfEvent] = []
+        window_to = to_ts
+        for _ in range(max_pages):
+            params: dict[str, object] = {
+                "from": from_ts,
+                "to": window_to,
+                "limit": limit,
+                "order": order,
+            }
+            raw = self._request("GET", "/board/events", params=params)
+            if not isinstance(raw, dict):
+                break
+            batch = [_parse_event(e) for e in (raw.get("events") or [])]
+            out.extend(batch)
+            if not raw.get("eventsLimited") or not batch:
+                break
+            oldest = min(
+                (e.timestamp for e in batch if e.timestamp), default=None
+            )
+            if oldest is None or oldest == window_to:
+                break
+            window_to = oldest
+        return out
+
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:
             raise KanbanFlowRateLimitError(
