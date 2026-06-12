@@ -771,3 +771,47 @@ def test_get_board_events_pages_backward_when_limited(
     assert [e.id for e in events] == ["e2", "e1", "e0"]
     assert len(urls) == 2
     assert "to=2026-06-05T12%3A00%3A00.000Z" in urls[1] or "to=2026-06-05T12:00:00.000Z" in urls[1]
+
+
+def test_get_board_events_respects_max_pages_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    counter = {"n": 0}
+
+    def fake(
+        method: str, url: str, headers: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        counter["n"] += 1
+        hour = 20 - counter["n"]  # strictly-decreasing oldest so paging keeps advancing
+        body = json.dumps(
+            {
+                "eventsLimited": True,
+                "events": [
+                    {
+                        "_id": f"e{counter['n']}",
+                        "timestamp": f"2026-06-05T{hour:02d}:00:00.000Z",
+                        "detailedEvents": [],
+                    }
+                ],
+            }
+        ).encode()
+        return (200, {}, body)
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    events = _client().get_board_events(order="descending", max_pages=3)
+    assert counter["n"] == 3
+    assert len(events) == 3
+
+
+def test_get_board_events_ascending_does_not_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(
+        monkeypatch,
+        status=200,
+        body=json.dumps(
+            {
+                "eventsLimited": True,
+                "events": [{"_id": "e1", "timestamp": "t", "detailedEvents": []}],
+            }
+        ),
+    )
+    events = _client().get_board_events(order="ascending")
+    assert len(events) == 1
+    assert len(calls) == 1  # no backward paging for non-descending order

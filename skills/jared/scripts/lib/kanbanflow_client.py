@@ -603,13 +603,18 @@ class KanbanFlowClient:
     ) -> list[KfEvent]:
         """Read board event history (GET /board/events).
 
-        Returns events newest-first (order='descending'). The endpoint has no
-        cursor — when the response sets `eventsLimited`, this walks the time
-        window backward by setting `to` to the oldest event seen, bounded by
-        `from_ts` (server-side floor) and `max_pages` (safety cap). The
-        `{eventsLimited, events}` envelope shape is confirmed live on p9vK6cR.
+        Returns events newest-first for order='descending' (the default). The
+        endpoint has no cursor — when the response sets `eventsLimited`, this walks
+        the time window backward by setting `to` to the oldest event seen, bounded
+        by `from_ts` (server-side floor) and `max_pages` (safety cap). Backward
+        paging is performed ONLY for order='descending'; any other order returns a
+        single page (the `to`-walk is descending-only by construction). Events are
+        de-duplicated by id across the page seam, so an inclusive `to` bound cannot
+        double-count the boundary event. The `{eventsLimited, events}` envelope
+        shape is confirmed live on p9vK6cR.
         """
         out: list[KfEvent] = []
+        seen: set[str] = set()
         window_to = to_ts
         for _ in range(max_pages):
             params: dict[str, object] = {
@@ -622,12 +627,17 @@ class KanbanFlowClient:
             if not isinstance(raw, dict):
                 break
             batch = [_parse_event(e) for e in (raw.get("events") or [])]
-            out.extend(batch)
-            if not raw.get("eventsLimited") or not batch:
+            for ev in batch:
+                if ev.id and ev.id in seen:
+                    continue
+                if ev.id:
+                    seen.add(ev.id)
+                out.append(ev)
+            # Backward paging is descending-only: `to=oldest` walks toward the past.
+            if not raw.get("eventsLimited") or not batch or order != "descending":
                 break
-            oldest = min(
-                (e.timestamp for e in batch if e.timestamp), default=None
-            )
+            # Timestamps are ISO-8601 UTC 'Z' strings; lexical order == chronological.
+            oldest = min((e.timestamp for e in batch if e.timestamp), default=None)
             if oldest is None or oldest == window_to:
                 break
             window_to = oldest
