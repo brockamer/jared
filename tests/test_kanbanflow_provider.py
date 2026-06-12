@@ -165,6 +165,18 @@ def test_recently_closed_skips_unresolvable_task(tmp_path: Path) -> None:
     assert provider.recently_closed(days=36500) == []
 
 
+def test_recently_closed_excludes_events_before_cutoff(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.tasks["task-A"] = KfTask(
+        id="task-A", name="Old close", column_id="col-done", number_value=7
+    )
+    # Event far in the past; a 30-day window must exclude it (deterministic — 2020 is
+    # always > 30 days ago). Exercises the provider's own `ev.timestamp < cutoff` gate,
+    # which is the only window enforcement in the test path (the fake ignores from_ts).
+    client.board_events = [_move_event("e1", "2020-01-01T00:00:00.000Z", "task-A", "col-done")]
+    assert provider.recently_closed(days=30) == []
+
+
 def test_validate_fields_passes_for_valid(tmp_path: Path) -> None:
     provider, _ = _provider(tmp_path)
     provider.validate_fields(priority="High", status="Backlog", fields=[("Work Stream", "alpha")])
