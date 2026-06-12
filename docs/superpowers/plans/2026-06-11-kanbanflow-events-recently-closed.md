@@ -16,9 +16,11 @@ This is **Phase 1a** of epic #357 (see `docs/superpowers/specs/2026-06-11-kanban
 
 **Explicitly NOT in this plan** (each planned separately when pulled):
 - **Phase 1b — CLOSED_STATE flip** (`find_orphaned` via Done-membership). Touches `dependency-graph.py` and may add a `@runtime_checkable BoardProvider` method → the atomic-coupling constraint (both provider impls in one commit).
-- **Phase 1c — VELOCITY_TIMESTAMPS flag decision.** Needs per-task `createdAt`/activity reconstruction across all open items **and** the event-retention ceiling (Task 4 records the first observation). The `VELOCITY_TIMESTAMPS` flag is **not** flipped in this plan; `recently_closed` returning data is independent of the flag (no surface gates `recently_closed` on it — verified by grep: the five gates are all created-at/activity surfaces).
+- **Phase 1c — VELOCITY_TIMESTAMPS flag decision.** Needs per-task `createdAt`/activity reconstruction across all open items **and** the event-retention ceiling (Task 4 records the first observation). The `VELOCITY_TIMESTAMPS` flag is **not** flipped in this plan.
 
-**Per-capability outcome of this plan:** no `_OMITTED_CAPABILITIES` change. `recently_closed` ships real data; the capability declaration is untouched.
+**Per-capability outcome of this plan:** no `_OMITTED_CAPABILITIES` change. `recently_closed` ships real data — but it is **dormant**: its only production consumer, the next-session-prompt "Recently closed" section (`skills/jared/scripts/jared:1190`), *also* gates on `VELOCITY_TIMESTAMPS`, so on KanbanFlow it shows the degraded note and never calls `recently_closed` until the flag flips (Phase 1b/1c). Phase 1a is correct foundational plumbing, not a user-visible KanbanFlow change.
+
+> **Correction (Phase 1a final review):** an earlier draft of this plan claimed "no surface gates `recently_closed` on [VELOCITY_TIMESTAMPS]." That was wrong — the grep behind it used `--include=*.py` and missed the extension-less `jared` CLI entry point, where the recently-closed section is a 6th VELOCITY_TIMESTAMPS gate. The spec's §6 Phase-1c design note records the un-gating decision this creates.
 
 ## File Structure
 
@@ -527,10 +529,9 @@ print('windowed event count (expect a small subset):', len(narrow))
 
 Expected: a strict subset of the full history. **If the count equals the full history**, the server ignores ISO `from`/`to` → record that `get_board_events` must rely on client-side timestamp filtering (already present in `recently_closed`) and note the format question for Phase 1c. **Either outcome is acceptable for this plan** — `recently_closed` already filters client-side defensively.
 
-- [ ] **Step 3: Confirm the integration surface**
+- [ ] **Step 3: Confirm the consumer is gated (dormancy), not the data**
 
-Run: `source /home/brockamer/.secrets && /home/brockamer/Code/jared/skills/jared/scripts/jared next-session-prompt` **against a KanbanFlow-backed `docs/project-board.md`** (the test board), and confirm the "Recently closed" section is now populated rather than empty.
-Expected: at least the `1eTJRipf` close appears (or however the test board stands at run time).
+The next-session-prompt "Recently closed" section gates on `VELOCITY_TIMESTAMPS` (`jared:1190`), which KanbanFlow omits — so the CLI would show the *degraded note*, not the data, even though `recently_closed` now works. Confirm the dormancy at the provider level instead (Step 1 already does): the data is correct-but-dormant until Phase 1b/1c un-gates the section. **Do not** expect `jared next-session-prompt` to surface the close on KanbanFlow in Phase 1a.
 
 - [ ] **Step 4: Record findings in the spec**
 

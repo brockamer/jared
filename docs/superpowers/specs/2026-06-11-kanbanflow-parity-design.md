@@ -103,14 +103,24 @@ build phases inherit, not to be re-derived:
 - **CLOSED_STATE → flips (clean, cheap, not retention-dependent).** Its only consumer,
   `find_orphaned`, needs closed-or-not; route that through Done-membership on KanbanFlow.
   The impossible orthogonal-closed flag stays a documented, *unused* limit.
-- **VELOCITY_TIMESTAMPS → `recently_closed` ships real data; flag flip is CONTINGENT.**
-  Building `recently_closed` delivers value (next-session-prompt "Recently closed";
-  velocity inputs) but clears **none** of the five gated surfaces — they need per-task
-  `createdAt`/activity reconstructed from the event log, which is (a) more build and (b)
-  retention-ceiling-dependent. The flag flips **only if** a retention probe confirms the
-  ceiling covers the aging windows (sweep default 14d; audit default-staleness clamp
-  `[14,60]`). **If retention is insufficient, `recently_closed` value still ships, the flag
-  stays omitted, and its note is refined** — the epic does *not* promise this flip.
+- **VELOCITY_TIMESTAMPS → `recently_closed` ships real data, but DORMANT; flag flip is
+  CONTINGENT.** Building `recently_closed` does the plumbing, but its only production
+  consumer — the next-session-prompt "Recently closed" section (`skills/jared/scripts/jared:1190`)
+  — *also* gates on VELOCITY_TIMESTAMPS, so on KanbanFlow it stays suppressed (shows the
+  degraded note, never calls `recently_closed`) until the flag flips. The data is
+  correct-but-dormant. And the flip clears **none** of the five aging gates by itself — they
+  need per-task `createdAt`/activity reconstructed from the event log, which is (a) more build
+  and (b) retention-ceiling-dependent. The flag flips **only if** a retention probe confirms
+  the ceiling covers the aging windows (sweep default 14d; audit default-staleness clamp
+  `[14,60]`). **If retention is insufficient, the flag stays omitted with a refined note** —
+  the epic does *not* promise this flip.
+  - **Phase 1c design note (discovered in the Phase 1a final review):** the recently-closed
+    section needs only *closed-at* (which works after Phase 1a), not *created-at*, yet it gates
+    on the created-at/aging flag VELOCITY_TIMESTAMPS. This is the coarse-flag tension in the
+    flesh. Phase 1c should decide whether to un-gate that section on a *closed-at* signal
+    (CLOSED_STATE, which flips cleanly in Phase 1b) independently of the created-at/aging flip —
+    so the dormant `recently_closed` data surfaces as soon as Phase 1b lands, without waiting on
+    the retention-gated VELOCITY flip.
 - **NATIVE_DEPENDENCIES → stays omitted; note refined.** Read wired (native
   `dependsOn`/`requiredBy` merged + reconciled vs `blocked-by:<N>` labels); writes remain
   label-only (no API). New note: *blocked-by writes are label markers; native relations are
@@ -186,8 +196,10 @@ value anchor; Phase 5 (MCP) is the heaviest and gets its own sub-spec.
    `kanbanflow_provider.py`'s capability declaration reflects the outcome.
 2. **No `degraded:` note overstates the actual loss** (asserted in Phase 6; the MARKDOWN_BODY
    correction is the canonical example).
-3. `recently_closed()` returns real data on KanbanFlow, **live-verified on `p9vK6cR`**;
-   next-session-prompt's "Recently closed" is populated.
+3. `recently_closed()` returns real data on KanbanFlow, **live-verified on `p9vK6cR`**. (The
+   next-session-prompt "Recently closed" section that would surface it *also* gates on
+   VELOCITY_TIMESTAMPS, so it stays dormant until Phase 1b/1c un-gates it — Phase 1a delivers
+   correct plumbing, not yet a user-visible change. See §6 Phase-1c design note.)
 4. CLOSED_STATE flips: `find_orphaned` works on KanbanFlow via Done-membership.
 5. Native `dependsOn`/`requiredBy` relations are read into the dependency graph and reconciled
    against label markers.
@@ -244,4 +256,7 @@ Run after Phase 1a code landed, via the real client+provider (not the fake):
   flag flip stays retention-gated for Phase 1c.
 - **next-session-prompt integration** was not exercised against a KanbanFlow-backed
   `docs/project-board.md` (none is configured), but the provider call it depends on
-  (`recently_closed`) is verified above.
+  (`recently_closed`) is verified above. Note (from the Phase 1a final review): even with a KF
+  board configured, the "Recently closed" section would currently show the *degraded note*, not
+  the data — it gates on VELOCITY_TIMESTAMPS (`jared:1190`), which KanbanFlow omits. So the new
+  `recently_closed` data is correct-but-dormant until Phase 1b/1c un-gates that section (§6).
