@@ -187,6 +187,28 @@ class KfUser:
     name: str = ""
 
 
+@dataclass
+class KfChangedProperty:
+    property: str
+    old_value: str | None = None
+    new_value: str | None = None
+
+
+@dataclass
+class KfDetailedEvent:
+    event_type: str
+    task_id: str | None = None
+    changed_properties: list[KfChangedProperty] = field(default_factory=list)
+
+
+@dataclass
+class KfEvent:
+    id: str
+    timestamp: str
+    user_id: str = ""
+    detailed_events: list[KfDetailedEvent] = field(default_factory=list)
+
+
 def _parse_label(raw: dict[str, Any]) -> KfLabel:
     return KfLabel(name=str(raw["name"]), pinned=bool(raw.get("pinned", False)))
 
@@ -275,6 +297,33 @@ def _parse_relation(raw: dict[str, Any]) -> KfRelation:
 
 def _parse_user(raw: dict[str, Any]) -> KfUser:
     return KfUser(id=str(raw["_id"]), name=str(raw.get("name", "")))
+
+
+def _parse_changed_property(raw: dict[str, Any]) -> KfChangedProperty:
+    return KfChangedProperty(
+        property=str(raw.get("property", "")),
+        old_value=str(raw["oldValue"]) if raw.get("oldValue") is not None else None,
+        new_value=str(raw["newValue"]) if raw.get("newValue") is not None else None,
+    )
+
+
+def _parse_detailed_event(raw: dict[str, Any]) -> KfDetailedEvent:
+    return KfDetailedEvent(
+        event_type=str(raw.get("eventType", "")),
+        task_id=str(raw["taskId"]) if raw.get("taskId") is not None else None,
+        changed_properties=[
+            _parse_changed_property(cp) for cp in raw.get("changedProperties", [])
+        ],
+    )
+
+
+def _parse_event(raw: dict[str, Any]) -> KfEvent:
+    return KfEvent(
+        id=str(raw.get("_id", "")),
+        timestamp=str(raw.get("timestamp", "")),
+        user_id=str(raw.get("userId", "")),
+        detailed_events=[_parse_detailed_event(de) for de in raw.get("detailedEvents", [])],
+    )
 
 
 class KanbanFlowClient:
@@ -542,6 +591,57 @@ class KanbanFlowClient:
     def get_relations(self, task_id: str) -> list[KfRelation]:
         raw = self._request("GET", f"/tasks/{task_id}/relations")
         return [_parse_relation(r) for r in raw]  # type: ignore[attr-defined]
+
+    def get_board_events(
+        self,
+        *,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+        limit: int = 100,
+        order: str = "descending",
+        max_pages: int = 20,
+    ) -> list[KfEvent]:
+        """Read board event history (GET /board/events).
+
+        Returns events newest-first for order='descending' (the default). The
+        endpoint has no cursor — when the response sets `eventsLimited`, this walks
+        the time window backward by setting `to` to the oldest event seen, bounded
+        by `from_ts` (server-side floor) and `max_pages` (safety cap). Backward
+        paging is performed ONLY for order='descending'; any other order returns a
+        single page (the `to`-walk is descending-only by construction). Events are
+        de-duplicated by id across the page seam, so an inclusive `to` bound cannot
+        double-count the boundary event. The `{eventsLimited, events}` envelope
+        shape is confirmed live on p9vK6cR.
+        """
+        out: list[KfEvent] = []
+        seen: set[str] = set()
+        window_to = to_ts
+        for _ in range(max_pages):
+            params: dict[str, object] = {
+                "from": from_ts,
+                "to": window_to,
+                "limit": limit,
+                "order": order,
+            }
+            raw = self._request("GET", "/board/events", params=params)
+            if not isinstance(raw, dict):
+                break
+            batch = [_parse_event(e) for e in (raw.get("events") or [])]
+            for ev in batch:
+                if ev.id and ev.id in seen:
+                    continue
+                if ev.id:
+                    seen.add(ev.id)
+                out.append(ev)
+            # Backward paging is descending-only: `to=oldest` walks toward the past.
+            if not raw.get("eventsLimited") or not batch or order != "descending":
+                break
+            # Timestamps are ISO-8601 UTC 'Z' strings; lexical order == chronological.
+            oldest = min((e.timestamp for e in batch if e.timestamp), default=None)
+            if oldest is None or oldest == window_to:
+                break
+            window_to = oldest
+        return out
 
     def _budget_gate(self) -> None:
         if self._daily_count >= self._daily_ceiling:

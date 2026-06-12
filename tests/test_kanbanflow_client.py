@@ -645,3 +645,173 @@ def test_update_task_follows_up_with_get_after_null_post(monkeypatch: pytest.Mon
     assert methods == ["POST", "GET"], (
         "update_task must POST to /tasks/{id} then GET the updated task"
     )
+
+
+def test_parse_event_maps_nested_shape() -> None:
+    raw = {
+        "_id": "Nn1Xdp",
+        "timestamp": "2026-06-05T13:20:56.216Z",
+        "userId": "u-1",
+        "detailedEvents": [
+            {
+                "eventType": "taskChanged",
+                "taskId": "1eTJRipf",
+                "changedProperties": [
+                    {"property": "columnId", "oldValue": "col-inprog", "newValue": "col-done"}
+                ],
+            }
+        ],
+    }
+    ev = kf._parse_event(raw)
+    assert ev.id == "Nn1Xdp"
+    assert ev.timestamp == "2026-06-05T13:20:56.216Z"
+    assert ev.user_id == "u-1"
+    assert len(ev.detailed_events) == 1
+    de = ev.detailed_events[0]
+    assert de.event_type == "taskChanged"
+    assert de.task_id == "1eTJRipf"
+    assert de.changed_properties[0].property == "columnId"
+    assert de.changed_properties[0].old_value == "col-inprog"
+    assert de.changed_properties[0].new_value == "col-done"
+
+
+def test_parse_event_taskcreated_has_no_changed_properties() -> None:
+    ev = kf._parse_event(
+        {
+            "_id": "e2",
+            "timestamp": "t",
+            "detailedEvents": [{"eventType": "taskCreated", "taskId": "x"}],
+        }
+    )
+    assert ev.detailed_events[0].changed_properties == []
+    assert ev.user_id == ""
+
+
+def test_get_board_events_single_call_returns_parsed_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = json.dumps(
+        {
+            "eventsLimited": False,
+            "events": [
+                {
+                    "_id": "e1",
+                    "timestamp": "2026-06-05T13:20:56.216Z",
+                    "detailedEvents": [
+                        {
+                            "eventType": "taskChanged",
+                            "taskId": "t1",
+                            "changedProperties": [
+                                {"property": "columnId", "oldValue": "a", "newValue": "b"}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    calls = patch_kf(monkeypatch, status=200, body=body)
+    events = _client().get_board_events(limit=100, order="descending")
+    assert len(events) == 1
+    assert events[0].id == "e1"
+    assert events[0].detailed_events[0].changed_properties[0].new_value == "b"
+    assert "/board/events" in cast(str, calls[0]["url"])
+    assert "limit=100" in cast(str, calls[0]["url"])
+    assert "order=descending" in cast(str, calls[0]["url"])
+
+
+def test_get_board_events_pages_backward_when_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seq: list[tuple[int, dict[str, str], bytes]] = [
+        (
+            200,
+            {},
+            json.dumps(
+                {
+                    "eventsLimited": True,
+                    "events": [
+                        {
+                            "_id": "e2",
+                            "timestamp": "2026-06-05T13:00:00.000Z",
+                            "detailedEvents": [],
+                        },
+                        {
+                            "_id": "e1",
+                            "timestamp": "2026-06-05T12:00:00.000Z",
+                            "detailedEvents": [],
+                        },
+                    ],
+                }
+            ).encode(),
+        ),
+        (
+            200,
+            {},
+            json.dumps(
+                {
+                    "eventsLimited": False,
+                    "events": [
+                        {"_id": "e0", "timestamp": "2026-06-05T11:00:00.000Z", "detailedEvents": []}
+                    ],
+                }
+            ).encode(),
+        ),
+    ]
+    urls: list[str] = []
+
+    def fake(
+        method: str, url: str, headers: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        urls.append(url)
+        return seq.pop(0)
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    events = _client().get_board_events(order="descending")
+    assert [e.id for e in events] == ["e2", "e1", "e0"]
+    assert len(urls) == 2
+    assert "to=2026-06-05T12%3A00%3A00.000Z" in urls[1] or "to=2026-06-05T12:00:00.000Z" in urls[1]
+
+
+def test_get_board_events_respects_max_pages_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    counter = {"n": 0}
+
+    def fake(
+        method: str, url: str, headers: dict[str, str], data: bytes | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        counter["n"] += 1
+        hour = 20 - counter["n"]  # strictly-decreasing oldest so paging keeps advancing
+        body = json.dumps(
+            {
+                "eventsLimited": True,
+                "events": [
+                    {
+                        "_id": f"e{counter['n']}",
+                        "timestamp": f"2026-06-05T{hour:02d}:00:00.000Z",
+                        "detailedEvents": [],
+                    }
+                ],
+            }
+        ).encode()
+        return (200, {}, body)
+
+    monkeypatch.setattr(kf, "_raw_http", fake)
+    events = _client().get_board_events(order="descending", max_pages=3)
+    assert counter["n"] == 3
+    assert len(events) == 3
+
+
+def test_get_board_events_ascending_does_not_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = patch_kf(
+        monkeypatch,
+        status=200,
+        body=json.dumps(
+            {
+                "eventsLimited": True,
+                "events": [{"_id": "e1", "timestamp": "t", "detailedEvents": []}],
+            }
+        ),
+    )
+    events = _client().get_board_events(order="ascending")
+    assert len(events) == 1
+    assert len(calls) == 1  # no backward paging for non-descending order

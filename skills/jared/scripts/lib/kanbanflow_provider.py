@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from .board import FieldNotFound, ItemNotFound, OptionNotFound
@@ -22,6 +23,7 @@ from .kanbanflow_client import (
     KfBoard,
     KfComment,
     KfCustomFieldDef,
+    KfEvent,
     KfLabel,
     KfTask,
     KfUser,
@@ -65,6 +67,14 @@ class KanbanFlowClientLike(Protocol):
     def get_board(self) -> KfBoard: ...
     def list_custom_field_defs(self) -> list[KfCustomFieldDef]: ...
     def iter_all_tasks(self) -> list[KfTask]: ...
+    def get_board_events(
+        self,
+        *,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+        limit: int = 100,
+        order: str = "descending",
+    ) -> list[KfEvent]: ...
     def get_task(self, task_id: str) -> KfTask: ...
     def create_task(
         self,
@@ -285,10 +295,61 @@ class KanbanFlowProvider:
         return edges
 
     def recently_closed(self, *, days: int) -> list[ClosedItem]:
-        # KanbanFlow exposes no reliable moved-to-Done timestamp
-        # (VELOCITY_TIMESTAMPS omitted). Degrade to empty; Phase 6 gates callers
-        # on the capability.
-        return []
+        """Closed items = tasks whose most recent move INTO the Done column
+        falls within the `days` window.
+
+        Scans GET /board/events (descending) for changedProperties columnId
+        transitions whose newValue is the Done column (resolved via the Status
+        column map). Each task's most-recent move-into-Done maps to a ClosedItem;
+        the task's number/title come from the live task set, so a deleted task
+        (history outlives the task) is skipped.
+
+        Asymmetry vs GitHub: GitHub's recently_closed reflects CURRENT closed
+        state, so a reopened issue drops out. This KanbanFlow version keys off the
+        move-into-Done event and does NOT check for a later move back out — a task
+        moved to Done then reopened still appears (with its Done timestamp). That
+        is acceptable for velocity / recently-closed surfaces, which care about
+        the close event, not current state.
+
+        No truncation guard: get_board_events pages up to max_pages*limit events;
+        a window exceeding that silently truncates (the GitHub sibling raises at
+        its 200-item cap). Acceptable while no caller drives large windows on
+        KanbanFlow; revisit if a high-traffic board surfaces.
+        """
+        done_col_id = self._column_id_by_status.get("Done")
+        if done_col_id is None:
+            return []
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        events = self._client.get_board_events(from_ts=cutoff, order="descending", limit=100)
+        task_by_id = {t.id: t for t in self._client.iter_all_tasks()}
+        seen: set[str] = set()
+        out: list[ClosedItem] = []
+        for ev in events:  # descending → first move-into-Done per task is the most recent
+            if ev.timestamp and ev.timestamp < cutoff:
+                continue
+            for de in ev.detailed_events:
+                tid = de.task_id
+                if not tid or tid in seen:
+                    continue
+                moved_to_done = any(
+                    cp.property == "columnId" and cp.new_value == done_col_id
+                    for cp in de.changed_properties
+                )
+                if not moved_to_done:
+                    continue
+                task = task_by_id.get(tid)
+                if task is not None and task.number_value is not None:
+                    out.append(
+                        ClosedItem(
+                            number=task.number_value,
+                            title=task.name,
+                            closed_at=ev.timestamp,
+                        )
+                    )
+                seen.add(tid)
+        return out
 
     def _user_name(self, user_id: str) -> str:
         if not hasattr(self, "_user_name_by_id"):
