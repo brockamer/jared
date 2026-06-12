@@ -8,6 +8,12 @@ import pytest
 
 from skills.jared.scripts.lib.board import FieldNotFound, OptionNotFound
 from skills.jared.scripts.lib.board_provider import BoardProvider
+from skills.jared.scripts.lib.kanbanflow_client import (
+    KfChangedProperty,
+    KfDetailedEvent,
+    KfEvent,
+    KfTask,
+)
 from skills.jared.scripts.lib.kanbanflow_provider import KanbanFlowProvider
 from skills.jared.scripts.lib.kf_number_index import KfNumberIndex
 from tests.fake_kanbanflow import FakeKanbanFlowClient
@@ -103,10 +109,60 @@ def test_fetch_blocked_by_edges_parses_labels(tmp_path: Path) -> None:
     assert sorted((e.dependent, e.blocker) for e in edges) == [(10, 3), (10, 4)]
 
 
-def test_recently_closed_is_empty_degraded(tmp_path: Path) -> None:
+def _move_event(ev_id: str, ts: str, task_id: str, new_col: str) -> KfEvent:
+    return KfEvent(
+        id=ev_id,
+        timestamp=ts,
+        detailed_events=[
+            KfDetailedEvent(
+                event_type="taskChanged",
+                task_id=task_id,
+                changed_properties=[
+                    KfChangedProperty(
+                        property="columnId", old_value="col-inprog", new_value=new_col
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def test_recently_closed_maps_columnid_into_done(tmp_path: Path) -> None:
     provider, client = _provider(tmp_path)
-    client.create_task(name="done", column_id="col-done", number_value=1)
-    assert provider.recently_closed(days=7) == []
+    client.tasks["task-A"] = KfTask(
+        id="task-A", name="Closed thing", column_id="col-done", number_value=7
+    )
+    client.board_events = [_move_event("e1", "2026-06-05T13:20:56.216Z", "task-A", "col-done")]
+    closed = provider.recently_closed(days=36500)  # wide window: exercise mapping, not cutoff
+    assert len(closed) == 1
+    assert closed[0].number == 7
+    assert closed[0].title == "Closed thing"
+    assert closed[0].closed_at == "2026-06-05T13:20:56.216Z"
+
+
+def test_recently_closed_most_recent_move_wins(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.tasks["task-A"] = KfTask(id="task-A", name="T", column_id="col-done", number_value=7)
+    client.board_events = [
+        _move_event("e2", "2026-06-05T15:00:00.000Z", "task-A", "col-done"),
+        _move_event("e1", "2026-06-05T13:00:00.000Z", "task-A", "col-done"),
+    ]
+    closed = provider.recently_closed(days=36500)
+    assert len(closed) == 1
+    assert closed[0].closed_at == "2026-06-05T15:00:00.000Z"
+
+
+def test_recently_closed_skips_moves_into_non_done(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.tasks["task-A"] = KfTask(id="task-A", name="T", column_id="col-inprog", number_value=7)
+    client.board_events = [_move_event("e1", "2026-06-05T13:00:00.000Z", "task-A", "col-inprog")]
+    assert provider.recently_closed(days=36500) == []
+
+
+def test_recently_closed_skips_unresolvable_task(tmp_path: Path) -> None:
+    provider, client = _provider(tmp_path)
+    client.board_events = [_move_event("e1", "2026-06-05T13:00:00.000Z", "ghost", "col-done")]
+    assert provider.recently_closed(days=36500) == []
 
 
 def test_validate_fields_passes_for_valid(tmp_path: Path) -> None:
