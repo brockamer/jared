@@ -295,13 +295,26 @@ class KanbanFlowProvider:
         return edges
 
     def recently_closed(self, *, days: int) -> list[ClosedItem]:
-        """Closed items = tasks whose most recent event is a move into Done.
+        """Closed items = tasks whose most recent move INTO the Done column
+        falls within the `days` window.
 
         Scans GET /board/events (descending) for changedProperties columnId
         transitions whose newValue is the Done column (resolved via the Status
-        column map), within the `days` window. Maps each task's most-recent
-        such move to a ClosedItem; the task's number/title come from the live
-        task set, so a deleted task (history outlives the task) is skipped.
+        column map). Each task's most-recent move-into-Done maps to a ClosedItem;
+        the task's number/title come from the live task set, so a deleted task
+        (history outlives the task) is skipped.
+
+        Asymmetry vs GitHub: GitHub's recently_closed reflects CURRENT closed
+        state, so a reopened issue drops out. This KanbanFlow version keys off the
+        move-into-Done event and does NOT check for a later move back out — a task
+        moved to Done then reopened still appears (with its Done timestamp). That
+        is acceptable for velocity / recently-closed surfaces, which care about
+        the close event, not current state.
+
+        No truncation guard: get_board_events pages up to max_pages*limit events;
+        a window exceeding that silently truncates (the GitHub sibling raises at
+        its 200-item cap). Acceptable while no caller drives large windows on
+        KanbanFlow; revisit if a high-traffic board surfaces.
         """
         done_col_id = self._column_id_by_status.get("Done")
         if done_col_id is None:
@@ -313,7 +326,7 @@ class KanbanFlowProvider:
         task_by_id = {t.id: t for t in self._client.iter_all_tasks()}
         seen: set[str] = set()
         out: list[ClosedItem] = []
-        for ev in events:  # descending → first move per task is the most recent
+        for ev in events:  # descending → first move-into-Done per task is the most recent
             if ev.timestamp and ev.timestamp < cutoff:
                 continue
             for de in ev.detailed_events:
