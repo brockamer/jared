@@ -17,6 +17,7 @@ from skills.jared.scripts.lib.kanbanflow_client import (
     KfComment,
     KfCustomFieldDef,
     KfCustomFieldValue,
+    KfEvent,
     KfLabel,
     KfSwimlane,
     KfTask,
@@ -65,6 +66,7 @@ class FakeKanbanFlowClient:
         self.tasks: dict[str, KfTask] = {}
         self.comments: dict[str, list[KfComment]] = {}
         self.users: list[KfUser] = []
+        self.board_events: list[KfEvent] = []
         self._next_id = 0
         self.fail_set_custom_field = False
 
@@ -80,6 +82,16 @@ class FakeKanbanFlowClient:
 
     def iter_all_tasks(self) -> list[KfTask]:
         return list(self.tasks.values())
+
+    def get_board_events(
+        self,
+        *,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+        limit: int = 100,
+        order: str = "descending",
+    ) -> list[KfEvent]:
+        return list(self.board_events)
 
     def get_task(self, task_id: str) -> KfTask:
         if task_id not in self.tasks:
