@@ -19,6 +19,8 @@ from typing import Any
 # types are still enforced inside lib.board.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
+from lib import worktree as _worktree  # noqa: E402
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     Board,
     BoardConfigError,
@@ -48,8 +50,6 @@ from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E40
     FileRoundTripError,
     IssueResolutionError,
 )
-from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
-from lib import worktree as _worktree  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _normalize_priority(s: str) -> str:
@@ -449,17 +449,31 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     migrate_p.add_argument(
-        "--to", required=True, choices=["github", "kanbanflow"],
+        "--to",
+        required=True,
+        choices=["github", "kanbanflow"],
         help="Target backend. Must differ from the source (current) backend.",
     )
     migrate_p.add_argument(
-        "--target-doc", required=True,
-        help="Path to the target backend's project-board.md (produced by `jared init` on the target).",
+        "--target-doc",
+        required=True,
+        help=(
+            "Path to the target backend's project-board.md "
+            "(produced by `jared init` on the target)."
+        ),
     )
-    migrate_p.add_argument("--apply", action="store_true", help="Perform writes (default: dry-run).")
-    migrate_p.add_argument("--include-closed", action="store_true", help="Also migrate Done/closed items.")
-    migrate_p.add_argument("--out", default=None, help="Path for the run artifact / resume ledger (JSON).")
-    migrate_p.add_argument("--yes", action="store_true", help="Skip the interactive confirmation on --apply.")
+    migrate_p.add_argument(
+        "--apply", action="store_true", help="Perform writes (default: dry-run)."
+    )
+    migrate_p.add_argument(
+        "--include-closed", action="store_true", help="Also migrate Done/closed items."
+    )
+    migrate_p.add_argument(
+        "--out", default=None, help="Path for the run artifact / resume ledger (JSON)."
+    )
+    migrate_p.add_argument(
+        "--yes", action="store_true", help="Skip the interactive confirmation on --apply."
+    )
     migrate_p.set_defaults(func=_cmd_migrate)
 
     return parser
@@ -469,7 +483,7 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     item = board.provider.get_item(args.issue_number)
     if item is None or not item.provider_ref:
-        from lib.board import ItemNotFound  # type: ignore[import-not-found]
+        from lib.board import ItemNotFound
 
         raise ItemNotFound(
             f"No project item for issue #{args.issue_number} in project "
@@ -834,7 +848,11 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
         "native blocked-by edges",
         "NATIVE_DEPENDENCIES not supported on this backend",
     )
-    suffix = " (label emulation — NATIVE_DEPENDENCIES not supported on this backend)" if native_absent else ""
+    suffix = (
+        " (label emulation — NATIVE_DEPENDENCIES not supported on this backend)"
+        if native_absent
+        else ""
+    )
     print(f"OK: {action} blocked-by edge #{args.dependent} <- #{args.blocker}{suffix}")
     return 0
 
@@ -1026,7 +1044,11 @@ def _fetch_board_items(board: Board) -> list[BoardItem]:
     Closed items in the handoff come from `_fetch_recently_closed`, which
     runs separately.
     """
-    return board.provider.list_open_items()
+    # Bind through a typed local: `lib.board` is deliberately unresolvable to mypy
+    # (the CLI puts scripts/ on sys.path at runtime; adding it to mypy_path makes
+    # board.py resolve under two module names), so provider results arrive as Any.
+    items: list[BoardItem] = board.provider.list_open_items()
+    return items
 
 
 def _detect_stuck_closed_recent(board: Board, *, days: int) -> list[dict[str, Any]]:
@@ -1117,7 +1139,8 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[ClosedItem]:
     `_fetch_recently_closed(board, days=N)` signature; the gh call and
     truncation guard now live in GitHubProjectsProvider.recently_closed.
     """
-    return board.provider.recently_closed(days=days)
+    closed: list[ClosedItem] = board.provider.recently_closed(days=days)
+    return closed
 
 
 def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
@@ -1364,7 +1387,7 @@ def _cmd_ties(args: argparse.Namespace) -> int:
 
 
 def _cmd_audit_fetch(args: argparse.Namespace) -> int:
-    from lib.board import fetch_audit_window  # type: ignore[import-not-found]
+    from lib.board import fetch_audit_window
 
     board = _load_board(args.board)
 
@@ -1458,9 +1481,7 @@ def _cmd_session_lock_write(args: argparse.Namespace) -> int:
 
     repo_root = Path(args.repo_root).resolve()
     started = (
-        datetime.datetime.now(datetime.timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
+        datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
     lock = session_lock.Lock(
         pid=os.getpid(),
@@ -1612,7 +1633,7 @@ def _cmd_wrap_state(args: argparse.Namespace) -> int:
         pr_state = PrState(
             exists=True,
             pr_number=pr_payload.get("number"),
-            checks_status=checks_status,  # type: ignore[arg-type]
+            checks_status=checks_status,
             mergeable=mergeable,
             merged=(pr_payload.get("state") == "MERGED"),
             merge_state_status=pr_payload.get("mergeStateStatus"),
@@ -1966,7 +1987,11 @@ def _apply_migration(
 
 
 def _cmd_migrate(args: argparse.Namespace) -> int:
-    from lib.migrate import compute_loss_axes, estimate_kf_calls, render_report  # type: ignore[import-not-found]
+    from lib.migrate import (
+        compute_loss_axes,
+        estimate_kf_calls,
+        render_report,
+    )
 
     source_board = _load_board(args.board)
     if args.to == source_board.backend:

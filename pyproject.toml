@@ -23,6 +23,10 @@ packages = []
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# The CLI entry point is extension-less, so ruff's directory walk (*.py/*.pyi)
+# skips it. Without this, `ruff check .` / `ruff format .` silently ignore the
+# most-invoked file in the repo.
+extend-include = ["skills/jared/scripts/jared"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
@@ -30,7 +34,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["skills/jared/scripts", "tests"]
+files = ["skills/jared/scripts", "skills/jared/scripts/jared", "tests"]
 exclude = ["skills/jared/scripts/__pycache__"]
 explicit_package_bases = true
 mypy_path = "."
