@@ -311,9 +311,7 @@ def _parse_detailed_event(raw: dict[str, Any]) -> KfDetailedEvent:
     return KfDetailedEvent(
         event_type=str(raw.get("eventType", "")),
         task_id=str(raw["taskId"]) if raw.get("taskId") is not None else None,
-        changed_properties=[
-            _parse_changed_property(cp) for cp in raw.get("changedProperties", [])
-        ],
+        changed_properties=[_parse_changed_property(cp) for cp in raw.get("changedProperties", [])],
     )
 
 
