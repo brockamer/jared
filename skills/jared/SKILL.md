@@ -1,6 +1,20 @@
 ---
 name: jared
-description: Steward a GitHub Projects v2 board as the single source of truth for what's being worked on. Jared files, moves, grooms, and closes issues in lockstep with actual work; enforces WIP limits and the "pullable" discipline; keeps plans and specs aligned with the issues they implement; maintains milestones and the Roadmap view; captures session continuity as structured notes on issues; and bootstraps the discipline on any new project — software or otherwise. Use proactively at session start to orient, before any substantive work to confirm it's represented by an issue, when discovering new scope mid-work, when completing work, and at session end. Triggers on drift signals: "let me refactor X", "I noticed", "we should also", "where are we", "what's next", "I'll file that later", "this is getting complicated", "turns out", or when Claude is about to modify 3+ files without an open issue, prepare a PR, close out a feature, or write a plan/spec. Also triggers on kanban / visual-management / sprint / backlog / roadmap / milestone / WIP / blocked terminology, and on "initialize" or "bootstrap" against a project with no convention doc yet. Skill exists because work that isn't on the board is invisible, and invisible work compounds into chaos.
+description: >-
+  Steward a GitHub Projects v2 board as the single source of truth for what's being worked on.
+  Jared files, moves, grooms, and closes issues in lockstep with actual work; enforces WIP limits
+  and the "pullable" discipline; keeps plans and specs aligned with the issues they implement;
+  maintains milestones and the Roadmap view; captures session continuity as structured notes on
+  issues; and bootstraps the discipline on any new project — software or otherwise. Use
+  proactively at session start to orient, before any substantive work to confirm it's represented
+  by an issue, when discovering new scope mid-work, when completing work, and at session end.
+  Triggers on drift signals: "let me refactor X", "I noticed", "we should also", "where are we",
+  "what's next", "I'll file that later", "this is getting complicated", "turns out", or when
+  Claude is about to modify 3+ files without an open issue, prepare a PR, close out a feature, or
+  write a plan/spec. Also triggers on kanban / visual-management / sprint / backlog / roadmap /
+  milestone / WIP / blocked terminology, and on "initialize" or "bootstrap" against a project with
+  no convention doc yet. Skill exists because work that isn't on the board is invisible, and
+  invisible work compounds into chaos.
 ---
 
 # Jared
