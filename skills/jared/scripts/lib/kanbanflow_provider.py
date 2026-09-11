@@ -319,9 +319,7 @@ class KanbanFlowProvider:
         done_col_id = self._column_id_by_status.get("Done")
         if done_col_id is None:
             return []
-        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat().replace(
-            "+00:00", "Z"
-        )
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat().replace("+00:00", "Z")
         events = self._client.get_board_events(from_ts=cutoff, order="descending", limit=100)
         task_by_id = {t.id: t for t in self._client.iter_all_tasks()}
         seen: set[str] = set()
