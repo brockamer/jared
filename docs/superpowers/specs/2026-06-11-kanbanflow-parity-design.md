@@ -1,9 +1,9 @@
 # KanbanFlow → GitHub capability parity — design (Phase 0 brainstorm output)
 
-- **Issue:** #357 (epic) — "Bring KanbanFlow backend to capability parity with GitHub Projects"
-- **Date:** 2026-06-11
-- **Status:** design approved; per-phase plans to follow (one spec/plan/PR each, per the epic body)
-- **Successor to:** epic #313 (closed) — which shipped KanbanFlow as a deliberately *reduced* backend
+**Issue:** #357 (epic) — "Bring KanbanFlow backend to capability parity with GitHub Projects"
+**Date:** 2026-06-11
+**Status:** design approved; per-phase plans to follow (one spec/plan/PR each, per the epic body)
+**Successor to:** epic #313 (closed) — which shipped KanbanFlow as a deliberately *reduced* backend
 
 ## 1. What this is
 

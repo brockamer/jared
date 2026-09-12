@@ -1,5 +1,6 @@
 # Marketplace-Readiness Review → Stranger-Ready Release
 
+**Issue:** #348
 **Date:** 2026-06-10
 **Status:** Design approved; pending implementation plan
 **Scope:** A top-to-bottom review of the entire `jared` plugin — code, docs, and live
