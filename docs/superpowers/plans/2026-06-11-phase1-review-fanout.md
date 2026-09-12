@@ -110,7 +110,7 @@ As each finder returns, its findings flow into verification without waiting for 
 
 ## Output & exit
 
-- [ ] Ledger updated with all confirmed Phase-1 findings; inventory `covered` markers set; commit + PR (closes #350).
+- [ ] Ledger updated with all confirmed Phase-1 findings; inventory `covered` markers set; commit + PR **referencing** #350. **Never write a closing keyword** (`close`/`closes`/`fixes`) in the PR body — not even negated. GitHub's parser ignored "Does not close #350" and auto-closed the issue on 2026-06-11. Refer to issues as "#N" only.
 - [ ] Session note on #350 summarizing counts by severity and the Phase-3 work-list shape.
 
 **Exit criterion:** every inventory surface is either `covered` with findings or `covered` and clean per the completeness critic — no silent skips.
