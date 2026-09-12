@@ -269,6 +269,16 @@ accuracy / intent / impact for 1c–1f). A finding survives only if fewer than a
 Six findings were severity-corrected **downward** by their verifiers; those are marked. The one finding
 that drew a refuting vote is flagged as a weak survivor rather than presented as equally certain.
 
+**What the verification bar actually was — read this before trusting a severity.** The plan specified
+"keep a finding iff fewer than a majority refute it," and that rule was implemented as written. But with
+**two** verifiers per non-P0 finding, a majority is two — so a single refuting vote never killed anything,
+and the effective bar for 56 of the 57 findings was *"at least one verifier declined to refute."* No
+finding in this set drew a P0's third verifier, because none was rated P0. **F17 is therefore not an
+exception; it is the only case where the rule was actually exercised** — one of its two verifiers refuted
+it and it survived on the tie. Phase 3 should treat the P2 tier in particular as "one reviewer confirmed,
+one reviewer looked" rather than as consensus. Raising the non-P0 verifier count to three would make the
+majority rule bite; that is a change to the plan, not a defect in this run.
+
 **Agent spend: 139 total (80 + 59), against a 55–115 estimate.** The overrun is real and is recorded here
 rather than smoothed over: round 2's five finders returned 24 findings where ~10 were projected, and each
 finding pulls two verifiers.
@@ -277,7 +287,7 @@ finding pulls two verifiers.
 
 Phase 0 recorded **"Version floor ≤ 3.9"** from a clean-room matrix of `py_compile` + `compileall` +
 `jared --help` across 3.9–3.14, all COLD-OK. **That conclusion is wrong**, and Phase 1's 1d finder
-refuted it (see F14): `datetime.UTC` is 3.11-only and is used in `stage.py:20`, `board.py` (7 call sites),
+refuted it (see F13): `datetime.UTC` is 3.11-only and is used in `stage.py:20`, `board.py` (7 call sites),
 `sweep.py` (6 call sites), `github_provider.py:645`, `kanbanflow_provider.py:322` and `jared:1484`.
 
 The probe proved those files **parse** on 3.9; the claim it was used to support was that they **run** on 3.9.
