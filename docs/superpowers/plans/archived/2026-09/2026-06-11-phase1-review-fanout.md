@@ -1,3 +1,7 @@
+---
+**Shipped in #350 on 2026-09-12. Final decisions captured in issue body.**
+---
+
 # Phase 1 — Read-Only Review Fan-Out (Workflow Blueprint)
 
 > **Execution:** this plan runs as a single **Workflow** (the `Workflow` tool), not subagent-driven TDD. It produces *findings appended to the ledger*, not code. Phase 3 fixes them.
