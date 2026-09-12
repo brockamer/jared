@@ -66,7 +66,7 @@ The **findings ledger** accumulates every defect with evidence and disposition.
 ### Plugin metadata (2) — *Phase 1d packaging*
 `.claude-plugin/plugin.json` · `.claude-plugin/marketplace.json`
 
-### Tests (59 files / 21,047 LOC) — *Phase 1e quality audit*
+### Tests (61 files / 21,297 LOC) — *Phase 1e quality audit*
 SKILL.md (`skills/jared/SKILL.md`, 5.4k words) is reviewed under Phase 1c.
 
 ---
@@ -77,11 +77,26 @@ SKILL.md (`skills/jared/SKILL.md`, 5.4k words) is reviewed under Phase 1c.
 | check | result |
 |---|---|
 | `ruff check .` | **PASS** — all checks passed |
-| `ruff format --check .` | **PASS** — 82 files already formatted |
-| `mypy` (`--strict` per pyproject) | **PASS** — no issues in 82 source files |
-| `pytest` (unit) | **PASS** — 890 passed, 3 deselected, 17.9s |
+| `ruff format --check .` | **PASS** — 83 files already formatted |
+| `mypy` (`--strict` per pyproject) | **PASS** — no issues in 83 source files |
+| `pytest` (unit) | **PASS** — 900 passed, 3 deselected, 9.5s |
 
 This is the **regression floor**: any red introduced in Phase 3 is ours.
+
+> **Baseline re-verified 2026-09-11 (commit `10ddbd7`), at the start of Phase 1.** The table above
+> carries the *corrected* counts. The 2026-06-11 recording read 82 files / 890 tests / 59 test files;
+> two PRs merged in the interim moved it to **83 files / 900 tests / 61 test files**, still all-green.
+> The regression floor for Phase 3 is the corrected row, not the original.
+>
+> **Two findings were fixed out-of-band between Phase 0 and Phase 1 — finders must not re-file them:**
+> - `dc8dbb0` — the extension-less CLI entry point `skills/jared/scripts/jared` was skipped by ruff's
+>   and mypy's directory walks; all gates reported clean while the file carried 9 ruff + 7 mypy errors.
+>   Fixed via `[tool.ruff] extend-include` + an explicit path in `[tool.mypy] files` (82 → 83 files).
+> - `a787145` — `skills/jared/SKILL.md` frontmatter was not valid YAML.
+>
+> **One Phase-0 gotcha is now stale:** the note that board ops need `env -u GH_TOKEN` because the
+> VM's PAT lacks `project` scope no longer holds on this machine — the active token carries `project`
+> and every board op in this session succeeded with it set.
 
 ### Live integration baseline — both backends
 | backend | test | result |
