@@ -1,4 +1,10 @@
+---
+**Shipped in #359 on 2026-06-12. Final decisions captured in issue body.**
+---
+
 # KanbanFlow event-history client + `recently_closed` — Implementation Plan
+
+**Issue:** #359
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
