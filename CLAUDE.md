@@ -150,6 +150,23 @@ Main is protected — every substantive change lands via a PR (`gh pr create` �
 - **Phase-numbered commits.** When implementing from a plan with explicit phases, prefix commits with `(Phase N.M)`: e.g., `feat(jared): wire next-session-prompt CLI (Phase 3.2)`. Preserves the phase trail when squashing isn't used.
 - **Merge strategy is `--merge`, not squash or rebase.** Preserves the phase-by-phase commit trail on main — git archaeology depends on it (e.g., v0.2.0's merge commit walks back through 33 phase commits).
 - **Parallel sessions must use git worktrees**, not `git checkout -b` in the shared repo — the shared `.git/HEAD` is the trap. See `skills/jared/references/parallel-sessions.md`.
+- **Never pair a closing keyword with a literal issue number in a commit message or PR body.** GitHub's
+  parser reads *both* surfaces on merge to `main`, and it honours neither negation, nor quotation, nor
+  backticks. This has fired twice on #350: once from a PR body reading "Does not clo&#115;e" plus the
+  number (2026-06-11), and once from commit `60ccc9e` (2026-09-12) whose message *quoted the keyword while
+  explaining the first incident*. Refer to issues as `#N` only; to describe a keyword, name it
+  ("a closing keyword paired with the issue number") rather than writing it beside digits. Check both
+  surfaces **before `git commit`**, not before `gh pr create` — by PR time the payload is already in
+  history:
+
+  ```bash
+  grep -nEi '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b[[:space:]]*:?[[:space:]]*#[0-9]'
+  ```
+
+  `docs/project-board.md` § "GitHub-side automation" has carried this rule for commit bodies since #156;
+  it is repeated here because that file is not loaded into a session by default and CLAUDE.md is. The
+  risk is structural in this repo, not incidental — an epic about *closing* issues and *fixing* findings
+  uses those words as ordinary prose on every line.
 
 ## Multi-session work — `--session N` opt-in
 
