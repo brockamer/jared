@@ -239,5 +239,6 @@ The bullet stays set on this board when the PR merges. The operator's stated def
 2. Config surfaces — `docs/project-board.md`, the template, `bootstrap-project.py`.
 3. The nine stubs — line-5 branch plus per-instruction void sentences.
 4. `SKILL.md` and `voice.md` pointers; F58 and F59 as a separate commit.
-5. Verification runs, Joplin fixture note, CHANGELOG entry.
-6. PR.
+5. Verification runs, Joplin fixture note.
+6. PR. (No CHANGELOG entry in this PR: CLAUDE.md § Versioning lands the CHANGELOG line in
+   the release PR that ships the tag, and `jared groom` backstops it.)
