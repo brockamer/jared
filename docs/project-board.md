@@ -101,6 +101,20 @@ Conventions:
   intended sequencing. A genuinely externally-paced phase is the exception — flag it
   rather than padding the date.
 
+**Open milestones on this board (as of the 2026-09-12 structural review): two.**
+
+| Milestone | Target | Deliverable |
+|---|---|---|
+| `Marketplace readiness` | 2026-09-30 | jared installs cold for a stranger and ships a tagged, marketplace-listed release — verified by a clean-room cold install. |
+| `KanbanFlow parity` | 2026-11-13 (soft) | Every capability in `_OMITTED_CAPABILITIES` is either implemented to an agreed parity bar or documented as an explicit, rationale-backed non-goal, and `kanbanflow_provider.py`'s capability declaration reflects that outcome. |
+
+This is the "genuinely distinct theme" exception above, exercised deliberately rather
+than by drift — the operator judged backend parity (#357) distinct from release
+readiness (#348) during the 2026-09-12 reshape. `KanbanFlow parity` carries a soft date
+to be re-set at #357's Phase-0 brainstorm, when its scope actually exists. Do not read
+two open milestones here as a violation of the one-at-a-time default; read it as the
+default plus one recorded exception.
+
 **Surfacing the phase.** Because milestones carry soft target dates, GitHub's
 **Roadmap** view layout renders a credible near-term timeline — it plots bars from the
 milestone due dates. For the at-a-glance checklist, group a **Table** or **Board** view
@@ -201,8 +215,6 @@ This file is the minimum. See the skill's references for:
 ## Jared config
 
 Project-level knobs that change Jared's behavior on this board. Each bullet is `name: value`. Omit any line to use its default.
-
-- `session-handoff-prompt: ask` — when `/jared-wrap` finishes, ask whether to draft a session handoff prompt for the next session. Values: `ask` (default), `always`, `never`. Used by `/jared-wrap`. The prompt is written to `tmp/next-session-prompt-<TIMESTAMP>.md` and is `.gitignore`d — ephemeral by design.
 
 - `voice: enabled` — controls whether the Jared character voice is rendered in slash-command dialogue (`/jared`, `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default), `disabled`. When `disabled`, every slash-command stub renders user-facing output in plain technical prose — same structural content, Jared-isms stripped. Used by every slash-command stub. The voice activation lives entirely in the plugin (no user-local Claude Code settings, no SessionStart hooks, no memory entries required); this bullet is the only way to opt out. See SKILL.md § "Project-level kill switch" (under the voice doctrine) and `references/voice.md` for the full spec.
 
