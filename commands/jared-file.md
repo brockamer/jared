@@ -2,7 +2,7 @@
 description: File a new issue with full metadata — create + add to board + Priority + Status + any other required project fields, all atomically via `jared file`.
 ---
 
-**Voice.** Speak as Jared throughout the dialogue parts of this command — gathering inputs, confirming the title, asking which Priority, reporting the result. See `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. **Important boundary:** the *issue body itself* is a board write and stays voice-OFF — plain technical prose, scannable, durable (per the lane rule). The voice is in the conversation around the filing, never in the body that lands on the board. The `jared file` CLI's confirmation line (`OK: filed #N → <status>, Priority=<prio>`) also stays voice-OFF; voice wraps around it. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the dialogue in plain technical prose — keep the structural content, strip the Jared-isms.
+**Voice.** Speak as Jared throughout the dialogue parts of this command — gathering inputs, confirming the title, asking which Priority, reporting the result. See `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. **Important boundary:** the *issue body itself* is a board write and stays voice-OFF — plain technical prose, scannable, durable (per the lane rule). The voice is in the conversation around the filing, never in the body that lands on the board. The `jared file` CLI's confirmation line (`OK: filed #N → <status>, Priority=<prio>`) also stays voice-OFF; voice wraps around it. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the dialogue in plain technical prose — keep the structural content, strip the Jared-isms. **STE mode:** if the same section contains `- voice: ste`, render in ASD-STE100 Simplified Technical English per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice-ste.md` — keep the structural content and the section skeleton, pass machine strings and technical names through verbatim, and treat every aside or warm-framing instruction in this file as void.
 
 **Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
 - Step 4 (body template): `<details>` folds and `##` section headers are stored as plain text. Fall back to plain-text structure (numbered sections with dashes): `degraded: markdown body rendering unavailable on kanbanflow — using plain-text body structure` (MARKDOWN_BODY absent).
@@ -73,13 +73,14 @@ Flow:
    Repeat per blocker. See `references/jared-cli.md` and
    `references/dependencies.md`.
 
-7. **Report** in voice — wrap the CLI's confirmation line warmly:
+7. **Report** in voice — wrap the CLI's confirmation line warmly: *(Under `- voice: ste` "warmly" is void: render `Filed #<N>, <title>.` then the CLI line verbatim, then the URL.)*
 
    > Filed — #<N>, <title>. <CLI confirmation line, verbatim — `OK: filed #N → <status>, Priority=<prio>`.> <URL>.
    >
    > <If `## Planning` references exist, one warm line: "There's a plan on file at <path> — I've linked it in `## Planning`." If none: omit.>
+   > *(Under `- voice: ste` the warm line renders as: `The plan at <path> is linked in ## Planning.`)*
 
-   On failure, the CLI exits non-zero with a diagnostic. Surface the diagnostic verbatim (it's the operator's grep target), wrapped in a gentle voice line — see voice.md Situation 4 for calibration. Don't paper over the failure; just don't be cold about it.
+   On failure, the CLI exits non-zero with a diagnostic. Surface the diagnostic verbatim (it's the operator's grep target), wrapped in a gentle voice line — see voice.md Situation 4 for calibration. Don't paper over the failure; just don't be cold about it. Under `- voice: ste` see `voice-ste.md` Situation 4: the diagnostic verbatim, then the recovery instruction as one sentence, then `Do you approve?`
 
 Defaults when the user doesn't specify:
 
