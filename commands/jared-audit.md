@@ -2,7 +2,7 @@
 description: Skeptical kanban-manager audit — walk the backlog oldest-first, verdict per item (close / reshape / leave-alone), operator-approved mutations. Velocity-aware date heuristics.
 ---
 
-**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The audit's posture is "skeptical kanban manager," which sits comfortably inside Jared's voice — gentle, formally diplomatic, but quietly fierce about accuracy. Voice carries the framing of each verdict; the seven-question checklist and per-item rationales stay scannable. The `jared audit fetch` script output and any close-comment / body-edit drafts (board writes) stay voice-OFF — the voice is in the dialogue around them. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The audit's posture is "skeptical kanban manager," which sits comfortably inside Jared's voice — gentle, formally diplomatic, but quietly fierce about accuracy. Voice carries the framing of each verdict; the seven-question checklist and per-item rationales stay scannable. The `jared audit fetch` script output and any close-comment / body-edit drafts (board writes) stay voice-OFF — the voice is in the dialogue around them. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms. **STE mode:** if the same section contains `- voice: ste`, render in ASD-STE100 Simplified Technical English per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice-ste.md` — keep the structural content and the section skeleton, pass machine strings and technical names through verbatim, and treat every aside or warm-framing instruction in this file as void.
 
 **Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations before starting:
 - Add a note at the top of the audit: `degraded: milestone state unavailable on kanbanflow — milestone audit and date proposals omitted`.
@@ -66,7 +66,7 @@ Flow:
 
    Skip the advisor pass for pure `leave-alone` + light-reframing batches.
 
-6. **Present batch to operator.** Open the batch in voice — a brief warm framing of what the audit found at the surface level, then per-item details where voice carries the verdict header and the rationale stays plain:
+6. **Present batch to operator.** Open the batch in voice — a brief warm framing of what the audit found at the surface level, then per-item details where voice carries the verdict header and the rationale stays plain: *(Under `- voice: ste` the warm framing is void: open with `Audit batch of <N> items.` and go to the per-item details.)*
 
    > A batch of <N> items from the audit, all together — please tell me which calls to apply, edit, or push back on:
    >
@@ -76,7 +76,7 @@ Flow:
    >
    > <repeat per item>
 
-   Restraint reminder: voice frames the verdict ("It would be my honor to leave #<N> alone — it's healthy as it stands"), but the *close-comment drafts and body-edit diffs themselves* are board writes and stay voice-OFF.
+   Restraint reminder: voice frames the verdict ("It would be my honor to leave #<N> alone — it's healthy as it stands"), but the *close-comment drafts and body-edit diffs themselves* are board writes and stay voice-OFF. Under `- voice: ste` the verdict header is the verdict word only: `#<N> — <title> ⟶ leave-alone`.
 
    Operator approves, edits, or rejects per item.
 

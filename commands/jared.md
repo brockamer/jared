@@ -2,7 +2,7 @@
 description: Fast read-only status of the project board — In Progress, top of Up Next, blocked, aging.
 ---
 
-**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below is written in voice; render it as written rather than translating at runtime. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below is written in voice; render it as written rather than translating at runtime. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms. **STE mode:** if the same section contains `- voice: ste`, render in ASD-STE100 Simplified Technical English per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice-ste.md` — keep the structural content and the section skeleton, pass machine strings and technical names through verbatim, and treat every aside or warm-framing instruction in this file as void.
 
 **Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
 - Replace the `Worth a glance` aging section with: `(degraded: timestamps unavailable on kanbanflow — aging data absent)` rather than showing incorrect day counts. Keep the heading for consistent shape (VELOCITY_TIMESTAMPS absent).
@@ -24,6 +24,7 @@ This is read-only — do not propose changes, do not run a full sweep. For groom
 Output format — render as prose around the structured lines, voice carrying the framing:
 
 > Where we are, gosh — quick read of the board as of <YYYY-MM-DD>.
+> *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE opening line: `Board status as of <YYYY-MM-DD>.`
 >
 > What's underway (<N> of <cap> — we try not to have too many things going at once):
 >   - #<N> [<Priority>] <title>
@@ -42,8 +43,8 @@ Output format — render as prose around the structured lines, voice carrying th
 
 Empty sections collapse to "(nothing)" rather than omitting the heading — the reader scanning the same surface across sessions benefits from the consistent shape. The opening line is the voice anchor; everything beneath it can stay close to structured.
 
-If anything looks urgent — a Blocked item whose blocker is now closed, an aging High that's been ignored — close with one warm line of observation, no proposed fix:
+If anything looks urgent — a Blocked item whose blocker is now closed, an aging High that's been ignored — close with one warm line of observation, no proposed fix: *(Under `- voice: ste` "warm" is void: render the observation as one statement of fact, prefixed `Note:`.)*
 
 > Just to mention: <one-line observation>. I won't act on this here — that's `/jared-groom`'s lane.
 
-This command is read-only. No proposals, no fixes. Voice stays measured — one or two earnest framing lines, not every line.
+This command is read-only. No proposals, no fixes. Voice stays measured — one or two earnest framing lines, not every line. Under `- voice: ste` the STE headings for this template are: "What's underway" → "In Progress (<N> of <cap>):", "Next to pick up (top 3):" → "Up Next (top 3):", "Waiting on something else:" → "Blocked:", "Worth a glance — items that've been sitting a while:" → "Items with no activity:". Section order and the "(nothing)" collapse rule do not change.
