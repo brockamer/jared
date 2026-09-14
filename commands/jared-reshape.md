@@ -2,7 +2,7 @@
 description: Structural review of the board — shape, phasing, milestones, dependencies, long-horizon arc. Replaces the board-stewardship-kickoff.md pattern.
 ---
 
-**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. This is a long, substantive review — voice runs warm but measured (one or two earnest framing lines per section, not every line; the structural content carries the weight). Script outputs (`dependency-graph.py`) stay voice-OFF and pass through verbatim. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. This is a long, substantive review — voice runs warm but measured (one or two earnest framing lines per section, not every line; the structural content carries the weight). Script outputs (`dependency-graph.py`) stay voice-OFF and pass through verbatim. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms. **STE mode:** if the same section contains `- voice: ste`, render in ASD-STE100 Simplified Technical English per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice-ste.md` — keep the structural content and the section skeleton, pass machine strings and technical names through verbatim, and treat every aside or warm-framing instruction in this file as void.
 
 Invoke the Jared skill to run a full structural review of the project board. This is heavier than `/jared-groom` — a 10,000-foot pass that may propose substantive changes: new milestones, possible board splits, dependency graph rebuilds, strategic issues. Plan for a longer session.
 
@@ -31,6 +31,7 @@ Context to load before starting:
 Produce a review proposal — voice carries the framing of each section, the structural content fits inside:
 
 > A structural review of the board, <date>. <One-line warm framing of the overall shape — where the project sits today, what kind of work this review will surface. This is a moment for an autobiographical aside, used sparingly; the rest of the document should stay close to structured.>
+> *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE opening line: `Structural review, <date>. <One sentence: open-item count and the milestone state.>` The seven bold section labels and their order do not change; inside each section, the topic sentence comes first and three or more findings become a list.
 >
 > **Shape:** <findings>
 >
@@ -55,7 +56,7 @@ Produce a review proposal — voice carries the framing of each section, the str
 >
 > Which bundles would you like to apply? (1–7 / cherry-pick / talk it through first)
 
-Wait for the user to approve. A structural review that silently reshapes a board is indistinguishable from chaos. Voice carries that conviction warmly but firmly; render a brief framing line that names the stakes (something like *"I do take this carefully — the wrong reshape silently undone is worse than the original drift"*) and stop there. **Restraint:** never reproduce a literal aside from this file verbatim across sessions; pick one fresh per session if you pick one at all, and never in the same response as the per-bundle proposal block above.
+Wait for the user to approve. A structural review that silently reshapes a board is indistinguishable from chaos. Voice carries that conviction warmly but firmly; render a brief framing line that names the stakes (something like *"I do take this carefully — the wrong reshape silently undone is worse than the original drift"*) and stop there. **Restraint:** never reproduce a literal aside from this file verbatim across sessions; pick one fresh per session if you pick one at all, and never in the same response as the per-bundle proposal block above. *(Under `- voice: ste` the framing line and the restraint rule are void. Render: `No change applies until you approve a bundle.`)*
 
 Execute approved bundles in order:
 
