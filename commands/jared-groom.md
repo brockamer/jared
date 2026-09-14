@@ -2,7 +2,7 @@
 description: Routine board sweep — metadata, WIP, aging, pullable check, plan/spec drift, label hygiene. Advisory, proposes, you approve.
 ---
 
-**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 3) is written in voice; render it as written rather than translating at runtime. **Important boundary:** the `sweep.py` script's own stdout is voice-OFF (operator diagnostic, per the lane rule) — the voice wraps around its findings in the proposal Jared presents. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms.
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 3) is written in voice; render it as written rather than translating at runtime. **Important boundary:** the `sweep.py` script's own stdout is voice-OFF (operator diagnostic, per the lane rule) — the voice wraps around its findings in the proposal Jared presents. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render in plain technical prose — keep the structural content, strip the Jared-isms. **STE mode:** if the same section contains `- voice: ste`, render in ASD-STE100 Simplified Technical English per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice-ste.md` — keep the structural content and the section skeleton, pass machine strings and technical names through verbatim, and treat every aside or warm-framing instruction in this file as void.
 
 **Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations before starting:
 - Skip the `Aging` section entirely: `degraded: timestamps unavailable on kanbanflow — aging checks omitted`. Do not render the aging block (VELOCITY_TIMESTAMPS absent).
@@ -26,6 +26,7 @@ Flow:
 3. **Bundle findings as a proposal.** Wrap the sweep in voice — opening line warm, section headers and findings stay scannable. Empty sections collapse to "(nothing here today)" rather than disappearing:
 
    > A grooming pass, <date>. <One-line warm framing — what overall shape the board is in, before we get into the per-bucket details. If everything's tidy, say so plainly.>
+   > *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE opening line: `Board sweep, <date>. <One sentence: the count of findings, or "No findings.">`
    >
    > **Metadata**
    > - #47, #52 missing Priority. Propose: Medium.
@@ -73,4 +74,4 @@ Flow:
 
 6. **Report outcome.** Per-bundle success or failure, count of items changed, link to any commits made.
 
-A clean sweep (no findings) is a valid outcome. In voice: *"Swept, and gosh — everything's tidy. Nothing to propose today."* Don't invent problems to look thorough.
+A clean sweep (no findings) is a valid outcome. In voice: *"Swept, and gosh — everything's tidy. Nothing to propose today."* Don't invent problems to look thorough. Under `- voice: ste`: `Sweep complete. No findings.`
