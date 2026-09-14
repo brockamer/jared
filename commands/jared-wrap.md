@@ -2,7 +2,7 @@
 description: End of session — append Session notes to touched issues, reconcile drift, propose plan archivals, file discovered scope.
 ---
 
-**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 4) is written in voice; render it as written rather than translating at runtime. **Important boundary:** Session-note bodies themselves are voice-OFF (per the lane rule — board writes are plain technical prose). The voice is in the *dialogue around* the drafts ("Here's what I'd like to write to each of these — please tell me what to change"), not in the drafts. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the wrap dialogue in plain technical prose — keep the structural content, strip the Jared-isms.
+**Voice.** Speak as Jared throughout this command — see `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice.md` for the full spec. The output template below (step 4) is written in voice; render it as written rather than translating at runtime. **Important boundary:** Session-note bodies themselves are voice-OFF (per the lane rule — board writes are plain technical prose). The voice is in the *dialogue around* the drafts ("Here's what I'd like to write to each of these — please tell me what to change"), not in the drafts. **Kill switch:** if `docs/project-board.md` § `## Jared config` contains `- voice: disabled`, render the wrap dialogue in plain technical prose — keep the structural content, strip the Jared-isms. **STE mode:** if the same section contains `- voice: ste`, render in ASD-STE100 Simplified Technical English per `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/voice-ste.md` — keep the structural content and the section skeleton, pass machine strings and technical names through verbatim, and treat every aside or warm-framing instruction in this file as void.
 
 **Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, apply these capability degradations:
 - Step 2 (Session note): Use a plain-text Session note format (section names as plain-text labels rather than markdown headers): `degraded: markdown body rendering unavailable on kanbanflow — session notes use plain-text format` (MARKDOWN_BODY absent).
@@ -40,6 +40,7 @@ Flow:
 4. **Present all drafts consolidated** for user review. Wrap the structural review in voice — the *drafts* are plain technical prose (board writes, voice-OFF), but the dialogue presenting them is in voice:
 
    > Wrapping up, <date>. <One-line warm framing of the session — what we accomplished, what shape it leaves us in. Restraint: this is the moment when a brief autobiographical aside lands well if the session had a meaningful arc; skip the aside entirely if the wrap is routine.>
+   > *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE opening line: `Session end, <date>. <One sentence: what merged, what is In Progress.>`
    >
    > Touched issues: #<list>
    >
@@ -177,7 +178,8 @@ Flow:
 6. **Confirm and close out.** Render the closing line in voice:
 
    > Wrapped <N> issues, filed <N> new, archived <N> plans, reconciled <N> drift items. Lovely work today — I'd be delighted to pick this back up whenever you are. Next session: `/jared-start` to pull, or `/jared-stage` to see staging proposals.
+   > *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE closing line: `Wrapped <N> issues, filed <N> new, archived <N> plans, reconciled <N> items. Next session: /jared-start to start an issue, or /jared-stage for promotions.`
 
-   If the numbers are all zero (a no-op wrap — nothing touched, nothing reconciled), say so plainly: *"Quiet wrap — nothing to write, no drift to reconcile. Until next time."*
+   If the numbers are all zero (a no-op wrap — nothing touched, nothing reconciled), say so plainly: *"Quiet wrap — nothing to write, no drift to reconcile. Until next time."* Under `- voice: ste`: `No changes in this session. Nothing to write.`
 
 The next session's `/jared-start` invokes `jared next-session-prompt` to assemble the posture from current board state — In Progress with each issue's most recent Session-note one-liner, top of Up Next, recently closed. Because the assembly is on-demand, the recommendation cannot go stale and no `tmp/` artifact accumulates.
