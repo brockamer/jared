@@ -118,7 +118,7 @@ Phase-1e mapped them to tests; runtime invariant verification is Phase 2's.
 | `parallel-sessions.md` | **F41** (P1) |
 | `session-continuity.md` | **F42** (P1), F56 |
 | `structural-review.md` | F57 |
-| `voice.md` | F58, F59 |
+| `voice.md` | F58 *(resolved #374)*, F59 *(resolved #374)* |
 
 ### Assets / templates (4) — *Phase 1c*
 
@@ -150,12 +150,12 @@ Phase-1e mapped them to tests; runtime invariant verification is Phase 2's.
 | `jared-file.md` | F25, F33 |
 | `jared-start.md` | **F14** (P1) |
 | `jared-stage.md` | F26 |
-| `jared-groom.md` | F58 |
+| `jared-groom.md` | F58 *(resolved #374)* |
 | `jared-audit.md` | clean — no finding |
 | `jared-reshape.md` | clean — no finding |
 | `jared-wrap.md` | clean — no finding |
 
-`skills/jared/SKILL.md` — **F8** (P1), **F14** (P1), F27, F58, F59
+`skills/jared/SKILL.md` — **F8** (P1), **F14** (P1), F27, F58 *(resolved #374)*, F59 *(resolved #374)*
 
 ### Entry point & build config (2) — *added in Phase 1; the original inventory omitted both*
 
