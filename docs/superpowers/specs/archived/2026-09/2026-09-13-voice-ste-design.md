@@ -1,3 +1,7 @@
+---
+**Shipped in #374 on 2026-09-14. Final decisions captured in issue body.**
+---
+
 # `voice: ste` — ASD-STE100 dialogue mode — design
 
 **Issue:** #374 — "feat(voice): add `voice: ste` — render Jared's dialogue in ASD-STE100 Simplified Technical English"
