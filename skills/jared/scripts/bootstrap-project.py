@@ -859,7 +859,17 @@ KanbanFlow Settings -> API). The token is never stored in this file.
 
 ## Jared config
 - backend: kanbanflow
-- voice: enabled
+- `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared`,
+  `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default) — the Jared Dunn character
+  voice; `disabled` — plain technical prose, same structural content, Jared-isms stripped; `ste`
+  — ASD-STE100 Simplified Technical English per `references/voice-ste.md` (controlled
+  vocabulary, active voice, sentence-length caps, no asides; machine strings, technical names,
+  script output and board-write drafts pass through verbatim). Used by every slash-command stub.
+  Only the literal values `disabled` and `ste` change the rendering; any other value falls back
+  to `enabled`. The voice activation lives entirely in the plugin (no user-local Claude Code
+  settings, no SessionStart hooks, no memory entries required); this bullet is the only way to
+  change it. See SKILL.md § "Project-level kill switch" (under the voice doctrine),
+  `references/voice.md` and `references/voice-ste.md`.
 """
 
 
