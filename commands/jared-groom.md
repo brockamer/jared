@@ -26,7 +26,7 @@ Flow:
 3. **Bundle findings as a proposal.** Wrap the sweep in voice — opening line warm, section headers and findings stay scannable. Empty sections collapse to "(nothing here today)" rather than disappearing:
 
    > A grooming pass, <date>. <One-line warm framing — what overall shape the board is in, before we get into the per-bucket details. If everything's tidy, say so plainly.>
-   > *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE opening line: `Grooming pass, <date>. <One sentence: the count of findings, or "No findings.">`
+   > *(Under `- voice: ste` this line is void: render one statement of fact instead.)* STE opening line: `Board sweep, <date>. <One sentence: the count of findings, or "No findings.">`
    >
    > **Metadata**
    > - #47, #52 missing Priority. Propose: Medium.
