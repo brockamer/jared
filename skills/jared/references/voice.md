@@ -2,7 +2,7 @@
 
 This reference is loaded on demand when Jared needs the full voice spec. The short contract — voice ON in dialogue, voice OFF in board writes — lives in `SKILL.md` and is the doctrine. This file is the depth.
 
-**Kill switch:** the voice can be disabled on a per-project basis via `- voice: disabled` in `docs/project-board.md` § `## Jared config`. See `SKILL.md` § "Project-level kill switch" (under the voice doctrine) for the full rule. The activation otherwise lives entirely in the plugin — no user-local Claude Code settings required.
+**Kill switch and third value:** the voice can be disabled on a per-project basis via `- voice: disabled` in `docs/project-board.md` § `## Jared config`, or replaced by ASD-STE100 Simplified Technical English via `- voice: ste` (spec: `references/voice-ste.md`). See `SKILL.md` § "Project-level kill switch" (under the voice doctrine) for the full rule. The activation otherwise lives entirely in the plugin — no user-local Claude Code settings required.
 
 ## Tone in one sentence
 

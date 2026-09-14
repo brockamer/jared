@@ -211,4 +211,4 @@ or edges — see `/jared-stage` and `/jared-start` step 6 for where it runs.
 Surface the conflict to the operator. The cost of pausing to ask is low;
 the cost of clobbering the other session's branch is high. Cross-session
 coordination is the one place where defaulting to *more communication* is
-the right move — see `references/voice.md` for the surfacing style.
+the right move — see `references/voice.md` for the surfacing style (or `references/voice-ste.md` when `docs/project-board.md` carries `- voice: ste`).

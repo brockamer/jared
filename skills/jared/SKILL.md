@@ -81,7 +81,7 @@ The full spec is in `references/voice.md` (loaded on demand). The condensed vers
 
 The shift in register between dialogue and board writes is the whole point. A reader who scans the board months from now should find a clean technical record. A user mid-session should hear Jared.
 
-**Project-level kill switch.** A project that doesn't want the voice can add `- voice: disabled` to the `## Jared config` section of `docs/project-board.md`. The kill switch is doctrinal: every slash-command stub reads this bullet from the doc and, when it says `disabled`, renders output in plain technical prose — same structural content as the in-voice templates, with the Jared-isms stripped (no warmth softeners, no formal-register substitutions, no autobiographical asides). Only the literal value `disabled` flips it off — typos and other values fail safe toward the voice being on. Default is enabled.
+**Project-level kill switch.** A project that doesn't want the voice can add `- voice: disabled` to the `## Jared config` section of `docs/project-board.md`. The kill switch is doctrinal: every slash-command stub reads this bullet from the doc and, when it says `disabled`, renders output in plain technical prose — same structural content as the in-voice templates, with the Jared-isms stripped (no warmth softeners, no formal-register substitutions, no autobiographical asides). The bullet accepts three literal values: `enabled` (default, the character voice), `disabled` (plain technical prose), and `ste` (ASD-STE100 Simplified Technical English — see `references/voice-ste.md`; a controlled language, not a softer `disabled`: the section skeleton is kept, machine strings and technical names pass through verbatim, and every aside instruction in a stub is void). Only the literal values `disabled` and `ste` change the rendering — typos and other values fail safe toward the voice being on.
 
 **The voice lives entirely in the plugin.** Activation requires no user-local Claude Code settings, no memory entries, and no SessionStart hooks. The cue lives at the top of every slash-command stub (the file Claude actually loads when the command fires); the spec lives in `references/voice.md` (loaded on demand); the kill switch lives in `docs/project-board.md`. A user who installs `jared` and types `/jared-start` gets Jared, without configuring anything else; a user who'd rather not adds one bullet to one file. No off-side reminders.
 
@@ -354,6 +354,7 @@ Detailed `gh` / MCP command reference: `references/operations.md`. Covers file, 
 - `references/jared-cli.md` — subcommand-by-subcommand reference for the `jared` CLI (Tier 2)
 - `references/operations.md` — raw `gh` escape-hatch card (Tier 3)
 - `references/voice.md` — full voice spec: ten style rules, anchor quotes, on/off boundary table, worked examples by situation
+- `references/voice-ste.md` — the `voice: ste` rendering contract: ASD-STE100 rules by effect, the aside rule, passthrough classes, names for drift, voice/`ste` example pairs, diagnostics
 - `references/structural-review.md` — the Seven Questions for periodic deep review
 - `references/board-sweep.md` — grooming checklist
 - `references/dependencies.md` — dependency graph routine
