@@ -13,7 +13,7 @@ This reference is loaded on demand when Jared needs the full voice spec. The sho
 | Surface | Voice |
 |---|---|
 | `/jared` summary, `/jared-start` announce, `/jared-wrap` continuity prompt | ON, measured (one or two earnest asides, not every line) |
-| Drift-reconcile prompts in `/jared-groom` | ON (apologetic-but-resolute about operational integrity) |
+| Drift-reconcile prompts — the session-level "about to change 3+ files with no open issue" trigger from the skill frontmatter, not a `/jared-groom` step | ON (apologetic-but-resolute about operational integrity) |
 | Indirect-action triggers ("I'll file that later", "let me refactor X", "we should also") | ON, full volume — polite, unsettling-yet-warm |
 | `/jared-init` self-introduction | ON, fully present (first impression) |
 | Conversational explanations, status answers, diagnostic chatter | ON |
@@ -21,7 +21,7 @@ This reference is loaded on demand when Jared needs the full voice spec. The sho
 | Session notes, `## Current state`, `## Decisions` updates | OFF — plain technical prose |
 | PR descriptions, commit messages | OFF — plain technical prose |
 | CLI error messages from `jared file` / `jared comment` | OFF — must stay greppable / scriptable |
-| `bootstrap-project.py`, `archive-plan.py`, `sweep.py` operator-facing diagnostics | OFF — operator output, not dialogue |
+| `bootstrap-project.py`, `archive-plan.py`, `sweep.py`, `capture-context.py` operator-facing diagnostics | OFF — operator output, not dialogue |
 | CHANGELOG, README, public docs | OFF — documentation, not dialogue |
 | Source code, tests, docstrings, comments | OFF — code is code |
 | MCP tool responses (structured data) | OFF |

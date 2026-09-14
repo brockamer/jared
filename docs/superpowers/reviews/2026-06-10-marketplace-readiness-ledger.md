@@ -357,8 +357,8 @@ syntactic question and cannot substantiate a runtime one.
 | **F55** | P2 | 1c | pii-pre-flight.md lists two pre-flight consumers; the code has three (_cmd_close also calls it) | `skills/jared/references/pii-pre-flight.md:34` |
 | **F56** | P2 | 1c | session-continuity.md's 'iff board has Session start checks configured' claim omits the required… | `skills/jared/references/session-continuity.md:175` |
 | **F57** | P2 | 1c | structural-review.md's backend-gate degraded: strings omit the canonical 'on <backend>' clause | `skills/jared/references/structural-review.md:4-6` |
-| **F58** | P2 | 1c | voice.md's boundary table misattributes 'drift-reconcile prompts' to /jared-groom | `skills/jared/references/voice.md:16` |
-| **F59** | P2 | 1c | voice.md's voice-OFF batch-script list is incomplete relative to SKILL.md's own CLI-string policy | `skills/jared/references/voice.md:24` |
+| **F58** | P2 | 1c | voice.md's boundary table misattributes 'drift-reconcile prompts' to /jared-groom | `skills/jared/references/voice.md:16` · **resolved** #374 (`feature/374-voice-ste`) |
+| **F59** | P2 | 1c | voice.md's voice-OFF batch-script list is incomplete relative to SKILL.md's own CLI-string policy | `skills/jared/references/voice.md:24` · **resolved** #374 (`feature/374-voice-ste`) |
 
 ### P1 — must-fix before release
 
@@ -817,6 +817,7 @@ syntactic question and cannot substantiate a runtime one.
 - **Evidence:** voice.md:16: '| Drift-reconcile prompts in `/jared-groom` | ON (apologetic-but-resolute about operational integrity) |'. voice.md:130-142 (Situation 2) frames this as a mid-session interrupt ('the user's about to make changes to four files and there isn't an issue representing the work'), matching SKILL.md's frontmatter trigger list (SKILL.md:11-13: '... or when Claude is about to modify 3+ files without an open issue, prepare a PR, close out a feature, or write a plan/spec'), not anything in commands/jared-groom.md, whose full flow (read) covers only the sweep.py-driven metadata/WIP/aging/dependency/label/plan-drift checklist with no such prompt.
 - **Suggested fix:** Relabel the table row to name the actual trigger (a general session-level 'about to act without a tracking issue' event) rather than attributing it to the /jared-groom slash command specifically.
 - **Verification:** 2 refute-first verifiers · 0 refuted · 0 uncertain.
+- **Resolution:** fixed on `feature/374-voice-ste` (#374), in the voice.md F58/F59 commit.
 
 #### F59 · P2 · dim 1c — voice.md's voice-OFF batch-script list is incomplete relative to SKILL.md's own CLI-string policy
 
@@ -825,4 +826,5 @@ syntactic question and cannot substantiate a runtime one.
 - **Evidence:** voice.md:24: '| `bootstrap-project.py`, `archive-plan.py`, `sweep.py` operator-facing diagnostics | OFF — operator output, not dialogue |' omits `capture-context.py`. SKILL.md:38 ('CLI-string policy: CLI error messages and the operator-facing diagnostics emitted by batch scripts (`sweep.py`, `bootstrap-project.py`, `archive-plan.py`, `capture-context.py`) stay voice-OFF') names all four. capture-context.py does emit such diagnostics, e.g. skills/jared/scripts/capture-context.py:251 `print("(no changes — already up to date)")` and :276 `print(f"Updated #{args.issue}.")`.
 - **Suggested fix:** Add capture-context.py to voice.md's boundary-table row so the two doctrine surfaces (SKILL.md and its 'depth' reference voice.md) enumerate the same script list.
 - **Verification:** 2 refute-first verifiers · 0 refuted · 0 uncertain.
+- **Resolution:** fixed on `feature/374-voice-ste` (#374), in the voice.md F58/F59 commit.
 
