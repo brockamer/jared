@@ -42,6 +42,26 @@ class ItemNotFound(Exception):
     """Raised when no project item corresponds to the given issue number."""
 
 
+
+def _demarkdown(value: str) -> str:
+    """Strip Markdown presentation from a config bullet value.
+
+    Bullet values are globs and paths, but they live in a Markdown file that a
+    project's formatter also owns. Prettier reads `**` as bold and `_` as emphasis,
+    so it rewrites a bare `src/**` to `src/\\*\\*` and `docs/my_notes.md` to
+    `docs/my\\_notes.md`. A project that defends against that by writing a code span
+    instead leaves the backticks behind. Both forms reach the parser as text that
+    fnmatch can never match, which yields a check that silently reports nothing while
+    looking correctly configured.
+
+    Removes surrounding backticks, then unescapes backslash-escaped ASCII punctuation.
+    """
+    value = value.strip()
+    if len(value) > 1 and value.startswith("`") and value.endswith("`"):
+        value = value[1:-1].strip()
+    return re.sub(r"\\([!-/:-@\[-`{-~])", r"\1", value)
+
+
 @dataclass
 class Board:
     # Search order for autodiscovery when --board / --config is not supplied.
@@ -366,13 +386,13 @@ class Board:
         if not docs_match:
             # Section present but Docs: bullet missing — treat as disabled.
             return [], []
-        docs = [d.strip() for d in docs_match.group("list").split(",")]
+        docs = [_demarkdown(d) for d in docs_match.group("list").split(",")]
         docs = [d for d in docs if d]
 
         surface_re = re.compile(r"^\s*-\s*Code surface:\s*(?P<list>.+?)\s*$", re.MULTILINE)
         surface_match = surface_re.search(body)
         if surface_match:
-            surface = [s.strip() for s in surface_match.group("list").split(",")]
+            surface = [_demarkdown(s) for s in surface_match.group("list").split(",")]
             surface = [s for s in surface if s]
         else:
             surface = ["src/**"]
