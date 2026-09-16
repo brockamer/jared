@@ -129,17 +129,21 @@ Phase-1e mapped them to tests; runtime invariant verification is Phase 2's.
 | `project-board.md.template` | **F9** (P1) |
 | `plan-conventions.md.template` | clean — no finding |
 
-### Top-level docs (7) — *Phase 1c / 1f onboarding*
+### Top-level docs (7) — *Phase 1c / 1f onboarding; round 3 closed the last three*
 
-| doc | Phase-1 findings |
-|---|---|
-| `README.md` | **F12** (P1), **F14** (P1), **F15** (P1) |
-| `docs/getting-started.md` | **F14** (P1), **F15** (P1), F33 |
-| `docs/bake-sites.md` | F47 |
-| `docs/github-api-tool-selection.md` | F48, F49, F50 |
-| `CHANGELOG.md` | **F14** (P1) |
-| `CLAUDE.md` | **F36** (P1) |
-| `docs/project-board.md` | F25 |
+**Read as primary target?** distinguishes a doc someone actually read end-to-end from one that
+merely appears in the findings column because another finding cites it as evidence — the
+distinction that motivated round 3 (#368). See "How to read the findings column" above.
+
+| doc | read as primary target | Phase-1 findings |
+|---|---|---|
+| `README.md` | ☑ round 1 | **F12** (P1), **F14** (P1), **F15** (P1) |
+| `docs/getting-started.md` | ☑ round 1 | **F14** (P1), **F15** (P1), F33 |
+| `docs/bake-sites.md` | ☑ round 2 | F47 |
+| `docs/github-api-tool-selection.md` | ☑ round 2 | F48, F49, F50 |
+| `CHANGELOG.md` | ☑ round 3 (#368) | **F14** (P1), F62 |
+| `CLAUDE.md` | ☑ round 3 (#368) | **F36** (P1), F60, F65, F66, F67, F68 |
+| `docs/project-board.md` | ☑ round 3 (#368) | F25, F63, and F14's second location |
 
 ### Slash-command stubs (9) — *Phase 1c static review; Phase 2 owes the live walk*
 
@@ -184,10 +188,11 @@ exactly this way, which is why the caveat is recorded rather than the inference.
 
 Phase 1's exit criterion is "no silent skips." These are the **non-silent** ones:
 
-- **`CHANGELOG.md`, `CLAUDE.md` and `docs/project-board.md` were never reviewed as primary targets** —
-  they appear in the tables above only because other findings cite them as evidence. Round 2 found real
-  drift in 11 of 11 reference docs that round 1 had left unexamined, so these three should not be presumed
-  clean. Recommended as the first target of any Phase-1 round 3.
+- ~~**`CHANGELOG.md`, `CLAUDE.md` and `docs/project-board.md` were never reviewed as primary
+  targets.**~~ **Closed by round 3 (#368), 2026-09-16.** All three were read end-to-end and verified
+  against the code, git history and the live board. The presumption held: eight new findings
+  (F60, F62–F68), none P0, none P1 after verification. See "Phase 1 round 3" below for the method,
+  the verification bar each finding actually met, and the checks that came back clean.
 - **Phase-2 runtime verification is owed** for 13 of 19 CLI subcommands and 8 of 9 slash commands.
 - **`migrate` remains the riskiest unverified surface** — three findings (F4, F5, F18) landed against it
   from static review alone, and no direction of the cross-backend copy has been exercised live.
@@ -250,6 +255,7 @@ This is the **regression floor**: any red introduced in Phase 3 is ours.
 - **Cleanliness gate passes** — `.gitignore` thorough; `tests/testbed.env` has zero git history (secret never committed); only `testbed.env.example` tracked. (Full-history secret scan still owed in Phase 1b.)
 - **CLI is pure stdlib** — cold-runs on Python 3.9–3.14 with no dependencies.
 - **No orphan session lock** — the `.jared/session-346.lock` seen earlier was already cleared by its wrap; `session-resolve` returned `PROCEED_SOLO`.
+- **F61 — withdrawn candidate, not a finding (round 3, #368, 2026-09-16).** The F-series skips 61 deliberately. The candidate was: `plugin.json` advertises `0.30.0` while 48 commits / 14 merged PRs sit on `main` past the `v0.30.0` tag, and `marketplace.json`'s `"source": "./"` makes the branch the distributed artifact. **Every fact checked out; the inference to "defect" did not.** Both refute-first verifiers refuted it (2 of 2 — a majority), on three independent grounds. (a) *Duplicate by tracking:* issue **#354** ("Phase 5 — Release: tag + GitHub Release + final clean-room gate") is open on this milestone and its deliverable *is* the proposed remedy, so the finding is circular against a rubric that defines P1 as "must-fix before release". (b) *No behavioral delta:* of the two PRs cited as user-facing, #375 (`voice: ste`) activates only on a bullet in the **consuming** project's board doc, and #365's own body records that "Claude Code's own frontmatter reader is lenient enough to accept it, which is why the skill has worked" — it hardened against stricter parsers rather than fixing a live break. (c) *The version field is not load-bearing:* Claude Code's own plugin-install schema describes `resolvedVersion` as used "in preference to manifest.version, since the upstream may have forgotten to bump plugin.json", and per-install identity is carried by `gitCommitSha`, not the semver string. A CHANGELOG entry now would additionally *violate* the documented discipline of landing it in the same PR as the tag. Prior adjudication agrees: the Plugin-metadata row above already records "version parity `0.30.0` confirmed against `pyproject.toml` ... No metadata defect found." Recorded here so a later round does not re-derive it. **Mechanism worth knowing, no action:** a marketplace install does track branch HEAD rather than the tag — jared's tags are `v0.30.0`, while version-constrained resolution matches `<pluginName>--v<version>`, so resolution always falls back to HEAD.
 
 ---
 
@@ -359,6 +365,14 @@ syntactic question and cannot substantiate a runtime one.
 | **F57** | P2 | 1c | structural-review.md's backend-gate degraded: strings omit the canonical 'on <backend>' clause | `skills/jared/references/structural-review.md:4-6` |
 | **F58** | P2 | 1c | voice.md's boundary table misattributes 'drift-reconcile prompts' to /jared-groom | `skills/jared/references/voice.md:16` · **resolved** #374 (`feature/374-voice-ste`) |
 | **F59** | P2 | 1c | voice.md's voice-OFF batch-script list is incomplete relative to SKILL.md's own CLI-string policy | `skills/jared/references/voice.md:24` · **resolved** #374 (`feature/374-voice-ste`) |
+| **F60** | P2 | 1c | CLAUDE.md asserts "Main is protected" in always-loaded guidance; the repo has no branch protection and no rulesets | `CLAUDE.md:147` · *verifiers corrected P1 → P2* |
+| **F62** | P2 | 1c | CHANGELOG's release-coverage note says "a few" tags in the v0.14.0–v0.18.1 window lack a Release; it is all six | `CHANGELOG.md:4` |
+| **F63** | P2 | 1c | project-board.md calls its list "the full capability set" but enumerates 6 of the 7 Capability members (omits SUB_ISSUES) | `docs/project-board.md:221` |
+| **F64** | P2 | 1c | the project-board asset template hardcodes the stale `~3` WIP figure as a literal, so F14's fix cannot reach it | `skills/jared/assets/project-board.md.template:20` |
+| **F65** | P2 | 1c | CLAUDE.md's Phase-1 provider boundary promises a migration whose trigger already fired, and omits dependency-graph.py | `CLAUDE.md:63` |
+| **F66** | P2 | 1c | CLAUDE.md's two batch-script enumerations omit stage.py, contradicting the same file's later references to it | `CLAUDE.md:41, :125` |
+| **F67** | P2 | 1c | CLAUDE.md's multi-session background pointer cites a spec path that was archived out from under it | `CLAUDE.md:201` |
+| **F68** | P2 | 1c | CLAUDE.md's "What this repo is" still defines jared as GitHub-Projects-only, which its own architecture section contradicts | `CLAUDE.md:7` |
 
 ### P1 — must-fix before release
 
@@ -455,8 +469,9 @@ syntactic question and cannot substantiate a runtime one.
 - **Location:** `docs/getting-started.md:107 (contradicted by README.md:37-38, commands/jared-start.md:89, skills/jared/SKILL.md:285, skills/jared/scripts/sweep.py:716, and CHANGELOG.md:123; root cause in skills/jared/scripts/bootstrap-project.py:732)`
 - **Claim:** The flagship 'first 15 minutes' walkthrough tells a newcomer the In-Progress WIP cap is 3, but every other authoritative source (README, SKILL.md, the actual jared-start doctrine, and the sweep.py runtime default) says 4. This is a real, tracked regression: issue #245 raised the default from 3→4 and README/SKILL.md/jared-start.md/sweep.py were all updated, but bootstrap-project.py's --wip-limit default (still 3) and docs/getting-started.md (still '3') were never updated to match, so every freshly-bootstrapped project's generated docs/project-board.md also bakes in the stale '~3' figure.
 - **Evidence:** docs/getting-started.md:107: "Check WIP (default cap: 3 In Progress at once)." vs. commands/jared-start.md:89: "Compare `M` ... against the project's configured cap (default 4, per #245)." vs. README.md:37-38: "**WIP cap on In Progress** (default 4, counted in workstreams...)" vs. skills/jared/scripts/sweep.py:716: `parser.add_argument("--wip-limit", type=int, default=4, help="In Progress cap")`. Root cause: skills/jared/scripts/bootstrap-project.py:732: `parser.add_argument("--wip-limit", type=int, default=3)` — never bumped when CHANGELOG.md:123 recorded "Default WIP caps raised to **8 Up Next / 4 In Progress** (was 5/3). (#245)".
-- **Suggested fix:** Bump bootstrap-project.py's --wip-limit default to 4 (matching #245), fix the '~{wip_limit}' text baked into freshly-generated docs/project-board.md, and fix docs/getting-started.md:107 to say 4.
+- **Suggested fix:** Bump bootstrap-project.py's --wip-limit default to 4 (matching #245), correct the '~{wip_limit}' text baked into freshly-generated docs/project-board.md, and set docs/getting-started.md:107 to 4.
 - **Verification:** 2 refute-first verifiers · 0 refuted · 0 uncertain.
+- **Round-3 addendum (#368, 2026-09-16) — two more locations, one of them a second root cause.** (a) jared's own `docs/project-board.md:57` carries the predicted stale output verbatim: "In Progress stays small. More than ~3 items means focus is scattered." It is downstream of this finding's recorded root cause (`bootstrap-project.py:732`) and needs no separate F-number — bumping that default and regenerating fixes it. (b) `skills/jared/assets/project-board.md.template:20` is **not** downstream of it: that line hardcodes `~3` as a literal rather than interpolating `{wip_limit}`, so the fix above would leave it stale. That second root cause is filed separately as **F64**.
 
 #### F15 · P1 · dim 1f — getting-started.md tells a newcomer to type bare `jared` CLI commands into their shell, but nothing in the documented install flow ever puts `jared` on PATH or explains how to invoke it outside a Claude Code session
 
@@ -828,3 +843,122 @@ syntactic question and cannot substantiate a runtime one.
 - **Verification:** 2 refute-first verifiers · 0 refuted · 0 uncertain.
 - **Resolution:** fixed on `feature/374-voice-ste` (#374), in the voice.md F58/F59 commit.
 
+
+#### F60 · P2 *(verifiers corrected down from P1)* · dim 1c — CLAUDE.md asserts "Main is protected" in always-loaded guidance, but the repo has no branch protection and no rulesets
+
+- **Location:** `CLAUDE.md:147 (same belief at docs/project-board.md:223 and skills/jared/references/parallel-sessions.md:107)`
+- **Claim:** The `## Branch + PR workflow` section opens "Main is protected — every substantive change lands via a PR". GitHub disagrees: `main` carries no branch-protection rule and the repo carries no rulesets, so nothing mechanically prevents a direct push. This is **stale drift, not fabrication** — the sentence was true when written and the protection was removed at some later, unrecoverable date. Scope note on what this is *not*: no code branches on the belief. `wrap_state.py`'s `blocked_on_review` gate reads GitHub's live `reviewDecision` / `mergeStateStatus`, never this prose, so on an unprotected repo the gate simply never fires and control falls through to the correct state. The defect is confined to the prose of a file loaded into every session in this repo.
+- **Evidence:** `CLAUDE.md:147`: "Main is protected — every substantive change lands via a PR (`gh pr create` → `gh pr merge --merge --delete-branch`)." Probes at commit `70dd573`: `gh api repos/brockamer/jared/branches/main/protection` → `{"message":"Branch not protected","status":"404"}`; `gh api repos/brockamer/jared/rulesets` → `[]`; `gh api repos/brockamer/jared/rules/branches/main` → `[]` (the effective-rules endpoint, which would surface an inherited ruleset). The owner is a User account, not an org, so no org-level ruleset is possible; there is no `.github/` directory, hence no CODEOWNERS and no blocking workflow. **The sentence was once true:** `git log -S'Main is protected' -- CLAUDE.md` dates it to `d651789` (2026-05-23), and issue #285's body records a live incident eight days later — "Hit live: a docs PR sat MERGEABLE-but-BLOCKED, then REVIEW_REQUIRED, and the operator resolved it with `gh pr merge --admin --squash`" — a state GitHub cannot produce without a protection rule. **The convention holds anyway:** since `e39ce30`, `main`'s first-parent line carries 73 merge commits and 0 direct non-merge commits (2026-05-23 → 2026-09-14). **But it has been violated once, after the prose landed:** `e39ce30` "feat(caps): raise default WIP caps to 8 Up Next / 4 In Progress (#245)" is a single-parent commit on main's first-parent line, authored ~1 hour after `d651789` (which `git merge-base --is-ancestor` confirms precedes it) — a feature, not one of the "post-merge hotfixes or release-tag pushes" the same sentence reserves direct pushes for. It succeeded silently and remains unreverted. Sibling instances of the same belief: `docs/project-board.md:223` justifies the standing `- admin-merge: --merge` sanction as "the common solo-author case on a protected `main`" — dormant rather than dead, since an explicitly *requested* review can set `reviewDecision=REVIEW_REQUIRED` with no protection at all and fire `wrap_state.py:99`; and `skills/jared/references/parallel-sessions.md:107` calls merge "the irreversible step against protected `main`" (in a shipped reference, where it describes the *consuming* project's main and may well be true there).
+- **Suggested fix:** **Ask the operator which side of the drift is the error before editing anything.** If protection was removed deliberately, correct the prose — "Main is PR-only by convention" at `CLAUDE.md:147`, and drop "on a protected `main`" from `docs/project-board.md:223` — leaving the `admin-merge` sanction itself intact. If protection was removed accidentally, the fix is to re-enable it and the prose needs no change. Do **not** default to enabling protection as a remedy: on a solo-author repo with no CI and no CODEOWNERS, a required review never arrives, so every PR would route to `blocked_on_review` and the current frictionless flow becomes a permanent `--admin` bypass.
+- **Verification:** 2 refute-first verifiers · 1 refuted · 0 uncertain — survives (a single refutation is not a majority). Both verifiers independently re-confirmed the *fact* and both corrected the severity P1 → P2. The refuting verifier rejected only the originally-claimed impact mechanism ("an agent assumes a mistaken push would be refused"), observing that the sentence's operative clause is the direct-push prohibition that follows it, so a reader who believes the claim is pushed *toward* the desired behavior, not away from it. Two sub-claims in the original finding were refuted outright and have been struck from the text above: that the protected-main condition "never obtains on this repo" (#285 proves it did), and that `docs/project-board.md:223` "compounds" the error (its parenthetical is descriptive, and the sanction still requires an explicit operator `y` per `commands/jared-wrap.md:134`). Recorded 2026-09-16 under #368.
+
+#### F62 · P2 · dim 1c — CHANGELOG's release-coverage note understates the gap: "a few" tags in the v0.14.0–v0.18.1 window lack a GitHub Release, but it is all six of them
+
+- **Location:** `CHANGELOG.md:4`
+- **Claim:** The header note tells a reader that "the v0.13.0+ era is consistently released" and that only "a few" tags in the `v0.14.0–v0.18.1` window predate the release-creation discipline. Both halves mislead. Every one of the six tags in that window (`v0.14.0`, `v0.15.0`, `v0.16.0`, `v0.17.0`, `v0.18.0`, `v0.18.1`) has no GitHub Release — not "a few" but all of them — and the lead clause asserts a consistency the same sentence then contradicts. The true consistently-released floor is `v0.19.0`, not `v0.13.0`. A reader auditing release coverage (exactly what the `Marketplace readiness` milestone requires) is told the v0.13.0+ era is sound when six consecutive tags in it are not.
+- **Evidence:** `CHANGELOG.md:4`: "Per-release deep dives live on the corresponding [GitHub Release](...) where available — the v0.13.0+ era is consistently released; earlier tags and a few in the v0.14.0–v0.18.1 window predate the release-creation discipline (pinned in v0.20.0 / #175)." Measured: `git tag -l 'v*'` yields 35 tags; `gh api 'repos/brockamer/jared/releases?per_page=100' --jq 'length'` yields 21. The 14 tags with no Release are `v0.2.0`, `v0.3.0`, `v0.3.1`, `v0.4.0`, `v0.7.0`, `v0.8.0`, `v0.8.1`, `v0.9.0`, `v0.14.0`, `v0.15.0`, `v0.16.0`, `v0.17.0`, `v0.18.0`, `v0.18.1`. Of those, `v0.14.0`–`v0.18.1` is a run of six consecutive tags and is the complete contents of the named window; `v0.13.0` and `v0.19.0` on either side both have Releases. The discipline citation is itself accurate — `CHANGELOG.md:176` records "Release discipline pinned: every `git push origin v*` must be paired with `gh release create`. (#175)" under `## v0.20.0`.
+- **Suggested fix:** Restate line 4 as "v0.19.0 onward is consistently released; every tag before v0.19.0 except v0.5.0, v0.6.0, and v0.10.0–v0.13.0 predates the release-creation discipline (pinned in v0.20.0 / #175)", or simply "all six tags in the v0.14.0–v0.18.1 window, plus most tags before v0.13.0, have no Release."
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+#### F63 · P2 · dim 1c — project-board.md calls its capability list "the full capability set" but enumerates six of the seven `Capability` members, omitting `SUB_ISSUES`
+
+- **Location:** `docs/project-board.md:221 (same under-enumeration at skills/jared/SKILL.md:26)`
+- **Claim:** The `## Jared config` capabilities bullet states that the GitHub backend "advertises the **full** capability set" and then parenthesises six names. The `Capability` enum has seven members. `GitHubProjectsProvider.default_capabilities()` returns all seven including `SUB_ISSUES`, so the parenthetical is not the full set it claims to be. A reader auditing degradation coverage counts six capabilities and never learns a seventh exists.
+- **Evidence:** `docs/project-board.md:221`: "the GitHub Projects v2 backend, which advertises the **full** capability set (`CLOSED_STATE`, `MILESTONE_STATE`, `MCP_TIER`, `NATIVE_DEPENDENCIES`, `VELOCITY_TIMESTAMPS`, `MARKDOWN_BODY`)". Measured in-process: `Capability` has 7 members — `MILESTONE_STATE`, `VELOCITY_TIMESTAMPS`, `NATIVE_DEPENDENCIES`, `MARKDOWN_BODY`, `CLOSED_STATE`, `MCP_TIER`, `SUB_ISSUES`; `GitHubProjectsProvider.default_capabilities()` returns all 7 (`Capability.SUB_ISSUES in g` → `True`); `KanbanFlowProvider.default_capabilities()` returns 0. `skills/jared/SKILL.md:26` repeats the identical six-name list ("advertises **none** of the GitHub-only capabilities; note ... `CLOSED_STATE, MILESTONE_STATE, MCP_TIER, NATIVE_DEPENDENCIES, VELOCITY_TIMESTAMPS, MARKDOWN_BODY` capabilities unavailable"), so the under-enumeration is systematic across surfaces rather than a single slip. Counter-argument considered and rejected: `CLAUDE.md:88` calls `SUB_ISSUES` "a deliberate non-finding: no consumer on either backend" — but that is a decision not to build a degradation *gate* for it, not a licence for a list that advertises itself as "full" to omit a member.
+- **Suggested fix:** Either add `SUB_ISSUES` to both enumerations, or change "the **full** capability set" to "every capability jared gates on" and state in one clause that `SUB_ISSUES` is declared but ungated (per CLAUDE.md:88).
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+#### F64 · P2 · dim 1c — the project-board asset template hardcodes the stale `~3` WIP figure as a literal, so F14's suggested fix cannot reach it
+
+- **Location:** `skills/jared/assets/project-board.md.template:20 (root cause distinct from F14's skills/jared/scripts/bootstrap-project.py:732)`
+- **Claim:** F14 recorded the 3-vs-4 WIP-cap drift and located its root cause at `bootstrap-project.py`'s `--wip-limit` default of 3, whose `~{wip_limit}` interpolation bakes "~3" into every freshly generated `docs/project-board.md`. There is a **second, independent** source of the same stale figure: the asset scaffold at `assets/project-board.md.template:20` carries `~3` as a *hardcoded literal*, not as the `{wip_limit}` placeholder. Bumping `bootstrap-project.py`'s default to 4 — F14's suggested fix — would leave this line still reading `~3`. The template is a live, consumed surface, and no test pins the value, so the drift is unguarded.
+- **Evidence:** `skills/jared/assets/project-board.md.template:20`: "- In Progress stays small. More than ~3 items means focus is scattered." — a literal. Contrast `skills/jared/scripts/bootstrap-project.py:362`, which emits the parameterised form: "- In Progress stays small. More than ~{wip_limit} items means focus is scattered.", with `bootstrap-project.py:732` `parser.add_argument("--wip-limit", type=int, default=3)`. The canonical cap is 4: `skills/jared/scripts/sweep.py:716` `default=4`, `commands/jared-start.md:89` "the project's configured cap (default 4, per #245)", and `CHANGELOG.md:123` "Default WIP caps raised to **8 Up Next / 4 In Progress** (was 5/3). (#245)". The template is consumed, not dead: `skills/jared/SKILL.md:321` ("see ... `assets/project-board.md.template` for the convention doc scaffold"), `skills/jared/references/new-board.md:30` ("following the template at `assets/project-board.md.template`"), and it carries its own test file `tests/test_asset_project_board_template.py` (which already pins F9's surface). `grep -n 'wip\|~3\|scattered' tests/test_asset_project_board_template.py` returns nothing, so no test locks the figure.
+- **Suggested fix:** Change `assets/project-board.md.template:20` to read `~4`, and add an assertion to `tests/test_asset_project_board_template.py` pinning the template's WIP figure to the canonical cap so the two sources cannot diverge again. Land alongside F14's `bootstrap-project.py:732` bump rather than separately.
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+#### F65 · P2 · dim 1c — CLAUDE.md's Phase-1 provider boundary promises a migration that already came due, and its list of unmigrated surfaces omits one
+
+- **Location:** `CLAUDE.md:63`
+- **Claim:** Two defects in one sentence. (a) The boundary note ends "Those migrate when the KanbanFlow provider lands (epic #313, Phases 2–6)" — a future-tense promise whose trigger has already fired. Epic #313 closed 2026-06-10 and the KanbanFlow provider shipped in v0.29.0/v0.30.0, yet none of the named surfaces migrated; they still call `Board` methods directly. A reader is told a cleanup is pending on an event that has passed. (b) The enumeration of unmigrated surfaces is incomplete — it names `sweep.py`/`stage.py` and `_cmd_ties`/`_cmd_propose_partition` but omits `dependency-graph.py`, which also calls `board.open_items()` directly.
+- **Evidence:** `CLAUDE.md:63`: "Phase-1 boundary: a few batch/analytic surfaces still use `Board` methods directly — `sweep.py`/`stage.py` (`open_items`/`board_items`), `_cmd_ties`/`_cmd_propose_partition` (`fetch_open_issues_for_ties`). Those migrate when the KanbanFlow provider lands (epic #313, Phases 2–6)." Epic state: `gh issue view 313 --json state,closedAt` → `CLOSED 2026-06-10T17:15:38Z`; `CHANGELOG.md:21-38` records the KanbanFlow backend shipping under `## v0.29.0` and `CHANGELOG.md:10-19` records Phases 5–6 under `## v0.30.0`. The surfaces did not migrate — current `main`: `skills/jared/scripts/sweep.py:210` `open_items = board.open_items()`, `skills/jared/scripts/stage.py:458` `raw_items: list[dict[str, Any]] = board.board_items()`, `skills/jared/scripts/jared:1341` and `:1664` `board.fetch_open_issues_for_ties(...)`. The omitted surface: `skills/jared/scripts/dependency-graph.py:130` `items = board.open_items()`.
+- **Suggested fix:** Replace the future-tense clause with the present state ("these remain on `Board` methods after epic #313 closed; migrating them is open work"), add `dependency-graph.py` to the list, and either file the migration as tracked work or record the decision to leave the boundary where it is.
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+#### F66 · P2 · dim 1c — CLAUDE.md's two batch-script enumerations omit `stage.py`, contradicting the same file's own later references to it
+
+- **Location:** `CLAUDE.md:41, CLAUDE.md:125 (contradicted by CLAUDE.md:63 and CLAUDE.md:80)`
+- **Claim:** Both places in CLAUDE.md that purport to enumerate this repo's batch scripts list five and omit `stage.py`, which is a real standalone batch script sitting in the same directory. The file is internally inconsistent: it names `stage.py` twice in other sections. A reader who takes the Layout block as the directory map does not learn `stage.py` exists, and the "all route their `gh` calls through `lib/board.py`" guarantee at line 41 silently excludes it. This is the same defect class as F59 (a batch-script enumeration omitting one member).
+- **Evidence:** `CLAUDE.md:41`: "The batch scripts (`sweep.py`, `bootstrap-project.py`, `archive-plan.py`, `capture-context.py`, `dependency-graph.py`) all route their `gh` calls through `lib/board.py`'s `run_gh` / `run_gh_raw` / `run_graphql`" — five, no `stage.py`. `CLAUDE.md:125` (Layout block) lists the identical five. But `CLAUDE.md:63` names "`sweep.py`/`stage.py`" and `CLAUDE.md:80` names "`sweep.py`/`dependency-graph.py`/`stage.py`". `stage.py` is a standalone script, not a helper module: `skills/jared/scripts/stage.py:15` `import argparse`, `:489` `def main(argv: list[str] | None = None) -> int:`, `:543` `if __name__ == "__main__":`. It uses the `Board` seam at `:458` `board.board_items()`. This ledger's own inventory already counts six: "### Batch scripts (6)" at ledger line 91 lists `stage.py` with findings **F6** (P1), **F13** (P1), F25.
+- **Suggested fix:** Add `stage.py` to both enumerations (`CLAUDE.md:41` and the Layout block at `:125`), matching this ledger's batch-script inventory of six.
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+#### F67 · P2 · dim 1c — CLAUDE.md's multi-session background pointer cites a spec path that was archived out from under it
+
+- **Location:** `CLAUDE.md:201`
+- **Claim:** The `## Multi-session work` section closes by directing the reader to `docs/superpowers/specs/2026-05-23-multi-session-impl-design.md`. No file exists at that path; it was moved into the dated archive tree. CLAUDE.md is loaded into every session in this repo, so this is a live pointer in always-loaded guidance, not a historical record — the class of citation the Phase-1 backtick-path sweep exists to catch.
+- **Evidence:** `CLAUDE.md:201`: "For background and the recovery-sequence incident that motivated this mechanism, see issue #231 and `docs/superpowers/specs/2026-05-23-multi-session-impl-design.md`." The file resolves at `docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-impl-design.md`. A backtick-path existence sweep over all three round-3 docs produced exactly one unresolvable live pointer — this one; every other hit was a glob placeholder (`tmp/migrate-<src>-to-<dst>-<timestamp>.json`), an autodiscovery candidate path that is not required to exist (`docs/maintainers/project-board.md`, `PROJECT_BOARD.md`, `.github/project-board.md`), a bare basename resolving under `skills/jared/references/`, or a historical CHANGELOG record of a path that was correct at the time. The other citers of the pre-archive path are themselves archived plans, where the stale form is appropriate.
+- **Suggested fix:** Repoint `CLAUDE.md:201` at `docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-impl-design.md`.
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+#### F68 · P2 · dim 1c — CLAUDE.md's "What this repo is" still defines jared as a GitHub-Projects-only steward, which its own architecture section contradicts
+
+- **Location:** `CLAUDE.md:7 (contradicted by CLAUDE.md:63-90)`
+- **Claim:** The orientation paragraph — the first substantive line of the always-loaded file, and the one a session reads to learn what jared is — says jared "stewards a GitHub Projects v2 board as the single source of truth", with no mention of a second backend. Since epic #313 closed, KanbanFlow is a selectable peer backend, and the same file documents it at length eighty lines later. The summary and the architecture section disagree about what the product is.
+- **Evidence:** `CLAUDE.md:7`: "This repo **is** a Claude Code plugin called `jared`. Jared is a skill + slash commands + Python CLI that stewards a GitHub Projects v2 board as the single source of truth." Contrast the same file at `:65-70` ("A KanbanFlow-backed `docs/project-board.md` carries `- backend: kanbanflow` ... Init-time selection landed in #317") and `:72-90` (the capability-degradation section, which exists only because a second backend does). Epic #313 is `CLOSED 2026-06-10`. Corroborating, out of this round's scope: `.claude-plugin/plugin.json:2` and `.claude-plugin/marketplace.json` both describe jared in GitHub-Projects-only terms. Note `skills/jared/SKILL.md:26` handles the same tension explicitly — "The 'GitHub Projects v2' framing in the skill description ... are GitHub-only — on KanbanFlow they degrade per the gated sections" — so the pattern of a GitHub-only framing is known and managed elsewhere; CLAUDE.md:7 carries no such acknowledgment.
+- **Suggested fix:** Amend `CLAUDE.md:7` to say jared stewards a project board — GitHub Projects v2 by default, KanbanFlow selectable — as the single source of truth, mirroring the acknowledgment already present at `SKILL.md:26`.
+- **Verification:** 1 self-challenge · 0 refuted. Bar is below F3–F59's two-verifier standard — see "Round 3 — verification bar" below.
+
+## Phase 1 round 3 — the three top-level docs Phase 1 never read  *(recorded 2026-09-16, #368)*
+
+Round 1 left 12 of 16 reference docs uncited and read that as cleanliness; the completeness critic
+spot-checked two and found drift in both; round 2 then read the rest and hit 11 of 11. On that base
+rate the three docs the "Residual gaps" section named — `CHANGELOG.md`, `CLAUDE.md` and
+`docs/project-board.md` — were presumed to carry findings rather than presumed clean. They did:
+**eight findings, F60 and F62–F68, none P0 and none P1 after verification.** Nine candidates went in;
+the two filed P1 were the two the verifiers hit hardest — F60 survived corrected down to P2, and
+F61 was refuted outright and withdrawn (see "Positive confirmations" above for why, and why the
+F-series skips 61). That is the adversarial step doing its job rather than rubber-stamping.
+
+### Round 3 — verification bar
+
+This round did **not** meet F3–F59's bar uniformly, and the `**Verification:**` line on each entry
+says which bar it got. The operator authorised refute-first verifiers for the two P1 candidates only:
+
+- **F60 and the withdrawn F61** — 2 refute-first opus verifiers each, perspective-diverse
+  (evidence lens + impact lens), same prompt shape as the archived Phase-1 plan. **F60: 1 of 2
+  refuted → survives at corrected severity P2**, with two sub-claims struck. **F61: 2 of 2 refuted
+  → withdrawn.** Every piece of verifier counter-evidence was independently re-run here before it
+  was accepted — the `e39ce30` direct-to-main push, the #285 live-protection incident, the date of
+  the CLAUDE.md sentence, #354's scope, and the installed-tree divergence were all reconfirmed
+  first-hand rather than taken on the verifiers' word.
+- **F62–F68** — 1 self-challenge each, no independent verifier. These are single-fact checks —
+  a path that does or does not resolve, an enumeration that does or does not match a Python enum,
+  a literal string in a template — mechanically verified rather than argued. The bar is lower than
+  F3–F59's and is recorded as such rather than papered over.
+
+The effective bar for the verified pair is still "at least one verifier declined to refute", not
+"two verifiers affirmed" — F60 drew one refutation of its impact mechanism and survived on the
+plan's `< majority refute` rule.
+
+### Negative results — what was checked and found clean
+
+Recorded because "no finding" is only meaningful if the check behind it is stated. These are
+semantic checks against the authoritative record, not path-existence checks.
+
+| check | method | result |
+|---|---|---|
+| CHANGELOG version headings vs. git tags | parsed all 35 `## vX.Y.Z — DATE` headings, compared each date to `git for-each-ref` creatordate in both local and UTC | **35/35 match** |
+| CHANGELOG issue/PR citations resolve | extracted 169 unique `#N`, set-differenced against the union of all 193 issues and 186 PRs | **169/169 resolve**, 0 dangling |
+| CHANGELOG entries cite PRs from their own release window | for each entry, compared every cited PR's `mergedAt` against its tag date and the prior tag's | **0 real violations**; the one flag (`#320` under v0.29.0) is prose context — the landing PR on that line is `#321` |
+| project-board.md field + option IDs vs. the live board | GraphQL `node(id:)` over project #4, compared all 10 IDs | **exact match** — Status field + 5 options, Priority field + 3 options, `Work Stream` correctly `<unset>` |
+| project-board.md milestone table vs. the repo | `gh api repos/brockamer/jared/milestones` | **exact match** — both titles, both due dates (2026-09-30, 2026-11-13), both deliverable sentences |
+| project-board.md `jared migrate` usage line | `jared migrate --help` | **exact match** — all 6 flags |
+| CLAUDE.md CLI inventory ("~19 subcommands") | regex over every `sub.add_parser` in `skills/jared/scripts/jared`, set-differenced both ways | **19/19 exact**, no drift in either direction |
+| CLAUDE.md "v0.2.0's merge commit walks back through 33 phase commits" | `git rev-list --count` across PR #2's merge | **33 commits** (29 carry a `(Phase N)` prefix) |
+| CLAUDE.md `sweep.check_release_changelog_gate` (#220) | grep | **exists**, `sweep.py:648` |
+| `voice:` config knob vs. `lib/board.py` | grep for a parser field | **correctly unparsed** — doctrine-only, read by prose surfaces. Parsing it would repeat the #114/F9 dead-field mistake. **Not a finding.** |
+| regression floor unchanged by this round | `pytest`, `ruff check .` | **900 passed, 3 deselected**; ruff clean. No code was modified. |
+
+The `voice:` row is recorded deliberately: it is the trap this round was most likely to fall into,
+since criterion 3 asks for the `## Jared config` knobs to be verified against the parser and the
+naive reading of "documented but unparsed" is "dead config".
