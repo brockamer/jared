@@ -231,16 +231,42 @@ class KanbanFlowProvider:
 
     # --- index plumbing ---
     def _reseed_index(self) -> None:
-        mapping = {
-            t.number_value: t.id
-            for t in self._client.iter_all_tasks()
-            if t.number_value is not None
-        }
-        self._index.replace(mapping)
+        """Rebuild the number -> task_id map from a full board scan.
 
-    def _ensure_seeded(self) -> None:
-        if self._index.is_empty():
-            self._reseed_index()
+        Collisions are surfaced rather than swallowed (F3, #371). This was a
+        plain dict comprehension keyed by `number_value`, so when two live
+        tasks shared a jared #N one `_id` was silently and permanently
+        dropped — which made `kf_number_index.py`'s own recovery claim
+        ("a reseed scan + manual renumber repairs it") false: nothing ever
+        told the operator there was a collision to renumber.
+
+        The surviving id for a collided number is the lexicographically first
+        one, so #N resolves to the same task on every reseed. Iteration order
+        previously decided it, so the answer could change run to run.
+
+        `replace()` overwrites the map wholesale, which is safe because
+        `iter_all_tasks()` walks every column and `list_tasks` follows the
+        `tasksLimited`/`nextTaskId` cursor to exhaustion — the scan is a
+        complete superset of the board, so the only entries dropped are ones
+        whose task no longer exists.
+        """
+        by_number: dict[int, list[str]] = {}
+        for task in self._client.iter_all_tasks():
+            if task.number_value is not None:
+                by_number.setdefault(task.number_value, []).append(task.id)
+
+        for number, ids in sorted(by_number.items()):
+            if len(ids) > 1:
+                ordered = sorted(ids)
+                print(
+                    f"WARNING: #{number} maps to {len(ordered)} tasks on this "
+                    f"KanbanFlow board: {', '.join(ordered)}. jared will resolve "
+                    f"#{number} to {ordered[0]}; the rest are unreachable by number "
+                    f"until you renumber them in KanbanFlow.",
+                    file=sys.stderr,
+                )
+
+        self._index.replace({number: sorted(ids)[0] for number, ids in by_number.items()})
 
     def _resolve_id(self, ref: IssueRef) -> str:
         task_id = self._index.get(ref)
@@ -389,7 +415,15 @@ class KanbanFlowProvider:
             self._check_option(name, value)
 
     def _next_number(self) -> int:
-        self._ensure_seeded()
+        """Allocate the next free #N from a live board scan (F3, #371).
+
+        Reseeds unconditionally. The previous `_ensure_seeded()` rebuilt only
+        when the index was *empty*, so a non-empty but stale index — a task
+        numbered outside jared's knowledge, a concurrent `jared file` — handed
+        out a number already in use. Costs one board scan per `file()` call,
+        which is the right trade for never issuing a colliding number.
+        """
+        self._reseed_index()
         return self._index.max_number() + 1
 
     def file(
