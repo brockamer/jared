@@ -1331,6 +1331,60 @@ def test_board_parses_operator_docs_section(tmp_path: Path) -> None:
     assert board.code_surface == ["src/**", "lib/**"]
 
 
+def test_board_operator_docs_unescapes_prettier_mangled_globs(tmp_path: Path) -> None:
+    """Prettier escapes a bare `src/**` in a Markdown bullet to `src/\\*\\*` because it
+    reads `**` as bold, and escapes `_` in a path for the same reason. The parser must
+    undo that, or the project silently gets a pattern fnmatch never matches — a doc-sync
+    gate that reports no findings forever while looking correctly configured."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Docs: CLAUDE.md, docs/my\\_notes.md
+        - Code surface: src/\\*\\*, lib/\\*\\*
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == ["CLAUDE.md", "docs/my_notes.md"]
+    assert board.code_surface == ["src/**", "lib/**"]
+
+
+def test_board_operator_docs_strips_code_spans(tmp_path: Path) -> None:
+    """A project that defends against Prettier by wrapping the glob in a code span must
+    also parse. The backticks are Markdown presentation, not part of the pattern."""
+    from skills.jared.scripts.lib.board import Board
+
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Current-state operator docs
+
+        - Docs: `CLAUDE.md`, `docs/PRD.md`
+        - Code surface: `src/**`
+        """)
+    )
+    board = Board.from_path(board_md)
+    assert board.operator_docs == ["CLAUDE.md", "docs/PRD.md"]
+    assert board.code_surface == ["src/**"]
+
+
 def test_board_operator_docs_defaults_code_surface_when_bullet_missing(tmp_path: Path) -> None:
     """`Docs:` bullet present but `Code surface:` bullet absent — default
     code_surface to ['src/**']. Lets projects opt into the check minimally."""
