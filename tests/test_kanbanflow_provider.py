@@ -594,3 +594,56 @@ class TestNextNumberReadsLiveState:
 
         assert provider._index.get(a.number) is not None
         assert provider._index.get(b.number) is not None
+
+
+class TestStaleIndexHit:
+    """A stale index *hit* — distinct from the stale-max path `_next_number`
+    now covers by reseeding unconditionally.
+
+    `get_item` / `_resolve_id` reseed only on a index *miss*. If the index
+    holds an entry whose task has since been renumbered in the KanbanFlow UI,
+    `get(ref)` returns an id and no reseed happens, so jared reports one
+    task's data under another task's number.
+    """
+
+    def test_get_item_does_not_report_a_renumbered_task_under_the_old_number(
+        self, tmp_path: Path
+    ) -> None:
+        provider, client = _provider(tmp_path)
+        item = provider.file(title="a", body="", priority="Low", status="Backlog")
+        assert item.number == 1
+        task_id = client.tasks[item.provider_ref or ""].id
+
+        # Someone renumbers the task in the KanbanFlow UI. The on-disk index
+        # still says 1 -> this task.
+        client.tasks[task_id].number_value = 9
+        assert provider._index.get(1) == task_id
+
+        result = provider.get_item(1)
+
+        assert result is None or result.number == 1, (
+            f"get_item(1) returned #{result.number if result else None} — a stale index "
+            f"hit reported another task's data under #1"
+        )
+
+    def test_get_item_finds_the_task_under_its_new_number(self, tmp_path: Path) -> None:
+        provider, client = _provider(tmp_path)
+        item = provider.file(title="a", body="", priority="Low", status="Backlog")
+        task_id = client.tasks[item.provider_ref or ""].id
+        client.tasks[task_id].number_value = 9
+
+        found = provider.get_item(9)
+
+        assert found is not None
+        assert found.number == 9
+
+    def test_a_fresh_index_hit_is_not_re_fetched_needlessly(self, tmp_path: Path) -> None:
+        """The validation must not turn every read into a board scan — it uses
+        the task `get_item` already fetched."""
+        provider, _ = _provider(tmp_path)
+        provider.file(title="a", body="", priority="Low", status="Backlog")
+
+        item = provider.get_item(1)
+
+        assert item is not None
+        assert item.number == 1
