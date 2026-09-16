@@ -283,17 +283,40 @@ class KanbanFlowProvider:
 
     # --- reads ---
     def get_item(self, ref: IssueRef) -> BoardItem | None:
-        task_id = self._index.get(ref)
-        if task_id is None:
-            self._reseed_index()
+        """Read #`ref`, reseeding once if the on-disk index proves stale.
+
+        Three staleness shapes are handled by the same retry (F3, #371):
+
+        * **miss** — no entry for `ref` (the original behavior),
+        * **dangling** — the entry's task was deleted, so the fetch 404s,
+        * **stale hit** — the entry's task was renumbered in the KanbanFlow
+          UI, so it resolves fine but is no longer #`ref`.
+
+        The third was silent: `get(ref)` returned an id, nothing reseeded, and
+        jared reported one task's data under another task's number. The check
+        uses the task already fetched, so a fresh hit costs no extra call.
+        """
+        for attempt in (0, 1):
             task_id = self._index.get(ref)
-        if task_id is None:
-            return None
-        try:
-            task = self._client.get_task(task_id)
-        except KanbanFlowNotFoundError:
-            return None
-        return self._item_from_task(task)
+            if task_id is None:
+                if attempt == 0:
+                    self._reseed_index()
+                    continue
+                return None
+            try:
+                task = self._client.get_task(task_id)
+            except KanbanFlowNotFoundError:
+                if attempt == 0:
+                    self._reseed_index()
+                    continue
+                return None
+            if task.number_value != ref:
+                if attempt == 0:
+                    self._reseed_index()
+                    continue
+                return None
+            return self._item_from_task(task)
+        return None
 
     def list_open_items(self) -> list[BoardItem]:
         done_id = self._column_id_by_status.get("Done")
