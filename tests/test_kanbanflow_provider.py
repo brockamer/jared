@@ -490,3 +490,107 @@ def test_status_map_missing_mapped_column_raises_on_move(tmp_path: Path) -> None
     provider._index.put(9, task.id)
     with pytest.raises(FieldNotFound):
         provider.move(9, "Done")
+
+
+# --- F3 (#371): reseed must detect collisions; allocation must read live state ---
+
+
+class TestReseedCollisionDetection:
+    """`kf_number_index.py`'s docstring promises that when two tasks end up
+    sharing a jared #N, "a reseed scan + manual renumber repairs it". As
+    implemented the reseed was a plain dict comprehension keyed by number, so
+    one `_id` was silently and permanently dropped — nothing ever told the
+    operator there was a collision to renumber.
+    """
+
+    def test_duplicate_numbers_are_reported_on_stderr(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        provider, client = _provider(tmp_path)
+        client.create_task(name="first", column_id="col-backlog", number_value=7)
+        client.create_task(name="second", column_id="col-backlog", number_value=7)
+
+        provider._reseed_index()
+
+        err = capsys.readouterr().err
+        assert "7" in err
+        assert "task-1" in err and "task-2" in err, err
+        assert "renumber" in err.lower(), "the operator needs the remedy named"
+
+    def test_a_clean_board_reports_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        provider, client = _provider(tmp_path)
+        client.create_task(name="a", column_id="col-backlog", number_value=1)
+        client.create_task(name="b", column_id="col-backlog", number_value=2)
+
+        provider._reseed_index()
+
+        assert capsys.readouterr().err == ""
+
+    def test_the_winner_is_deterministic_not_iteration_order(self, tmp_path: Path) -> None:
+        """Whichever task wins, it must be the same one on every reseed —
+        otherwise #7 resolves to a different task run to run."""
+        provider, client = _provider(tmp_path)
+        client.create_task(name="first", column_id="col-backlog", number_value=7)
+        client.create_task(name="second", column_id="col-backlog", number_value=7)
+
+        provider._reseed_index()
+        first_pass = provider._index.get(7)
+
+        # Re-insert in the opposite order to change what iter_all_tasks yields first.
+        client.tasks = dict(reversed(list(client.tasks.items())))
+        provider._reseed_index()
+
+        assert provider._index.get(7) == first_pass
+        assert first_pass == "task-1", "lowest task id wins, by documented tie-break"
+
+    def test_no_task_is_lost_from_the_report(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Three-way collision: every colliding id must be named, not just the
+        winner and the last writer."""
+        provider, client = _provider(tmp_path)
+        for name in ("a", "b", "c"):
+            client.create_task(name=name, column_id="col-backlog", number_value=4)
+
+        provider._reseed_index()
+
+        err = capsys.readouterr().err
+        for task_id in ("task-1", "task-2", "task-3"):
+            assert task_id in err, err
+
+
+class TestNextNumberReadsLiveState:
+    def test_allocation_sees_a_task_added_after_the_index_was_seeded(self, tmp_path: Path) -> None:
+        """`_ensure_seeded` only reseeded when the index was *empty*, so a
+        non-empty-but-stale index handed out a number already in use on the
+        live board — the exact collision the docstring calls "last-writer-wins".
+        """
+        provider, client = _provider(tmp_path)
+        first = provider.file(title="a", body="", priority="Low", status="Backlog")
+        assert first.number == 1  # index is now non-empty
+
+        # A task jared did not allocate appears on the board (another session,
+        # a manual KanbanFlow edit, a concurrent `jared file`).
+        client.create_task(name="external", column_id="col-backlog", number_value=99)
+
+        second = provider.file(title="b", body="", priority="Low", status="Backlog")
+        assert second.number == 100, "allocation must read the live board, not a stale index"
+
+    def test_allocation_still_starts_at_one_on_an_empty_board(self, tmp_path: Path) -> None:
+        provider, _ = _provider(tmp_path)
+        assert provider.file(title="a", body="", priority="Low", status="Backlog").number == 1
+
+    def test_reseed_does_not_drop_entries_for_live_tasks(self, tmp_path: Path) -> None:
+        """`replace()` overwrites the map wholesale, so the reseed scan must be
+        a complete superset of the board — otherwise fixing the stale-max bug
+        would trade it for a dropped-entry bug."""
+        provider, _ = _provider(tmp_path)
+        a = provider.file(title="a", body="", priority="Low", status="Backlog")
+        b = provider.file(title="b", body="", priority="Low", status="Backlog")
+
+        provider._reseed_index()
+
+        assert provider._index.get(a.number) is not None
+        assert provider._index.get(b.number) is not None
