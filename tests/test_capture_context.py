@@ -160,3 +160,67 @@ def test_end_to_end_update_cycle_preserves_unrelated_sections() -> None:
     assert "done it" in new_body
     # Preamble survives.
     assert new_body.startswith("One-line summary.")
+
+
+# --- F34 (#371): idempotency must be equality, not substring containment ----
+
+
+def test_append_decision_keeps_a_decision_that_is_a_substring_of_an_existing_one() -> None:
+    """The idempotency check compared with `in`, so a shorter decision that
+    happened to be a prefix of one already recorded that day was silently
+    dropped — no error, no output, the decision simply never landed."""
+    sections: dict[str, str] = {}
+    cc.append_decision(sections, "Use UTC everywhere in stage.py")
+    cc.append_decision(sections, "Use UTC")
+
+    result = sections["Decisions"]
+    assert "Use UTC everywhere in stage.py" in result
+    # The short decision must appear as its own line, not merely as a
+    # substring of the longer one.
+    lines = [line.strip() for line in result.splitlines()]
+    assert "Use UTC" in lines, f"the second decision was dropped: {result!r}"
+
+
+def test_append_decision_keeps_two_decisions_where_one_contains_the_other() -> None:
+    """The same defect in the other direction: a longer decision appended
+    after a shorter one it contains."""
+    sections: dict[str, str] = {}
+    cc.append_decision(sections, "Rename the helper")
+    cc.append_decision(sections, "Rename the helper and update its callers")
+
+    lines = [line.strip() for line in sections["Decisions"].splitlines()]
+    assert "Rename the helper" in lines
+    assert "Rename the helper and update its callers" in lines
+
+
+def test_append_decision_still_dedupes_an_exact_repeat_among_several() -> None:
+    """Equality-based dedupe must still hold once the section has content."""
+    sections: dict[str, str] = {}
+    cc.append_decision(sections, "First decision.")
+    cc.append_decision(sections, "Second decision.")
+    before = sections["Decisions"]
+    cc.append_decision(sections, "First decision.")
+
+    assert sections["Decisions"] == before
+    assert before.count("First decision.") == 1
+
+
+def test_append_decision_dedupes_on_whitespace_normalised_text() -> None:
+    """`append_decision` already strips its input; the dedupe must see the
+    same normalised form so a trailing newline doesn't create a twin."""
+    sections: dict[str, str] = {}
+    cc.append_decision(sections, "A decision.")
+    before = sections["Decisions"]
+    cc.append_decision(sections, "  A decision.\n")
+
+    assert sections["Decisions"] == before
+
+
+def test_append_decision_preserves_a_multiline_decision() -> None:
+    sections: dict[str, str] = {}
+    cc.append_decision(sections, "Line one.\nLine two.")
+    cc.append_decision(sections, "Line one.")
+
+    lines = [line.strip() for line in sections["Decisions"].splitlines()]
+    assert "Line one." in lines
+    assert "Line two." in lines
