@@ -36,6 +36,15 @@ from typing import cast
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# F13 (#371): enforce the >=3.11 floor before any lib import. This script runs
+# as its own entry point (own shebang, own __main__ block), so it needs its own
+# call — the guard in `jared` is not on this path. lib.pyversion is deliberately
+# 3.8-safe; other lib modules are not (kanbanflow_provider.py has a module-level
+# `from datetime import UTC`).
+from lib.pyversion import require_python  # type: ignore[import-not-found]  # noqa: E402
+
+require_python()
+
 from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E402
     GitHubProjectsProvider,
 )
@@ -147,9 +156,43 @@ def update_current_state(sections: dict[str, str], text: str) -> None:
         sections["Current state"] = heading + new_body
 
 
+def decision_entries(section_text: str) -> list[tuple[str, str]]:
+    """Parse a `## Decisions` section into (date, text) pairs, one per `###`.
+
+    Exists for `append_decision`'s idempotency check (F34, #371). That check
+    used `entry.strip() in current`, i.e. substring containment, so a new
+    decision that happened to be a prefix of one already recorded under the
+    same date was silently discarded — no error, no output, the decision just
+    never landed. Comparing parsed entries makes the check what it always
+    claimed to be: equality.
+    """
+    entries: list[tuple[str, str]] = []
+    heading = re.compile(r"^###\s+(.+?)\s*$")
+    date_key: str | None = None
+    buf: list[str] = []
+
+    for line in section_text.splitlines():
+        m = heading.match(line)
+        if m:
+            if date_key is not None:
+                entries.append((date_key, "\n".join(buf).strip()))
+            date_key = m.group(1).strip()
+            buf = []
+        elif date_key is not None:
+            buf.append(line)
+
+    if date_key is not None:
+        entries.append((date_key, "\n".join(buf).strip()))
+    return entries
+
+
 def append_decision(sections: dict[str, str], text: str) -> None:
     heading = "## Decisions\n"
-    today = dt.date.today().isoformat()
+    # UTC, not the local clock (F6's defect class, inside F34's range): this
+    # date is the key the idempotency check below compares on, so a local date
+    # would make two runs either side of local midnight disagree about what
+    # "today" is and stop deduping.
+    today = dt.datetime.now(dt.UTC).date().isoformat()
     entry = f"\n### {today}\n{text.strip()}\n\n"
 
     if "Decisions" in sections:
@@ -159,8 +202,10 @@ def append_decision(sections: dict[str, str], text: str) -> None:
         if body_without_heading.strip() in ("(none yet)", "(none)", "None", ""):
             sections["Decisions"] = heading + entry
         else:
-            # Check idempotency — don't duplicate the exact same entry
-            if entry.strip() in current:
+            # Idempotency by equality, not containment (F34, #371): `in`
+            # dropped any decision that was a substring of one already
+            # recorded under today's heading.
+            if (today, text.strip()) in decision_entries(current):
                 return
             if current.endswith("\n\n"):
                 sections["Decisions"] = current + entry.lstrip("\n")

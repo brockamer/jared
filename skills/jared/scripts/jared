@@ -19,6 +19,14 @@ from typing import Any
 # types are still enforced inside lib.board.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# F13 (#371): enforce the >=3.11 floor before any lib import. lib.pyversion is
+# deliberately 3.8-safe so it can report to the interpreter it rejects; every
+# other lib module may use 3.11-only syntax (kanbanflow_provider.py already
+# has a module-level `from datetime import UTC`).
+from lib.pyversion import require_python  # type: ignore[import-not-found]  # noqa: E402
+
+require_python()
+
 from lib import session_lock  # type: ignore[import-not-found]  # noqa: E402
 from lib import worktree as _worktree  # noqa: E402
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
@@ -32,6 +40,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     fetch_issue_title_from_cwd,
     fetch_project_items_batch,
     fetch_recent_comments_batch,
+    gh_env,
     pre_flight_check,
     print_redaction_diff,
     resolve_body,
@@ -1544,6 +1553,12 @@ def _cmd_worktree_add(args: argparse.Namespace) -> int:
     return 0
 
 
+# gh's "branch has no PR" wording, across versions: "no pull requests found
+# for branch X" and the older "no open pull requests found ...". Any other
+# stderr on a non-zero exit is a real failure — see F7 (#371).
+_NO_PR_SIGNATURE = re.compile(r"no\s+(open\s+)?pull\s+requests?\s+found", re.IGNORECASE)
+
+
 def _cmd_wrap_state(args: argparse.Namespace) -> int:
     """Collect git + PR state, hand to decide_next_step, print the step name."""
     import json as _json
@@ -1594,9 +1609,28 @@ def _cmd_wrap_state(args: argparse.Namespace) -> int:
         capture_output=True,
         text=True,
         check=False,
+        env=gh_env(),
     )
 
     if pr_result.returncode != 0:
+        # F7 (#371): `gh pr view` exits non-zero both when no PR exists and
+        # when gh itself fails (auth, network, rate limit). Collapsing the two
+        # makes wrap say `create_pr` for a branch whose PR is merely
+        # unreachable — so only the recognised no-PR wording is treated as
+        # "no PR"; anything else is surfaced and refused.
+        stderr_text = (pr_result.stderr or "").strip()
+        if not _NO_PR_SIGNATURE.search(stderr_text):
+            print(
+                f"ERROR: `gh pr view` failed for branch {branch!r} "
+                f"(exit {pr_result.returncode}): {stderr_text or '<no stderr>'}",
+                file=sys.stderr,
+            )
+            print(
+                "Cannot tell this apart from 'no PR exists', so wrap-state "
+                "refuses to guess. Fix the gh failure and re-run.",
+                file=sys.stderr,
+            )
+            return 1
         pr_state = PrState(
             exists=False,
             pr_number=None,
