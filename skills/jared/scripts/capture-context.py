@@ -179,7 +179,11 @@ def decision_entries(section_text: str) -> list[tuple[str, str]]:
 
 def append_decision(sections: dict[str, str], text: str) -> None:
     heading = "## Decisions\n"
-    today = dt.date.today().isoformat()
+    # UTC, not the local clock (F6's defect class, inside F34's range): this
+    # date is the key the idempotency check below compares on, so a local date
+    # would make two runs either side of local midnight disagree about what
+    # "today" is and stop deduping.
+    today = dt.datetime.now(dt.UTC).date().isoformat()
     entry = f"\n### {today}\n{text.strip()}\n\n"
 
     if "Decisions" in sections:
