@@ -1332,10 +1332,15 @@ def test_board_parses_operator_docs_section(tmp_path: Path) -> None:
 
 
 def test_board_operator_docs_unescapes_prettier_mangled_globs(tmp_path: Path) -> None:
-    """Prettier escapes a bare `src/**` in a Markdown bullet to `src/\\*\\*` because it
-    reads `**` as bold, and escapes `_` in a path for the same reason. The parser must
-    undo that, or the project silently gets a pattern fnmatch never matches — a doc-sync
-    gate that reports no findings forever while looking correctly configured."""
+    """Prettier escapes a bare `src/**` in a Markdown bullet to `src/\\*\\*` (it reads `**`
+    as bold) and a leading `_` in a path segment to `\\_` (it can open emphasis), so
+    `docs/_posts/index.md` becomes `docs/\\_posts/index.md`. The parser must undo both, or
+    the project silently gets a pattern fnmatch never matches — a doc-sync gate that
+    reports no findings forever while looking correctly configured.
+
+    Both escaped forms here were observed from real `prettier --write` output, not
+    hand-written. Note that an *intraword* underscore is not an emphasis delimiter, so
+    `docs/my_notes.md` passes through untouched — only a leading one is at risk."""
     from skills.jared.scripts.lib.board import Board
 
     board_md = tmp_path / "docs" / "project-board.md"
@@ -1350,12 +1355,12 @@ def test_board_operator_docs_unescapes_prettier_mangled_globs(tmp_path: Path) ->
 
         ### Current-state operator docs
 
-        - Docs: CLAUDE.md, docs/my\\_notes.md
+        - Docs: CLAUDE.md, docs/\\_posts/index.md, docs/my_notes.md
         - Code surface: src/\\*\\*, lib/\\*\\*
         """)
     )
     board = Board.from_path(board_md)
-    assert board.operator_docs == ["CLAUDE.md", "docs/my_notes.md"]
+    assert board.operator_docs == ["CLAUDE.md", "docs/_posts/index.md", "docs/my_notes.md"]
     assert board.code_surface == ["src/**", "lib/**"]
 
 
