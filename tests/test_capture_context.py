@@ -224,3 +224,37 @@ def test_append_decision_preserves_a_multiline_decision() -> None:
     lines = [line.strip() for line in sections["Decisions"].splitlines()]
     assert "Line one." in lines
     assert "Line two." in lines
+
+
+def test_append_decision_dates_entries_in_utc() -> None:
+    """F34's dedupe compares (date, text) pairs, so the date key must not come
+    from the local clock — otherwise two runs either side of local midnight
+    produce different keys for the same UTC day and the dedupe stops working.
+    Same defect class as F6, inside the range F34 owns (lines 150-171)."""
+    import datetime as dt
+
+    sections: dict[str, str] = {}
+    cc.append_decision(sections, "A decision.")
+
+    assert f"### {dt.datetime.now(dt.UTC).date().isoformat()}" in sections["Decisions"]
+
+
+def test_capture_context_never_reads_the_local_clock() -> None:
+    """Deterministic guard: the assertion above agrees with a local-clock
+    implementation for most of any given day, so it cannot catch this alone."""
+    import ast
+
+    from tests.conftest import SKILL_SCRIPTS
+
+    tree = ast.parse((SKILL_SCRIPTS / "capture-context.py").read_text())
+    offenders = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "today"
+    ]
+    assert not offenders, (
+        f"capture-context.py reads the local clock via .today() at line(s) {offenders}; "
+        "the ### date heading keys append_decision's idempotency comparison"
+    )
