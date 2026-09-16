@@ -42,7 +42,6 @@ class ItemNotFound(Exception):
     """Raised when no project item corresponds to the given issue number."""
 
 
-
 def _demarkdown(value: str) -> str:
     """Strip Markdown presentation from a config bullet value.
 
@@ -874,7 +873,7 @@ def _fetch_issue_rest_with_etag(repo: str, number: int) -> dict[str, Any] | None
         capture_output=True,
         text=True,
         check=False,
-        env=_child_env(),
+        env=gh_env(),
     )
 
     status = _extract_http_status(result.stdout, result.stderr)
@@ -1004,7 +1003,7 @@ def fetch_issue_title_from_cwd(issue_number: int) -> str:
         return ""
 
 
-def _child_env() -> dict[str, str]:
+def gh_env() -> dict[str, str]:
     """Env for `gh` subprocess calls, with GH_TOKEN/GITHUB_TOKEN removed.
 
     When either var is set, gh prefers it over the OAuth session from
@@ -1012,6 +1011,11 @@ def _child_env() -> dict[str, str]:
     an OAuth token that has it — and `gh auth status` doesn't surface the
     override. Scrubbing here forces project mutations (and every other gh
     call) onto the OAuth session jared expects to be authoritative.
+
+    Public (renamed from `_child_env` by F7, #371). `run_gh`, `run_gh_raw`
+    and `run_graphql` all route through it, but a `gh` call made outside
+    those wrappers must pass `env=gh_env()` explicitly — `wrap-state`'s
+    `gh pr view` did not, and silently ran under a shadowing PAT.
     """
     env = os.environ.copy()
     env.pop("GH_TOKEN", None)
@@ -1112,7 +1116,7 @@ def _probe_oauth_scopes() -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            env=_child_env(),
+            env=gh_env(),
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -1145,7 +1149,7 @@ def run_gh_raw(args: list[str], *, cache: str | None = None, input_text: str | N
         capture_output=True,
         text=True,
         check=False,
-        env=_child_env(),
+        env=gh_env(),
         input=input_text,
     )
     if result.returncode != 0:

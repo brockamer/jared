@@ -147,6 +147,36 @@ def update_current_state(sections: dict[str, str], text: str) -> None:
         sections["Current state"] = heading + new_body
 
 
+def decision_entries(section_text: str) -> list[tuple[str, str]]:
+    """Parse a `## Decisions` section into (date, text) pairs, one per `###`.
+
+    Exists for `append_decision`'s idempotency check (F34, #371). That check
+    used `entry.strip() in current`, i.e. substring containment, so a new
+    decision that happened to be a prefix of one already recorded under the
+    same date was silently discarded — no error, no output, the decision just
+    never landed. Comparing parsed entries makes the check what it always
+    claimed to be: equality.
+    """
+    entries: list[tuple[str, str]] = []
+    heading = re.compile(r"^###\s+(.+?)\s*$")
+    date_key: str | None = None
+    buf: list[str] = []
+
+    for line in section_text.splitlines():
+        m = heading.match(line)
+        if m:
+            if date_key is not None:
+                entries.append((date_key, "\n".join(buf).strip()))
+            date_key = m.group(1).strip()
+            buf = []
+        elif date_key is not None:
+            buf.append(line)
+
+    if date_key is not None:
+        entries.append((date_key, "\n".join(buf).strip()))
+    return entries
+
+
 def append_decision(sections: dict[str, str], text: str) -> None:
     heading = "## Decisions\n"
     today = dt.date.today().isoformat()
@@ -159,8 +189,10 @@ def append_decision(sections: dict[str, str], text: str) -> None:
         if body_without_heading.strip() in ("(none yet)", "(none)", "None", ""):
             sections["Decisions"] = heading + entry
         else:
-            # Check idempotency — don't duplicate the exact same entry
-            if entry.strip() in current:
+            # Idempotency by equality, not containment (F34, #371): `in`
+            # dropped any decision that was a substring of one already
+            # recorded under today's heading.
+            if (today, text.strip()) in decision_entries(current):
                 return
             if current.endswith("\n\n"):
                 sections["Decisions"] = current + entry.lstrip("\n")
