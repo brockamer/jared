@@ -38,6 +38,20 @@ from tests.conftest import CLI_PATH, SKILL_SCRIPTS
 
 STAGE_PATH = SKILL_SCRIPTS / "stage.py"
 
+# Every surface a stranger can reach that runs as its own script. `jared` is
+# the CLI entry point; the rest are invoked directly by slash commands, each
+# with its own shebang and its own `if __name__ == "__main__"`, so each needs
+# its own guard — `lib/pyversion.py` cannot be reached through a sibling.
+GUARDED_SCRIPTS = [
+    CLI_PATH,
+    STAGE_PATH,
+    SKILL_SCRIPTS / "sweep.py",
+    SKILL_SCRIPTS / "dependency-graph.py",
+    SKILL_SCRIPTS / "capture-context.py",
+    SKILL_SCRIPTS / "bootstrap-project.py",
+    SKILL_SCRIPTS / "archive-plan.py",
+]
+
 
 # --- the shared helper ------------------------------------------------------
 
@@ -114,27 +128,19 @@ def _load(path: Path, name: str) -> None:
         sys.modules.pop(name, None)
 
 
-@pytest.mark.parametrize(
-    ("path", "name"),
-    [(CLI_PATH, "jared_cli_guardtest"), (STAGE_PATH, "stage_guardtest")],
-)
-def test_script_refuses_to_run_below_311(
-    path: Path, name: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.parametrize("path", GUARDED_SCRIPTS, ids=lambda p: p.name)
+def test_script_refuses_to_run_below_311(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "version_info", (3, 10, 12, "final", 0))
 
     with pytest.raises(SystemExit) as exc:
-        _load(path, name)
+        _load(path, f"{path.stem}_guardtest")
 
     assert "3.11" in str(exc.value)
 
 
-@pytest.mark.parametrize(
-    ("path", "name"),
-    [(CLI_PATH, "jared_cli_okversion"), (STAGE_PATH, "stage_okversion")],
-)
-def test_script_loads_normally_on_a_supported_version(path: Path, name: str) -> None:
-    _load(path, name)  # must not raise
+@pytest.mark.parametrize("path", GUARDED_SCRIPTS, ids=lambda p: p.name)
+def test_script_loads_normally_on_a_supported_version(path: Path) -> None:
+    _load(path, f"{path.stem}_okversion")  # must not raise
 
 
 # --- the guard is early enough to matter ------------------------------------
@@ -172,7 +178,7 @@ def _module_level_linenos(path: Path) -> tuple[int | None, int | None]:
     return guard, risky
 
 
-@pytest.mark.parametrize("path", [CLI_PATH, STAGE_PATH])
+@pytest.mark.parametrize("path", GUARDED_SCRIPTS, ids=lambda p: p.name)
 def test_guard_precedes_every_311_dependent_import(path: Path) -> None:
     guard, risky = _module_level_linenos(path)
 

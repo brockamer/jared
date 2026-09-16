@@ -33,24 +33,33 @@ from typing import Any, cast
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# F13 (#371): enforce the >=3.11 floor before any lib import. This script runs
+# as its own entry point (own shebang, own __main__ block), so it needs its own
+# call — the guard in `jared` is not on this path. lib.pyversion is deliberately
+# 3.8-safe; other lib modules are not (kanbanflow_provider.py has a module-level
+# `from datetime import UTC`).
+from lib.pyversion import require_python  # type: ignore[import-not-found]  # noqa: E402
+
+require_python()
+
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     Board,
     BoardConfigError,
     GhInvocationError,
 )
-from lib.board import (
+from lib.board import (  # noqa: E402
     check_graphql_budget as board_check_graphql_budget,
 )
-from lib.board import (
+from lib.board import (  # noqa: E402
     fetch_blocked_by_edges as board_fetch_blocked_by_edges,
 )
-from lib.board import (
+from lib.board import (  # noqa: E402
     fetch_issue_state_rest as board_fetch_issue_state_rest,
 )
-from lib.board import (
+from lib.board import (  # noqa: E402
     graphql_budget as board_graphql_budget,
 )
-from lib.board import (
+from lib.board import (  # noqa: E402
     run_gh as board_run_gh,
 )
 from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
