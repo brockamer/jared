@@ -16,10 +16,7 @@ import argparse
 import math
 import re
 import sys
-from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
 
 # Extend sys.path so `from lib.board import …` resolves when this script is
 # loaded directly (CLI) or via SourceFileLoader in tests.  Mirrors the pattern
@@ -27,6 +24,17 @@ from typing import Any
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+
+# F13 (#371): the `from datetime import UTC` below is a 3.11-only import, so
+# the floor must be enforced above it — otherwise a 3.10 user gets a raw
+# ImportError and the guard never runs.
+from lib.pyversion import require_python  # type: ignore[import-not-found]  # noqa: E402
+
+require_python()
+
+from dataclasses import dataclass, field  # noqa: E402
+from datetime import UTC, date, datetime  # noqa: E402
+from typing import Any  # noqa: E402
 
 from lib.board import Board  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # noqa: E402
@@ -79,6 +87,23 @@ _ACCEPTANCE_HEADING_ANY = re.compile(r"^##\s+Acceptance\b", re.MULTILINE)
 _ISSUE_REF = re.compile(r"#(\d+)")
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
+
+
+def utc_today(now: datetime | None = None) -> date:
+    """Today's calendar date in UTC (F6, #371).
+
+    Every timestamp stage.py ranks against is UTC — GitHub's `createdAt` and
+    `updatedAt`, and a milestone's `due_on`. `date.today()` reads the local
+    system clock, so for the hours where the local and UTC calendars disagree
+    the same board staged from two machines yields different Backlog ages and
+    milestone-proximity values. Ranking must not depend on where the operator
+    is sitting.
+
+    `now` is injectable so a test can pin an instant where the two calendars
+    genuinely differ; it must be timezone-aware.
+    """
+    moment = datetime.now(UTC) if now is None else now
+    return moment.astimezone(UTC).date()
 
 
 def priority_rank(priority: str | None) -> int:
@@ -296,7 +321,8 @@ def render(
 ) -> str:
     """Format StageProposals as the stdout block documented in the spec."""
     if today is None:
-        today = now.date()
+        # `now` is localised for display; the ranking date must stay UTC (F6).
+        today = utc_today()
     lines: list[str] = []
     lines.append(f"/jared-stage — proposals {now.strftime('%Y-%m-%d %H:%M')}")
     if backlog_age_note:
@@ -518,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         "ranked by Priority and age only",
     )
     items = fetch_items_for_stage(board, skip_native_edges=native_edges_note is not None)
-    today = date.today()
+    today = utc_today()
     proposals = stage_proposals(items, up_next_cap=args.up_next_cap, today=today)
     now = datetime.now(UTC).astimezone()
     backlog_age_note = degraded_or_none(

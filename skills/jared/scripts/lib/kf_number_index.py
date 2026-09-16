@@ -11,7 +11,11 @@ Stored as {"numbers": {"<N>": "<task_id>"}}. Writes use atomic-rename
 
 Concurrency: document-and-accept (operator decision 2026-06-03). Two concurrent
 `jared file` calls may both pick max+1 and collide (last-writer-wins on the
-index); a reseed scan + manual renumber repairs it. No locking.
+index); a reseed scan reports the collision on stderr — naming the number and
+every task id that claims it — and a manual renumber in KanbanFlow repairs it.
+No locking. Until #371 the reseed collapsed such a collision silently, so this
+paragraph described a recovery the code did not offer; see
+`KanbanFlowProvider._reseed_index`.
 """
 
 from __future__ import annotations
