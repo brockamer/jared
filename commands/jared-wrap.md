@@ -106,6 +106,15 @@ Flow:
    STEP=$(${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared wrap-state)
    ```
 
+   **Check the exit code before dispatching on `$STEP`.** `wrap-state` exits non-zero
+   with an empty stdout when it cannot determine PR state — `gh pr view` failed for a
+   reason other than "no PR exists" (auth, network, rate limit), so reporting
+   `create_pr` would tell you to open a PR that may already exist (F7, #371). On a
+   non-zero exit: print the CLI's stderr verbatim, do **not** dispatch a step, and exit
+   the loop. The lock-clear block below still runs. Re-run `/jared-wrap` once the `gh`
+   failure is addressed. A detached HEAD reaches this path too, since the branch name
+   `wrap-state` resolves is empty there.
+
    Each iteration of the loop runs the CLI to determine the next step, then executes that step. Loop exits on `cleanup` (which runs the lock-clear + worktree-remove block below), or when the operator declines a confirm prompt, or when a non-actionable step (`wait_checks`, `surface_failure`, `surface_conflict`, `update_branch`, `blocked_on_review`) is returned. `update_branch` exits-then-re-run (like `surface_conflict` — you act, push, and re-run `/jared-wrap`); `blocked_on_review` is terminal for the loop (it either ends in an operator-confirmed `--admin` merge or a "get a review" exit).
 
    **Step actions:**

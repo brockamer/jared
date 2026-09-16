@@ -1056,3 +1056,66 @@ class TestMain:
         stage = import_stage()
         rc = stage.main(["--up-next-cap", "5"])
         assert rc == 0
+
+
+# --- F6 (#371): "today" must come from UTC, not the local system clock ------
+
+
+class TestUtcToday:
+    """`stage.py` ranks Backlog age and milestone proximity against "today".
+
+    Every timestamp it compares against — GitHub's `createdAt`, `updatedAt`,
+    milestone `due_on` — is UTC. Deriving "today" from the local system clock
+    puts the operator's timezone into the ranking, so the same board staged
+    from two machines can propose different promotions.
+    """
+
+    # 23:30 UTC is still 2026-09-16 in UTC, but already 2026-09-17 at UTC+14.
+    INSTANT = datetime(2026, 9, 16, 23, 30, tzinfo=UTC)
+
+    def test_the_chosen_instant_really_does_straddle_a_date_boundary(self) -> None:
+        """Guard the guard: if this ever stops being true the tests below go
+        vacuous, passing whether or not the fix is present."""
+        from zoneinfo import ZoneInfo
+
+        local = self.INSTANT.astimezone(ZoneInfo("Pacific/Kiritimati"))
+        assert local.date() == date(2026, 9, 17)
+        assert self.INSTANT.date() == date(2026, 9, 16)
+        assert local.date() != self.INSTANT.date()
+
+    def test_utc_today_uses_the_utc_calendar_date(self) -> None:
+        from zoneinfo import ZoneInfo
+
+        stage = import_stage()
+        local_date = self.INSTANT.astimezone(ZoneInfo("Pacific/Kiritimati")).date()
+
+        assert stage.utc_today(self.INSTANT) == date(2026, 9, 16)
+        assert stage.utc_today(self.INSTANT) != local_date
+
+    def test_utc_today_defaults_to_the_current_utc_date(self) -> None:
+        stage = import_stage()
+        assert stage.utc_today() == datetime.now(UTC).date()
+
+    def test_stage_py_never_reads_the_local_clock(self) -> None:
+        """Regression guard against reintroduction.
+
+        The behavioral tests above cannot catch a *new* `date.today()` added
+        at some other call site, and the CI machine runs in UTC, where the
+        bug is invisible. This reads the source instead.
+        """
+        import ast
+
+        from tests.conftest import SKILL_SCRIPTS
+
+        tree = ast.parse((SKILL_SCRIPTS / "stage.py").read_text())
+        offenders = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "today"
+        ]
+        assert not offenders, (
+            f"stage.py reads the local clock via .today() at line(s) {offenders}; "
+            "use utc_today() so ranking matches GitHub's UTC timestamps"
+        )
