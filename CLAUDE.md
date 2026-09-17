@@ -150,23 +150,41 @@ Main is protected — every substantive change lands via a PR (`gh pr create` �
 - **Phase-numbered commits.** When implementing from a plan with explicit phases, prefix commits with `(Phase N.M)`: e.g., `feat(jared): wire next-session-prompt CLI (Phase 3.2)`. Preserves the phase trail when squashing isn't used.
 - **Merge strategy is `--merge`, not squash or rebase.** Preserves the phase-by-phase commit trail on main — git archaeology depends on it (e.g., v0.2.0's merge commit walks back through 33 phase commits).
 - **Parallel sessions must use git worktrees**, not `git checkout -b` in the shared repo — the shared `.git/HEAD` is the trap. See `skills/jared/references/parallel-sessions.md`.
-- **Never pair a closing keyword with a literal issue number in a commit message or PR body.** GitHub's
-  parser reads *both* surfaces on merge to `main`, and it honours neither negation, nor quotation, nor
-  backticks. This has fired twice on #350: once from a PR body reading "Does not clo&#115;e" plus the
-  number (2026-06-11), and once from commit `60ccc9e` (2026-09-12) whose message *quoted the keyword while
-  explaining the first incident*. Refer to issues as `#N` only; to describe a keyword, name it
-  ("a closing keyword paired with the issue number") rather than writing it beside digits. Check both
-  surfaces **before `git commit`**, not before `gh pr create` — by PR time the payload is already in
-  history:
+- **Never pair a closing keyword with a literal issue number in a commit message, PR title, or PR
+  body.** GitHub's parser reads those surfaces on merge to `main`, and it honours neither negation, nor
+  quotation, nor backticks, nor markdown. This has now fired **three** times, every time from text that
+  was *explaining or negating* the danger: a PR body reading "Does not clo&#115;e" plus the number
+  (2026-06-11, #350); commit `60ccc9e` (2026-09-12, #350) whose message *quoted the keyword while
+  explaining the first incident*; and a commit during #369 (2026-09-16) that described this very rule's
+  suffix format and put markdown emphasis between the keyword and the number. Refer to issues as `#N`
+  only; to describe a keyword, name it ("a closing keyword paired with the issue number") rather than
+  writing it beside digits. Check **before `git commit`**, not before `gh pr create` — by PR time the
+  payload is already in history:
 
   ```bash
-  grep -nEi '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b[[:space:]]*:?[[:space:]]*#[0-9]'
+  grep -nEi '(close[sd]?|fix(e[sd])?|resolve[sd]?)[^A-Za-z0-9]{0,4}#[0-9]'
   ```
 
-  `docs/project-board.md` § "GitHub-side automation" has carried this rule for commit bodies since #156;
-  it is repeated here because that file is not loaded into a session by default and CLAUDE.md is. The
-  risk is structural in this repo, not incidental — an epic about *closing* issues and *fixing* findings
-  uses those words as ordinary prose on every line.
+  **Do not narrow this pattern.** An earlier version allowed only `[[:space:]]*:?[[:space:]]*` between
+  the keyword and the number, so *any* intervening punctuation walked through it — `**bold**`,
+  `*italic*`, `_underscore_`, a stray paren. That hole is what let the third firing reach a pushed
+  commit, and a clean result from the narrow form is not evidence. The form above deliberately
+  over-matches: a flagged line is a prompt to rephrase or confirm, not proof of a defect. The asymmetry
+  justifies it — a false negative silently closes an issue, a false positive costs one rephrase.
+  `tests/test_autoclose_guard.py` reads this exact pattern out of this file and asserts it against the
+  known-armed fixtures, so narrowing it fails the suite rather than failing silently.
+
+  Run it on all three surfaces — the commit message, and the PR title and body:
+
+  ```bash
+  git log origin/main..HEAD --format='%B' | grep -nEi '(close[sd]?|fix(e[sd])?|resolve[sd]?)[^A-Za-z0-9]{0,4}#[0-9]'
+  ```
+
+  `docs/project-board.md` § "Project workflows — recommended settings" has carried the narrative form of
+  this rule since #156; it is repeated here because that file is not loaded into a session by default and
+  CLAUDE.md is. The risk is structural in this repo, not incidental — an epic about *closing* issues and
+  *fixing* findings uses those words as ordinary prose on every line, and writing *about* the landmine is
+  itself the highest-risk activity.
 
 ## Multi-session work — `--session N` opt-in
 
