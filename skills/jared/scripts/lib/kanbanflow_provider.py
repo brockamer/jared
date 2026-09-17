@@ -399,18 +399,26 @@ class KanbanFlowProvider:
         return out
 
     def _user_name(self, user_id: str) -> str:
+        """Resolve a KF user id to a display name, or "" if unknown.
+
+        The "" fallback is the `Comment.author` contract, not a convenience:
+        returning the id itself would put a provider-internal `_id` on the
+        neutral side of the seam, which is the one thing it exists to prevent.
+        Unknown ids are ordinary — a removed board member still owns comments
+        (#414).
+        """
         if not hasattr(self, "_user_name_by_id"):
             self._user_name_by_id: dict[str, str] = {
                 u.id: u.name for u in self._client.list_users()
             }
-        return self._user_name_by_id.get(user_id, user_id)
+        return self._user_name_by_id.get(user_id, "")
 
     def list_comments(self, ref: IssueRef) -> list[Comment]:
         """Return a task's comments oldest→newest as neutral Comments.
 
         Wraps the client's list_comments; resolves KF authorUserId to a display
-        name (lazily, one /users fetch per provider instance). Falls back to the
-        raw id if the user is unknown.
+        name (lazily, one /users fetch per provider instance). An id that is
+        absent from /users resolves to "", per the Comment.author contract.
         """
         task_id = self._resolve_id(ref)
         return [
