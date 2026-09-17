@@ -1193,9 +1193,9 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
 
     Pure read: lists In Progress (with last Session-note one-liners), top 3
     Up Next, recently closed (last 7 days), plus a kickoff footer. No
-    GitHub side effects; no synthesis. The /jared-wrap slash command calls
-    this and layers conversation-context synthesis (frame, anti-targets) on
-    top before writing to tmp/next-session-prompt-<TIMESTAMP>.md.
+    GitHub side effects; no synthesis. /jared-start calls this at session
+    start and renders the output verbatim; nothing is written to disk, so
+    the posture cannot go stale between sessions.
 
     The output's structural contract is what the slash command depends on,
     so changes here are user-visible.
@@ -1293,7 +1293,10 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     print("```")
     print()
     print("---")
-    print("Regenerated each wrap; do not edit. Source of truth is the issues, plans, and memory.")
+    print(
+        "Assembled live from board state on each invocation — not a stored file. "
+        "Source of truth is the issues, plans, and memory."
+    )
     return 0
 
 

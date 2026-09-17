@@ -81,7 +81,6 @@ class Board:
     project_url: str = ""
     _field_ids: dict[str, str] = field(default_factory=dict)
     _field_options: dict[str, dict[str, str]] = field(default_factory=dict)
-    session_handoff_prompt: str = "ask"
     session_start_checks: list[str] = field(default_factory=list)
     # Optional "current-state operator docs" config — populated from the
     # `### Current-state operator docs` block in docs/project-board.md.
@@ -194,7 +193,6 @@ class Board:
 
         jared_config = cls._parse_jared_config(text)
         backend = jared_config.get("backend", "github")
-        session_handoff_prompt = jared_config.get("session-handoff-prompt", "ask")
         session_start_checks = cls._parse_session_start_checks(text)
         operator_docs, code_surface = cls._parse_operator_docs(text)
 
@@ -218,7 +216,6 @@ class Board:
                 backend="kanbanflow",
                 status_column_map=status_column_map,
                 board_id=board_id,
-                session_handoff_prompt=session_handoff_prompt,
                 session_start_checks=session_start_checks,
                 operator_docs=operator_docs,
                 code_surface=code_surface,
@@ -257,7 +254,6 @@ class Board:
             project_url=project_url,
             _field_ids=field_ids,
             _field_options=field_options,
-            session_handoff_prompt=session_handoff_prompt,
             session_start_checks=session_start_checks,
             operator_docs=operator_docs,
             code_surface=code_surface,

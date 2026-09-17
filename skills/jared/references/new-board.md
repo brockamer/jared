@@ -18,7 +18,7 @@ For solo-dev repos, the typical answer is "there's a project at `github.com/user
 ### 2. Run bootstrap-project.py
 
 ```bash
-scripts/bootstrap-project.py \
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py \
   --url https://github.com/users/<owner>/projects/<N> \
   --repo <owner>/<repo>
 ```
@@ -32,7 +32,7 @@ The script:
 
 For a genuinely blank project (just created), the script proposes creating:
 
-- **Status** field: Backlog / Up Next / In Progress / Done
+- **Status** field: Backlog / Up Next / In Progress / Blocked / Done
 - **Priority** field: High / Medium / Low
 - **Work Stream** field (optional): asks if the project has distinct work categories worth bucketing; if yes, asks for the streams
 
@@ -132,7 +132,7 @@ Any No, propose grooming or filtered views instead.
 3. **Set up fields** matching the source board: Status / Priority, plus any project-specific fields the source uses (e.g., Work Stream, if defined), adjusted for the new domain.
 4. **Bootstrap conventions:**
    ```bash
-   scripts/bootstrap-project.py --url <new-project-url> --repo <owner>/<repo>
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py --url <new-project-url> --repo <owner>/<repo>
    ```
    Write conventions to `docs/<n>-board.md` (not overwriting the source's).
 5. **Migrate issues:** for each issue that belongs on the new board:

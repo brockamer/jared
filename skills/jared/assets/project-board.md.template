@@ -122,8 +122,6 @@ This file covers the board itself. See the Jared skill's references for:
 
 Project-level knobs that change Jared's behavior on this board. Each bullet is `name: value`. Omit any line to use its default.
 
-- `session-handoff-prompt: ask` — when `/jared-wrap` finishes, ask whether to draft a session handoff prompt for the next session. Values: `ask` (default), `always`, `never`. Used by `/jared-wrap`. The prompt is written to `tmp/next-session-prompt-<TIMESTAMP>.md` and is `.gitignore`d — ephemeral by design.
-
 - `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared`, `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default) — the Jared Dunn character voice; `disabled` — plain technical prose, same structural content, Jared-isms stripped; `ste` — ASD-STE100 Simplified Technical English per `references/voice-ste.md` (controlled vocabulary, active voice, sentence-length caps, no asides; machine strings, technical names, script output and board-write drafts pass through verbatim). Used by every slash-command stub. Only the literal values `disabled` and `ste` change the rendering; any other value falls back to `enabled`. The voice activation lives entirely in the plugin (no user-local Claude Code settings, no SessionStart hooks, no memory entries required); this bullet is the only way to change it. See SKILL.md § "Project-level kill switch" (under the voice doctrine), `references/voice.md` and `references/voice-ste.md`.
 
 ### Current-state operator docs
@@ -143,7 +141,7 @@ alike — there's no need for `**/*.md`. Use specific path prefixes
 
 ## Session start checks
 
-Operational commands that the session handoff prompt should embed in its "Quick health check on session start" section. Each fenced ```bash block is one check command; the slash command runs `jared next-session-prompt --include-session-checks` to render them. Omit the section if you don't want any.
+Operational commands to embed in the "Quick health check on session start" section of the posture `jared next-session-prompt` emits. Each fenced ```bash block is one check command; the slash command runs `jared next-session-prompt --include-session-checks` to render them. Omit the section if you don't want any.
 
 Example for a project with a Docker-hosted operator and a sqlite pipeline:
 

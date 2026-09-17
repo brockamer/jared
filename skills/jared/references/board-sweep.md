@@ -42,7 +42,7 @@ Status in particular is easy to miss: GitHub's auto-add-to-project workflow adds
 
 ### 3. Up Next queue and pullable check
 
-- More than 3 items in Up Next? Overstocked. Propose moving lower items back to Backlog.
+- More than 8 items in Up Next? Overstocked. Propose moving lower items back to Backlog. (8 is `sweep.py`'s `check_up_next_size` default and there is no override flag, so a lower threshold here would flag boards the tool itself reports as healthy.)
 - Is the top item **pullable**? Specifically: does it have (a) a clear next action stated in the body, (b) acceptance criteria, (c) all dependencies unblocked? If not, propose reshaping it or pulling the next pullable item instead.
 - Up Next items without Priority set — fix.
 

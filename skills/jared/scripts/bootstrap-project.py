@@ -738,7 +738,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=Board.DEFAULT_CONFIG_PATHS[0],
         help=f"Output path (default: {Board.DEFAULT_CONFIG_PATHS[0]})",
     )
-    parser.add_argument("--wip-limit", type=int, default=3)
+    parser.add_argument("--wip-limit", type=int, default=4, help="In Progress cap")
     parser.add_argument(
         "--no-create",
         action="store_true",

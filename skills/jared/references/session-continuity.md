@@ -128,24 +128,40 @@ When a session starts in a project with `docs/project-board.md`, Jared orients a
 
 The orientation output:
 
+````
+# Session handoff — <owner>/<repo> — 2026-04-19 09:12
+
+## In flight
+
+- #14 [High] Add excluded_employers config + prefilter
+  Last session: "decide YAML ordering"
+- #20 [High] First-tester onboarding materials
+  Last session: "waiting for feedback on the draft"
+
+## Top of Up Next
+
+- #31 [High] Add JD-quality scoring tier
+- #27 [Medium] Logging consistency pass
+- #35 [Medium] Config externalization for prefilter
+
+## Recently closed (last 7 days)
+
+- #12 Strip priority labels from open issues  (2026-04-17)
+
+## To start
+
+Read the sections above, decide which issue to pull, then:
+
 ```
-Where we are (board state, 2026-04-19):
-
-In Progress (2/3):
-  #14 [High/Infrastructure] Add excluded_employers config + prefilter
-    Last session (2026-04-18): "2/3 tests passing, unpushed. Next: decide YAML ordering."
-  #20 [High/Job Search] First-tester onboarding materials
-    Last session (2026-04-16): "Draft sent to Alice; waiting for feedback."
-
-Up Next (top 3):
-  #31 [High/Job Search] Add JD-quality scoring tier — pullable
-  #27 [Medium/Infrastructure] Logging consistency pass — needs acceptance criteria
-  #35 [Medium/Generalization] Config externalization for prefilter — depends on #14
-
-Blocked: none.
-
-Aging: #18 (High Backlog) filed 2026-03-25, no activity — worth revisiting.
+/jared-start <#N>
 ```
+````
+
+`next-session-prompt` emits exactly these sections — plus `## Session-N
+staged` under `--session N`, and `## Quick health check on session start`
+when the board configures one. There is no Blocked section and no Aging
+section; those belong to `/jared-groom`. The `Last session:` line carries
+the next action only, with no date.
 
 That's the handoff. No tmp file required.
 

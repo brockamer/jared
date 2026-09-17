@@ -8,7 +8,7 @@ Run via `/jared-init` followed by `/jared-reshape`, or directly by asking Jared 
 
 ### 1. Bootstrap the convention doc
 
-If `docs/project-board.md` (or PROJECT_BOARD.md, .github/project-board.md) doesn't exist, run `scripts/bootstrap-project.py` to generate it. If it exists but is stale, run with `--diff` to surface drift and propose updates.
+If `docs/project-board.md` (or PROJECT_BOARD.md, .github/project-board.md) doesn't exist, run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py` to generate it. If it exists but is stale, re-run the same command with no extra flag: the script auto-detects staleness or a legacy shape, writes `<output>.new`, and prints a unified diff for you to review. Apply it with `mv`, or re-run with `--force` to overwrite in place. (There is no `--diff` flag.)
 
 ### 2. Strip hardcoded values from older convention docs
 
@@ -52,7 +52,7 @@ Same scan for specs.
 
 If the project uses the Priority field but also has legacy `priority: high` / `priority: med` / `priority: low` labels, propose stripping the labels from all open issues. The field is canonical.
 
-`scripts/sweep.py` detects these; follow up with:
+`${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/sweep.py` detects these; follow up with:
 
 ```bash
 # Remove in bulk (after user approval)
@@ -89,7 +89,7 @@ From here on, `/jared-wrap` maintains the discipline.
 
 ### 10. Final sweep
 
-After the migration pass, run a full `scripts/sweep.py` to confirm the board is clean. Report any residual issues (items that need human judgment — "this plan references #5 and #6, but #5 is closed and #6 is open; should the plan stay or archive?").
+After the migration pass, run a full `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/sweep.py` to confirm the board is clean. Report any residual issues (items that need human judgment — "this plan references #5 and #6, but #5 is closed and #6 is open; should the plan stay or archive?").
 
 ## The migration proposal
 
