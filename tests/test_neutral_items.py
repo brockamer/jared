@@ -16,7 +16,12 @@ import pytest
 
 from skills.jared.scripts.lib.board import Board
 from skills.jared.scripts.lib.board_provider import BoardItem
-from skills.jared.scripts.lib.neutral_items import board_item_to_row, neutral_open_rows
+from skills.jared.scripts.lib.neutral_items import (
+    board_item_to_issue,
+    board_item_to_row,
+    neutral_issue_rows,
+    neutral_open_rows,
+)
 from tests.conftest import patch_gh, write_minimal_board
 
 
@@ -158,3 +163,40 @@ def test_neutral_rows_from_the_real_github_provider_have_check_shape(
     assert row["status"] == "Up Next"
     assert row["priority"] == "High"
     assert row["labels"] == ["bug"]
+
+
+# --- the flat issue-row projection (dependency-graph, audit fetch) ---------
+
+
+def test_issue_row_shape_matches_gh_issue_list() -> None:
+    """`gh issue list --json number,title,body,labels,state` is the shape
+    dependency-graph and `jared audit fetch` read. Labels arrive as dicts with
+    a `name` key, not bare strings — code downstream indexes ["name"]."""
+    item = BoardItem(
+        number=5,
+        title="t",
+        status="Backlog",
+        priority="High",
+        body="a body",
+        labels=["bug", "epic"],
+    )
+
+    row = board_item_to_issue(item)
+
+    assert row["number"] == 5
+    assert row["title"] == "t"
+    assert row["body"] == "a body"
+    assert row["labels"] == [{"name": "bug"}, {"name": "epic"}]
+    assert row["state"] == "OPEN"
+
+
+def test_neutral_issue_rows_come_from_the_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    board = Board.from_path(write_minimal_board(tmp_path))
+    patch_gh(monkeypatch, json.dumps(_OPEN_ITEMS_RESPONSE))
+
+    rows = neutral_issue_rows(board)
+
+    assert [r["number"] for r in rows] == [11]
+    assert rows[0]["labels"] == [{"name": "bug"}]
