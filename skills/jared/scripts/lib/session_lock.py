@@ -1,20 +1,30 @@
-"""Session-presence locking for parallel jared sessions (#231, #236, #259).
+"""Session-presence locking for parallel jared sessions (#231, #236, #259, #376).
 
-Every active `/jared-start` writes a JSON lock file at `<repo>/.jared/session-<issue>.lock`
-recording the issue, start time, optional `--session N` value, worktree path, and the
-writing process's PID (diagnostic only). The lock is keyed by issue, not PID: the
-CLI subprocess that writes the lock exits immediately, so a PID-keyed file would be
-dead-on-arrival and the B-leg refusal would never fire (the original #231/#236
-implementation had this defect — #259 fixes it).
+Every active `/jared-start` writes a JSON lock file at
+`<repo>/.git/jared/session-<issue>.lock` recording the issue, start time, optional
+`--session N` value, worktree path, and the writing process's PID (diagnostic only).
+The lock is keyed by issue, not PID: the CLI subprocess that writes the lock exits
+immediately, so a PID-keyed file would be dead-on-arrival and the B-leg refusal would
+never fire (the original #231/#236 implementation had this defect — #259 fixes it).
 
 Locks live until explicitly cleared by `/jared-wrap` (or `jared session-lock-clear
 --issue N`). A crashed session leaves its lock on disk; the next `/jared-start` will
 detect it and refuse with guidance, including the recorded PID so the operator can
 verify and force-clear if appropriate.
 
-See docs/superpowers/specs/2026-05-23-multi-session-impl-design.md for original design;
-this module's identity model was reworked in #259 after empirical evidence that
-PID-keyed locks were stale-on-arrival.
+Locks live under the git common dir, not in the working tree (#376). This is a
+correctness requirement, not tidiness: `list_active_locks` does no liveness sweep,
+so every lock file on disk counts as a live sibling. A lock committed from a
+working-tree path would therefore make `/jared-start` refuse in every clone of
+that project, forever, for a session that never existed. Git does not track the
+contents of its own directory, so this location removes the failure mode rather
+than guarding against it. Locks written before #376 at `<repo>/.jared/`
+are ignored, never migrated or deleted — a tracked one is not jared's file to
+remove, and would return on the next checkout regardless.
+
+See docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-impl-design.md
+for the original design; this module's identity model was reworked in #259 after
+empirical evidence that PID-keyed locks were stale-on-arrival.
 """
 
 from __future__ import annotations
@@ -25,6 +35,10 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+
+class NotAGitCheckout(Exception):
+    """Raised when a `repo_root` has no `.git` directory to anchor locks under."""
 
 
 @dataclass(frozen=True)
@@ -39,11 +53,17 @@ class Lock:
 
 
 def _lock_dir(repo_root: Path) -> Path:
-    # `.resolve()` anchors `.jared/` at the true (absolute) repo root even when
+    # Every caller derives `repo_root` as `dirname(git rev-parse --git-common-dir)`,
+    # so `<repo_root>/.git` is the common dir by contract — no subprocess needed to
+    # find it, and this stays a pure path computation. The common dir is also exactly
+    # the scope the sibling detector reasons about: it is what linked worktrees share,
+    # which is the trap `--session N` exists to avoid (#376).
+    #
+    # `.resolve()` anchors the lock dir at the true (absolute) repo root even when
     # the caller passes a relative root — e.g. REPO_ROOT collapsing to '.' in the
     # main checkout (#284). A cwd-relative lock dir breaks cross-session sibling
     # detection. Every lock path flows through here, so this is the single net.
-    return repo_root.resolve() / ".jared"
+    return repo_root.resolve() / ".git" / "jared"
 
 
 def _lock_path(repo_root: Path, issue: int) -> Path:
@@ -51,7 +71,17 @@ def _lock_path(repo_root: Path, issue: int) -> Path:
 
 
 def write_lock(repo_root: Path, lock: Lock) -> Path:
-    """Atomically write a lock file for this session. Returns the path."""
+    """Atomically write a lock file for this session. Returns the path.
+
+    Raises NotAGitCheckout if `repo_root` is not a checkout root. Writes are strict
+    where reads are tolerant: `mkdir(parents=True)` would otherwise *create* a
+    `.git/` in a plain directory, turning it into something git half-recognises.
+    Reachable — the `/jared-start` stub's REPO_ROOT derivation collapses to cwd
+    when `git rev-parse` fails.
+    """
+    git_dir = repo_root.resolve() / ".git"
+    if not git_dir.is_dir():
+        raise NotAGitCheckout(f"not a git checkout root (no .git directory): {repo_root.resolve()}")
     lockdir = _lock_dir(repo_root)
     lockdir.mkdir(parents=True, exist_ok=True)
     path = _lock_path(repo_root, lock.issue)
@@ -85,21 +115,6 @@ def read_lock(path: Path) -> Lock | None:
         return None
 
 
-def is_alive(pid: int) -> bool:
-    """Check whether a process with this PID exists.
-
-    Uses `os.kill(pid, 0)`: ProcessLookupError (ESRCH) means dead;
-    PermissionError (EPERM) means alive but not signalable (e.g., init).
-    """
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def clear_lock(repo_root: Path, issue: int) -> None:
     """Remove the lock file for this issue. No-op if absent."""
     path = _lock_path(repo_root, issue)
@@ -110,12 +125,17 @@ def clear_lock(repo_root: Path, issue: int) -> None:
 def list_active_locks(repo_root: Path) -> list[Lock]:
     """Enumerate all session locks on disk for this repo.
 
-    Walks `<repo>/.jared/session-*.lock` and reads each. Malformed lock files
+    Walks `<repo>/.git/jared/session-*.lock` and reads each. Malformed lock files
     are silently skipped — they may be partial writes from a crashed write
-    that didn't reach os.replace. Old-style locks left over from the pre-#259
-    PID-keyed naming (filename number ≠ recorded `issue` field) are removed
-    opportunistically — this is the only automatic migration path for in-place
-    upgrades from pre-#259 installs.
+    that didn't reach os.replace. A missing `.git/` or `.git/jared/` yields no
+    siblings: reads stay tolerant where writes are strict.
+
+    Locks at the pre-#376 working-tree path `<repo>/.jared/` are not read at all,
+    so a committed one can no longer manufacture a false sibling. They are left
+    on disk: jared must not delete a file from a consuming project's tree, and a
+    tracked lock would reappear on the next checkout anyway. (The pre-#259
+    PID-keyed migration sweep went with them — it could only ever fire against
+    `.jared/`, which nothing reads now.)
 
     No PID-liveness sweep is performed: the CLI subprocess's PID (only recorded
     diagnostically) is always dead by the time anything reads the file. A
@@ -130,17 +150,6 @@ def list_active_locks(repo_root: Path) -> list[Lock]:
     for path in sorted(lockdir.glob("session-*.lock")):
         lock = read_lock(path)
         if lock is None:
-            continue
-        # Migration: pre-#259 lock filenames were session-<pid>.lock; their
-        # filename number won't match the lock's `issue` field. Issue-keyed
-        # writes (#259 onward) always satisfy filename_number == lock.issue.
-        try:
-            filename_number = int(path.stem.removeprefix("session-"))
-        except ValueError:
-            filename_number = -1
-        if filename_number != lock.issue:
-            with contextlib.suppress(OSError):
-                path.unlink()
             continue
         active.append(lock)
     return active
@@ -169,7 +178,7 @@ def resolve_action(siblings: list[Lock], flags: Flags) -> Action:
     """Decide what `/jared-start` should do given current sibling locks and flags.
 
     Maps to the six-row action table in
-    docs/superpowers/specs/2026-05-23-multi-session-impl-design.md § D3.
+    docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-impl-design.md § D3.
     Pure function — no I/O, no side effects.
     """
     # --session and --no-worktree are mutually exclusive: one says "isolate me",
