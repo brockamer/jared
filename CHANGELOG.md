@@ -7,6 +7,18 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## Unreleased
+
+**Bug fixes**
+- `sweep.py` no longer aborts at its entry point on a KanbanFlow board. Board identity resolves through the provider, the banner names the actual board, and `/jared-init` step 6 completes. (#386)
+- `Board.provider()` / `board_items()` / `open_items()` raise a typed `BackendMismatch` instead of a bare `assert`, which `python -O` stripped — turning a backend mismatch into a misleading `gh` error about a missing repository. (#388)
+- `dependency-graph.py` reads issues and edges from `board.provider`; `--repo` is now optional and required only on the github backend. Its priority-inversion check works off github too. (#389)
+- `jared audit fetch` sources its working set from `board.provider`, so `/jared-audit` is no longer empty on a KanbanFlow board. (#402)
+- `/jared-stage` no longer proposes a blocked item for promotion on backends whose edges are emulated: an absent `NATIVE_DEPENDENCIES` capability does not mean absent edge data. (#402)
+
+**Refactor**
+- New `lib/neutral_items.py` — the single backend-neutral row source for every batch surface, closing the #314 Phase-1 boundary. GitHub output is pinned byte-for-byte by `tests/golden/*.txt`.
+
 ## v0.30.0 — 2026-06-10
 
 Completes epic #313 — jared's board backend is now fully pluggable (GitHub Projects v2 or KanbanFlow), end to end.
