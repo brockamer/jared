@@ -288,3 +288,32 @@ def test_audit_fetch_github_structure_is_pinned(
     # Every item carries the fields /jared-audit reads.
     for item in result["items"]:
         assert {"number", "title", "body", "labels"} <= set(item)
+
+
+def test_dependency_graph_still_requires_repo_on_github(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--repo stays mandatory on github, at the same exit code (#389).
+
+    It could no longer be argparse's `required=True`, because a KanbanFlow
+    board legitimately has no repo. The guard moved into main(). The message
+    text therefore differs from argparse's — a deliberate, GitHub-visible
+    change, pinned here so it cannot drift further unnoticed.
+    """
+    write_minimal_board(tmp_path)
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
+    _patch_github_calls(monkeypatch)
+
+    rc, out = run_script_main(
+        import_dep(),
+        ["dependency-graph.py"],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        include_stderr=True,
+    )
+
+    assert rc == 2
+    assert "--repo is required on the github backend" in out
