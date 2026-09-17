@@ -182,3 +182,30 @@ def test_kanbanflow_list_comments_batch_never_invokes_gh(
 
     provider, _client = make_kf_provider_with_tasks(tasks={12: []})
     assert provider.list_comments_batch([12]) == {12: []}
+
+
+def test_kanbanflow_unknown_author_resolves_to_empty_not_raw_id() -> None:
+    """An unresolvable author must not leak the KanbanFlow `_id` (#414).
+
+    `Comment.author` promises "" when unresolved, and provider-internal ids
+    never cross the neutral boundary. A comment whose authorUserId is absent
+    from /users (a removed board member) used to surface that raw id as if it
+    were a display name.
+    """
+    from tests.fake_kanbanflow import make_kf_provider_with_tasks
+
+    provider, _client = make_kf_provider_with_tasks(
+        users={"u1": "Daniel Brock"},
+        tasks={
+            12: [
+                {
+                    "text": "note from a departed user",
+                    "createdTimestamp": "2026-09-16T10:00:00Z",
+                    "authorUserId": "u-deleted",
+                }
+            ]
+        },
+    )
+
+    (comment,) = provider.list_comments(12)
+    assert comment.author == "", f"leaked a provider-internal id: {comment.author!r}"
