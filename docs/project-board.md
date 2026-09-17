@@ -111,7 +111,8 @@ Conventions:
 This is the "genuinely distinct theme" exception above, exercised deliberately rather
 than by drift — the operator judged backend parity (#357) distinct from release
 readiness (#348) during the 2026-09-12 reshape. `KanbanFlow parity` carries a soft date
-to be re-set at #357's Phase-0 brainstorm, when its scope actually exists. Do not read
+sequenced after Marketplace readiness; its scope is the Phase 0 design spec
+(`docs/superpowers/specs/2026-06-11-kanbanflow-parity-design.md`, 2026-06-11). Do not read
 two open milestones here as a violation of the one-at-a-time default; read it as the
 default plus one recorded exception.
 
