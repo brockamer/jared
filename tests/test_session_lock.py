@@ -151,7 +151,7 @@ def test_list_active_locks_empty_when_repo_root_has_no_git_dir(tmp_path: Path) -
 def test_list_active_locks_ignores_pre_376_working_tree_locks(repo_root: Path) -> None:
     """Acceptance criterion for #376: a leftover `<repo>/.jared/` is not read.
 
-    Locks written by jared <= 0.30.0 live in the working tree and may be *tracked*
+    Locks written before #376 live in the working tree and may be *tracked*
     — a committed one is the exact false-positive this issue removes. Ignoring the
     directory (rather than migrating it) is deliberate: jared must not delete a
     file from a consuming project's working tree, and a tracked lock would come

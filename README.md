@@ -313,7 +313,9 @@ other's branch state. Jared layers four defenses:
   `<repo>/.git/jared/session-<issue>.lock`. A second session sees the lock
   and refuses to start in the shared checkout unless you opt in. The lock
   sits under the git common dir so it can never be committed — a tracked
-  lock would refuse every later session in every clone (#376).
+  lock would refuse every later session in every clone (#376). Upgrading
+  from an older jared? A leftover `.jared/` directory in your project is
+  ignored and safe to delete.
 - **Worktree isolation.** `/jared-start <N> --session N` creates
   `~/Code/<repo>-<N>/` via `git worktree add`, checks out a fresh
   feature branch from `origin/main`, and shifts CWD into the worktree.
