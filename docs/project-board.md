@@ -111,9 +111,20 @@ Conventions:
 This is the "genuinely distinct theme" exception above, exercised deliberately rather
 than by drift — the operator judged backend parity (#357) distinct from release
 readiness (#348) during the 2026-09-12 reshape. `KanbanFlow parity` carries a soft date
-to be re-set at #357's Phase-0 brainstorm, when its scope actually exists. Do not read
+sequenced after Marketplace readiness; its scope is the Phase 0 design spec
+(`docs/superpowers/specs/2026-06-11-kanbanflow-parity-design.md`, 2026-06-11). Do not read
 two open milestones here as a violation of the one-at-a-time default; read it as the
 default plus one recorded exception.
+
+**Which milestone a KanbanFlow defect joins (rule recorded 2026-09-16).** The milestone follows
+the *fix*, not the backend that shows the symptom. A defect whose fix is a correction inside an
+existing code path — a wrong comparison, a missing error catch, a wrong URL, an unvalidated index
+hit — is release scope, `Marketplace readiness`: a stranger hits it on the shipped backend and the
+fix carries no capability decision. A defect whose fix is routing a surface through
+`board.provider` or flipping a `Capability` flag is parity scope, `KanbanFlow parity`: that is
+the Phase-1-boundary migration the parity program owns, judged against the parity spec's rule
+that no jared surface degrades on that backend. Applied on 2026-09-16: #361, #362, #363, #385,
+#391 → release; #386, #388, #389, #390, #394, #402 → parity.
 
 **Surfacing the phase.** Because milestones carry soft target dates, GitHub's
 **Roadmap** view layout renders a credible near-term timeline — it plots bars from the
