@@ -815,3 +815,83 @@ def test_get_board_events_ascending_does_not_page(monkeypatch: pytest.MonkeyPatc
     events = _client().get_board_events(order="ascending")
     assert len(events) == 1
     assert len(calls) == 1  # no backward paging for non-descending order
+
+
+# --- board-scoped token files (~/.config/jared/kanbanflow/boards/<id>.env) ---
+#
+# KanbanFlow tokens are board-scoped, so a single exported KANBANFLOW_API_TOKEN
+# cannot serve a machine with several boards. When the variable is unset we fall
+# back to the board's own credential file, keyed by the Board ID that
+# docs/project-board.md already records.
+
+
+def _write_board_env(tmp_path, board_id: str, body: str):
+    boards = tmp_path / "jared" / "kanbanflow" / "boards"
+    boards.mkdir(parents=True, exist_ok=True)
+    path = boards / f"{board_id}.env"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_from_env_falls_back_to_board_token_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_board_env(tmp_path, "BOARDID3", "KANBANFLOW_API_TOKEN=filetok\n")
+
+    client = KanbanFlowClient.from_env(board_id="BOARDID3")
+    calls = patch_kf(monkeypatch, body="{}")
+    client._request("GET", "/board")
+    assert cast(dict[str, str], calls[0]["headers"])["Authorization"] == "Bearer filetok"
+
+
+def test_from_env_prefers_environment_over_board_token_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("KANBANFLOW_API_TOKEN", "envtok")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_board_env(tmp_path, "BOARDID3", "KANBANFLOW_API_TOKEN=filetok\n")
+
+    client = KanbanFlowClient.from_env(board_id="BOARDID3")
+    calls = patch_kf(monkeypatch, body="{}")
+    client._request("GET", "/board")
+    assert cast(dict[str, str], calls[0]["headers"])["Authorization"] == "Bearer envtok"
+
+
+def test_from_env_board_token_file_tolerates_export_comments_and_quotes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_board_env(
+        tmp_path,
+        "BOARDID3",
+        '# board token\n\nexport KANBANFLOW_API_TOKEN="filetok"\n',
+    )
+
+    client = KanbanFlowClient.from_env(board_id="BOARDID3")
+    calls = patch_kf(monkeypatch, body="{}")
+    client._request("GET", "/board")
+    assert cast(dict[str, str], calls[0]["headers"])["Authorization"] == "Bearer filetok"
+
+
+def test_from_env_error_names_the_board_token_file_when_board_id_known(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    with pytest.raises(KanbanFlowError, match=r"boards/BOARDID3\.env"):
+        KanbanFlowClient.from_env(board_id="BOARDID3")
+
+
+def test_from_env_board_token_file_ignores_unrelated_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_board_env(tmp_path, "BOARDID3", "SOMETHING_ELSE=nope\n")
+
+    with pytest.raises(KanbanFlowError, match="KANBANFLOW_API_TOKEN"):
+        KanbanFlowClient.from_env(board_id="BOARDID3")
