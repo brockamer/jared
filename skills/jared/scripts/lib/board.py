@@ -482,7 +482,7 @@ class Board:
                 from .kanbanflow_provider import KanbanFlowProvider
                 from .kf_number_index import KfNumberIndex
 
-                client = KanbanFlowClient.from_env()
+                client = KanbanFlowClient.from_env(board_id=self.board_id)
                 kf_board = client.get_board()
                 field_defs = client.list_custom_field_defs()
                 index = KfNumberIndex.for_board(kf_board.id)
