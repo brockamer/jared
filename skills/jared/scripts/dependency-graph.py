@@ -68,6 +68,13 @@ from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
 from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     degraded_or_none,
 )
+from lib.kanbanflow_client import (  # type: ignore[import-not-found]  # noqa: E402
+    KanbanFlowError,
+)
+from lib.neutral_items import (  # type: ignore[import-not-found]  # noqa: E402
+    neutral_issue_rows,
+    neutral_open_rows,
+)
 
 # ---------- gh helpers ----------
 
@@ -100,7 +107,7 @@ def fetch_issue_state(repo: str, number: int) -> str:
     return cast(str, state)
 
 
-def fetch_field_priorities(repo: str, *, board: Board | None = None) -> dict[int, str]:
+def fetch_field_priorities(repo: str | None, *, board: Board | None = None) -> dict[int, str]:
     """Map open-issue number -> project-field Priority (e.g. "High").
 
     Priority is a project **field** under jared doctrine; the `priority:` labels
@@ -128,7 +135,12 @@ def fetch_field_priorities(repo: str, *, board: Board | None = None) -> dict[int
                 file=sys.stderr,
             )
             return {}
-    if board.repo != repo:
+    # The repo join only guards the github path: Board reads its repo from the
+    # doc, not from --repo, and joining on mismatched issue numbers would
+    # manufacture phantom inversions. Off github there is no --repo to compare
+    # (#389) and the provider's items are the board's own, so the join is safe
+    # by construction.
+    if board.backend == "github" and board.repo != repo:
         print(
             f"dependency-graph: board doc repo {board.repo!r} != --repo {repo!r}; "
             "priority check disabled",
@@ -136,8 +148,11 @@ def fetch_field_priorities(repo: str, *, board: Board | None = None) -> dict[int
         )
         return {}
     try:
-        items = board.open_items()
-    except GhInvocationError as e:
+        # open_items() is github-only and raises BackendMismatch off github
+        # (#388). Priority itself is backend-neutral — BoardItem carries it on
+        # both — so the check runs everywhere; only the source differs.
+        items = neutral_open_rows(board) if board.backend != "github" else board.open_items()
+    except (GhInvocationError, KanbanFlowError) as e:
         print(
             f"dependency-graph: open_items failed ({e}); priority check disabled",
             file=sys.stderr,
@@ -388,7 +403,13 @@ def format_dot(graph: dict[int, set[int]], titles: dict[int, str]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--repo", required=True, help="Repo slug (owner/repo)")
+    parser.add_argument(
+        "--repo",
+        help=(
+            "Repo slug (owner/repo). github backend only; on other backends "
+            "the board doc selects the board and issues come from the provider."
+        ),
+    )
     parser.add_argument("--milestone", help="Limit to issues in this milestone")
     parser.add_argument("--format", choices=["text", "dot"], default="text")
     parser.add_argument("--summary", action="store_true", help="One-block summary")
@@ -422,29 +443,48 @@ def main() -> int:
             print(f"dependency-graph: {warning}", file=sys.stderr)
             return 0
 
-    print(
-        f"Fetching open issues from {args.repo}"
-        + (f" (milestone {args.milestone!r})..." if args.milestone else "..."),
-        file=sys.stderr,
-    )
-
-    try:
-        issues = fetch_open_issues(args.repo, args.milestone)
-    except GhInvocationError as e:
-        print(f"dependency-graph: {e}", file=sys.stderr)
-        return 1
-
-    issues_by_number = {i["number"]: i for i in issues}
-    open_numbers = set(issues_by_number.keys())
-
-    # Resolve capabilities offline (no live API calls — never touch board.provider).
-    # If the board doc can't be found/parsed, capability_board stays None and all
-    # gates are skipped, preserving pre-Phase-6 behaviour.
+    # Resolve the board first (#389). It decides whether --repo is required at
+    # all: on a non-github backend the data source is board.provider, and a
+    # KanbanFlow-backed project need not have a GitHub repo. This Board also
+    # serves the Phase 6 capability gates below — resolved offline, since
+    # Board.capabilities() never constructs the provider.
     capability_board: Board | None = None
     try:  # noqa: SIM105
         capability_board = Board.from_default()
     except Exception:  # noqa: BLE001 — offline doc parse; never fail the graph build
         pass
+
+    backend = capability_board.backend if capability_board is not None else "github"
+
+    if backend == "github" and not args.repo:
+        print(
+            "dependency-graph: --repo is required on the github backend",
+            file=sys.stderr,
+        )
+        return 2
+
+    source = args.repo if backend == "github" else f"the {backend} board"
+    print(
+        f"Fetching open issues from {source}"
+        + (f" (milestone {args.milestone!r})..." if args.milestone else "..."),
+        file=sys.stderr,
+    )
+
+    try:
+        if backend != "github" and capability_board is not None:
+            issues = neutral_issue_rows(capability_board)
+            if args.milestone:
+                issues = [i for i in issues if i.get("milestone") == args.milestone]
+        else:
+            issues = fetch_open_issues(args.repo, args.milestone)
+    except (GhInvocationError, KanbanFlowError) as e:
+        # KanbanFlowError does not subclass RuntimeError; without catching it an
+        # unset token would leak a raw traceback instead of this one-line form.
+        print(f"dependency-graph: {e}", file=sys.stderr)
+        return 1
+
+    issues_by_number = {i["number"]: i for i in issues}
+    open_numbers = set(issues_by_number.keys())
 
     # Pre-fetch ALL native dependency edges for the repo in one paginated
     # GraphQL call instead of one per issue. None means the GraphQL call
@@ -452,7 +492,16 @@ def main() -> int:
     # that issue (treat as fall-back-to-body, same as before).
     all_native: dict[int, list[int]] | None = None
     if not args.no_native:
-        all_native = fetch_all_native_dependencies(args.repo, board=capability_board)
+        if backend != "github" and capability_board is not None:
+            # The provider already models dependencies — the KanbanFlow one
+            # parses its emulated `blocked-by:` labels into BoardItem.blocked_by
+            # and exposes them as Edges. The NATIVE_DEPENDENCIES gate below
+            # tells the reader these are emulated, not native.
+            all_native = {}
+            for edge in capability_board.provider.fetch_blocked_by_edges():
+                all_native.setdefault(edge.dependent, []).append(edge.blocker)
+        else:
+            all_native = fetch_all_native_dependencies(args.repo, board=capability_board)
 
     # Build graph: N → set of issues N depends on
     graph: dict[int, set[int]] = defaultdict(set)
@@ -489,7 +538,7 @@ def main() -> int:
     # Priority from the project field, not `priority:` labels (doctrine strips
     # those, so the old label read was always empty — #299). Degrades to {} if
     # the board can't be read; the rest of the analysis still runs.
-    priorities = fetch_field_priorities(args.repo)
+    priorities = fetch_field_priorities(args.repo, board=capability_board)
 
     # Analyze
     topo, cycles = topological_sort(dict(graph))

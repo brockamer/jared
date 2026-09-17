@@ -46,6 +46,9 @@ from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
 from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     degraded_or_none,
 )
+from lib.neutral_items import (  # type: ignore[import-not-found]  # noqa: E402
+    neutral_open_rows,
+)
 
 
 @dataclass(frozen=True)
@@ -481,7 +484,17 @@ def fetch_items_for_stage(board: Any, *, skip_native_edges: bool = False) -> lis
     still fires for blocked detection. Pass ``native_edges_note`` to
     ``render()`` so the degradation is visible in the output.
     """
-    raw_items: list[dict[str, Any]] = board.board_items()
+    if board.backend != "github":
+        # board_items() is github-only and now raises BackendMismatch (#388).
+        # The provider is the source on any other backend; neutral_open_rows
+        # emits exactly the keys the normalisation below reads — status,
+        # priority, labels, milestone at top level, number/title/body under
+        # content. createdAt is absent, which is correct: KanbanFlow has no
+        # task creation timestamp, and the Backlog-age tiebreaker is already
+        # gated on VELOCITY_TIMESTAMPS.
+        raw_items: list[dict[str, Any]] = neutral_open_rows(board)
+    else:
+        raw_items = board.board_items()
     if not raw_items:
         return []
 
@@ -495,7 +508,17 @@ def fetch_items_for_stage(board: Any, *, skip_native_edges: bool = False) -> lis
         number: int | None = content.get("number")
         if number is None:
             continue
-        blocked_by_native: list[int] = [edge["number"] for edge in edges_map.get(number, [])]
+        # On a non-github backend the neutral row carries the provider's own
+        # blocked_by — emulated from `blocked-by:` labels on KanbanFlow, but
+        # real edges all the same. Treating "no NATIVE_DEPENDENCIES capability"
+        # as "no edges" hid real blockers and let stage propose a blocked item
+        # for promotion. dependency-graph (#389) and audit (#402) consume these
+        # same edges; stage agrees with them.
+        blocked_by_native: list[int] = (
+            list(raw.get("blocked_by") or [])
+            if board.backend != "github"
+            else [edge["number"] for edge in edges_map.get(number, [])]
+        )
         normalised.append(
             {
                 "number": number,
@@ -535,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         board,
         Capability.NATIVE_DEPENDENCIES,
         "native blocked-by edges",
-        "blocker detection from `## Blocked by` body sections only",
+        "blockers from emulated `blocked-by:` labels and `## Blocked by` body sections",
     )
     milestone_proximity_note = degraded_or_none(
         board,
