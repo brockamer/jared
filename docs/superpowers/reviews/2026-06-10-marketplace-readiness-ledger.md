@@ -319,20 +319,20 @@ syntactic question and cannot substantiate a runtime one.
 
 | id | sev | dim | finding | location |
 |---|---|---|---|---|
-| **F3** | P1 | 1a | kf_number_index reseed silently collapses duplicate task numbers with no detection, contradicting its own… | `skills/jared/scripts/lib/kanbanflow_provider.py:233-243,391-393` |
+| **F3** | P1 | 1a | kf_number_index reseed silently collapses duplicate task numbers with no detection, contradicting its own… | `skills/jared/scripts/lib/kanbanflow_provider.py:233-243,391-393` · **resolved** #371 (`feature/371-p1-correctness`, `a66f190`) |
 | **F4** | P1 | 1a | migrate.py's cross-ref rewriter lacks ties.py's false-positive guard, corrupting text on kanbanflow->github | `skills/jared/scripts/lib/migrate.py:101` |
 | **F5** | P1 | 1a | blocked-by edges to a closed/Done endpoint are silently dropped, not converted -- and undisclosed at all on… | `skills/jared/scripts/lib/migrate.py:54-78` |
-| **F6** | P1 | 1a | stage.py computes "today" from local system clock, not UTC, mismatching GitHub's UTC timestamps | `skills/jared/scripts/stage.py:521` |
-| **F7** | P1 | 1b | jared wrap-state's gh pr view call skips the GH_TOKEN/GITHUB_TOKEN scrub, and a failure silently reads as "no PR" | `skills/jared/scripts/jared:1585-1606` |
+| **F6** | P1 | 1a | stage.py computes "today" from local system clock, not UTC, mismatching GitHub's UTC timestamps | `skills/jared/scripts/stage.py:521` · **resolved** #371 (`feature/371-p1-correctness`, `fc6f683`) |
+| **F7** | P1 | 1b | jared wrap-state's gh pr view call skips the GH_TOKEN/GITHUB_TOKEN scrub, and a failure silently reads as "no PR" | `skills/jared/scripts/jared:1585-1606` · **resolved** #371 (`feature/371-p1-correctness`, `fc6f683`) |
 | **F8** | P1 | 1c | SKILL.md's 'jared close polls for auto-move' claim contradicts tested implementation (no poll) | `skills/jared/SKILL.md:116, :204, :206` · **resolved** #369 (`feature/369-p1-docs`, `1116f3c`) |
 | **F9** | P1 | 1c | session-handoff-prompt config documents a /jared-wrap file-write feature that has no consumer and is contradicted… | `skills/jared/assets/project-board.md.template:125` · **resolved** #369 (`feature/369-p1-docs`, `f8bb211`) |
 | **F10** | P1 | 1c | dependencies.md misdescribes dependency-graph.py's KanbanFlow fallback as reading label emulation; it actually… | `skills/jared/references/dependencies.md:7` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
 | **F11** | P1 | 1c | Backend-gate boxes across reference docs quote fabricated `degraded: ...` strings that never appear in the code | `skills/jared/references/jared-cli.md:114,254` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
 | **F12** | P1 | 1d | README Prerequisites never mentions Python or git, both hard runtime dependencies of every slash command | `README.md:44-62` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
-| **F13** | P1 | 1d | Stage-0's "proven Python floor ≤3.9" is a false positive — datetime.UTC (3.11+-only) breaks /jared-stage and… | `skills/jared/scripts/stage.py:20` |
+| **F13** | P1 | 1d | Stage-0's "proven Python floor ≤3.9" is a false positive — datetime.UTC (3.11+-only) breaks /jared-stage and… | `skills/jared/scripts/stage.py:20` · **resolved** #371 (`feature/371-p1-correctness`, `fc6f683`) |
 | **F14** | P1 | 1f | getting-started.md states the wrong WIP cap default (3 vs. the actual 4) | `docs/getting-started.md:107` · **resolved** #369 (`feature/369-p1-docs`, `106ac9f`) |
 | **F15** | P1 | 1f | getting-started.md tells a newcomer to type bare `jared` CLI commands into their shell, but nothing in the… | `docs/getting-started.md:30-32, 135, 161` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
-| **F34** | P1 | 1a | append_decision uses substring containment, not equality, for its idempotency check — silently drops distinct… | `skills/jared/scripts/capture-context.py:150-171` |
+| **F34** | P1 | 1a | append_decision uses substring containment, not equality, for its idempotency check — silently drops distinct… | `skills/jared/scripts/capture-context.py:150-171` · **resolved** #371 (`feature/371-p1-correctness`, `fc6f683`) |
 | **F35** | P1 | 1c | board-sweep.md's Up Next overstock threshold (>3) doesn't match sweep.py's actual cap (8), which has no override… | `skills/jared/references/board-sweep.md:45` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
 | **F36** | P1 | 1c | human-readable-board.md's Labels section documents a `blocked` label as valid, contradicting the project's own… | `skills/jared/references/human-readable-board.md:112` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
 | **F37** | P1 | 1c | human-readable-board.md's issue-body skeleton shows a `## Depends on` / `## Blocks` shape the real template… | `skills/jared/references/human-readable-board.md:39-69,81` · **resolved** #369 (`feature/369-p1-docs`, `d8054dc`) |
