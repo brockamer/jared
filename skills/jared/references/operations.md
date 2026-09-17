@@ -20,6 +20,26 @@ Degradation lives in two places:
 
 GitHub advertises the full set, so **nothing degrades on GitHub** — the gates are inert there by design.
 
+### The neutral row seam — where batch surfaces get their rows
+
+`sweep.py`, `stage.py`, `dependency-graph.py` and `jared audit fetch` each read board rows as dicts. Each one used to build those dicts from a GitHub call — `gh project item-list` or `gh issue list` — which is why all four broke on a KanbanFlow board (#386, #388, #389, #402).
+
+`lib/neutral_items.py` is the seam. The provider returns neutral `BoardItem`s on either backend, and two mappers project them into the shapes the existing checks already read:
+
+| Mapper | Shape | Consumers |
+|---|---|---|
+| `board_item_to_row` / `neutral_open_rows` | board rows — `status`/`priority`/`labels`/`milestone` at top level, `number`/`title`/`body` under `content` | `sweep.py`, `stage.py` |
+| `board_item_to_issue` / `neutral_issue_rows` | flat `gh issue list --json` rows — `labels` as `{"name": …}` dicts | `dependency-graph.py`, `fetch_audit_window` |
+
+**The rule: a new batch surface reads rows from `neutral_open_rows(board)` or `neutral_issue_rows(board)`, never from `gh` directly.** The checks themselves stay untouched — only their source changes — which is what keeps GitHub output byte-identical (pinned by `tests/golden/*.txt`).
+
+Two distinctions worth keeping straight:
+
+- **Capability gates decide what to render; the backend selector decides where rows come from.** There is no `Capability` meaning "has a `gh project item-list`", and inventing one would put an implementation detail into the vocabulary prose surfaces branch on. Data-source branches therefore key on `board.backend`, not on a capability.
+- **An absent capability does not mean absent data.** `NATIVE_DEPENDENCIES` is absent on KanbanFlow, but the provider emulates edges with `blocked-by:` labels and exposes them via `fetch_blocked_by_edges()`. The note says *"emulated labels only"*, not *"no edges"*, so consuming them is consistent with what the operator is told. All four surfaces consume these edges and must agree.
+
+A github-only `Board` method called on another backend raises `BackendMismatch`, which names the method and the configured backend. It replaced three bare `assert`s that `python -O` stripped (#388).
+
 Primary reference is `references/jared-cli.md` — use the `jared` CLI for any
 board operation it covers (file, move, set, close, comment, blocked-by,
 get-item, summary). This file is the **escape hatch**: commands for things

@@ -1,0 +1,23 @@
+/jared-stage — proposals <SCRUBBED>
+
+== Backlog → Up Next ==
+
+(no promotions this pass)
+
+Deferred (this pass):
+  #1 [High] alpha — not pullable — empty body
+
+== Blocked revisit ==
+
+Unblocked: (none — all Blocked items still have open blockers or real-world annotations)
+
+
+== Almost ready (advisory) ==
+
+(none — no Backlog items have open native or body-ref blockers)
+
+──────────────────────────────────────────────────
+Approve? (y / <issue numbers> / skip)
+  y               apply all proposed promotions + unblocks
+  <numbers>       apply only those (e.g., "y #1 #4")
+  skip            apply nothing; output is record only
