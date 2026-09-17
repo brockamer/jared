@@ -18,7 +18,7 @@ so every lock file on disk counts as a live sibling. A lock committed from a
 working-tree path would therefore make `/jared-start` refuse in every clone of
 that project, forever, for a session that never existed. Git does not track the
 contents of its own directory, so this location removes the failure mode rather
-than guarding against it. Locks written by jared <= 0.30.0 at `<repo>/.jared/`
+than guarding against it. Locks written before #376 at `<repo>/.jared/`
 are ignored, never migrated or deleted — a tracked one is not jared's file to
 remove, and would return on the next checkout regardless.
 
