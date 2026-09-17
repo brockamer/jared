@@ -67,7 +67,10 @@ bullet, a `Board ID:` / `Board URL:`, and a `### Status column map` block (canon
 Status → the board's actual column name); it omits the GitHub Project identifiers and
 field/option-ID blocks (the provider resolves columns/options live from the API, with the
 board-scoped `KANBANFLOW_API_TOKEN` selecting the board). Init-time selection landed in #317
-(Phase 4 of epic #313).
+(Phase 4 of epic #313). The token itself resolves from `KANBANFLOW_API_TOKEN` first and then
+from that board's own file at `$XDG_CONFIG_HOME/jared/kanbanflow/boards/<Board ID>.env`, so one
+machine can drive several boards without a wrapper; `bootstrap-project.py` stays env-only
+because `/jared-init` learns the Board ID from the connection itself (see #409).
 
 **Capability-aware degradation (Phase 6, #319).** Phase 6 *consumes* the `Capability` enum
 the provider seam declares — it adds no capabilities and changes no provider. `Board.capabilities()`
