@@ -78,16 +78,33 @@ Flow:
 
 5b. **Run the back-end flow.** After Session notes are posted and reconciliation is applied, run the commit → push → PR create → mergeable check → confirm merge → cleanup sequence. The flow is idempotent — re-running `/jared-wrap` re-evaluates state and picks up at the current step.
 
-   **Precondition — branch guard.** The back-end flow assumes the session worked on a feature branch. If the current branch is `main`, skip the loop entirely and jump directly to the lock-clear + worktree-removal bullets below — running the loop on `main` would attempt `gh pr create` for the main branch, which either fails with a confusing GitHub error or produces a malformed PR. Check:
+   **Precondition — repo and branch guard.** The back-end flow assumes two facts, and neither is safe to assume. First, that `origin` is the repo this board tracks: jared is often paired with a clone of a project the operator cannot push to, and the loop would push and open a PR against that upstream. Second, that the session worked on a feature branch rather than the repo's default branch: a repo whose default branch is `master` fell straight through the old `main`-only check and ran the PR loop on its default branch. Both are F72 (#393). Establish the facts before any network write. Anything the guard cannot establish is a skip — the flow errs toward doing nothing rather than toward writing somewhere:
 
    ```bash
-   if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
-     echo "On main — skipping back-end PR flow."
-     # proceed to lock-clear / worktree cleanup below
+   BOARD_REPO=$(sed -n 's/^- Repo: *//p' docs/project-board.md 2>/dev/null | head -1)
+   ORIGIN_SLUG=$(git remote get-url origin 2>/dev/null \
+     | sed -E 's#^(git@[^:]+:|ssh://[^/]+/|https?://[^/]+/)##; s#/+$##; s#\.git$##')
+   DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+   BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+   if [ -z "$BOARD_REPO" ] || [ -z "$ORIGIN_SLUG" ]; then
+     echo "SKIP: cannot confirm origin is ours (board doc Repo: '${BOARD_REPO:-unset}', origin: '${ORIGIN_SLUG:-unset}') — skipping back-end PR flow."
+   elif [ "$ORIGIN_SLUG" != "$BOARD_REPO" ]; then
+     echo "SKIP: origin is $ORIGIN_SLUG, but docs/project-board.md records $BOARD_REPO — skipping back-end PR flow."
+   elif [ -z "$DEFAULT_BRANCH" ]; then
+     echo "SKIP: cannot resolve this repo's default branch — skipping back-end PR flow. Set it once with: git remote set-head origin -a"
+   elif [ "$BRANCH" = "$DEFAULT_BRANCH" ]; then
+     echo "SKIP: on $BRANCH, this repo's default branch — skipping back-end PR flow."
+   else
+     echo "PROCEED: feature branch $BRANCH on $ORIGIN_SLUG (default branch $DEFAULT_BRANCH)."
    fi
    ```
 
-   When the guard fires, the lock-clear still runs (the session may have written one) and the worktree-removal bullet is a no-op (worktrees are never created against `main`).
+   On any `SKIP:` line, skip the loop entirely and jump directly to the lock-clear + worktree-removal bullets below; print the line so the operator knows which fact was missing. The lock-clear still runs (the session may have written one), and the worktree-removal bullet is a no-op after the default-branch skip (worktrees are never created against the default branch). On `PROCEED:`, enter the loop.
+
+   Three notes on the mechanism. The ownership check compares `origin` against the `- Repo:` bullet `docs/project-board.md` already carries, so it needs no new configuration and makes no network call; the `sed -E` normalises the four remote-URL shapes (`git@host:o/r.git`, `ssh://git@host/o/r.git`, `https://host/o/r.git`, and either with a trailing slash) to a bare `owner/repo`. The default branch is read from `refs/remotes/origin/HEAD`, which `git clone` writes and `git remote add` does not — when it is absent the guard refuses to guess rather than falling back to the literal `main`, because that fallback is the defect. And a `- Repo:` bullet that is missing, or escaped by a Markdown formatter (#381), produces the first skip rather than a silent pass.
+
+   `tests/test_wrap_stub_guards.py` extracts this block and runs it against synthetic repositories — a `master` default branch, a foreign `origin`, all four URL shapes, and a repo with no `origin/HEAD`. Edit the block and the tests exercise the edit; rephrase a `SKIP:` or `PROCEED:` line and they fail first.
 
    **Integrate `main` before the PR.** Parallel sessions diverge from `main` while they work. Before pushing or opening the PR, fold the current `main` into the branch and resolve *here* — in the session that has full context — rather than discovering it at merge time:
 
@@ -119,7 +136,16 @@ Flow:
 
    **Step actions:**
 
-   - **`commit`** (working tree dirty): Show `git status` to the operator. Ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: run `git add -A && git commit -m "$msg"`. On `skip`: exit wrap (the lock is still cleared at the end). Loop continues after a successful commit.
+   - **`commit`** (working tree dirty): Stage in two parts, then ask for the message. Scope first, wording second — the operator has to know *what* is going in before they name it. F71 (#392) was the opposite order: one prompt about wording, which read as consent to every untracked path in the tree.
+
+     ```bash
+     git add -u                                 # tracked modifications and deletions
+     git ls-files --others --exclude-standard   # untracked — nothing above stages these
+     ```
+
+     Show `git status` as before. If that second command lists anything, show the list and ask: *"Also stage these N untracked path(s)? (y/N)"* — default **No**. On `y`, stage them by explicit path (`git add -- <path> ...`); a blanket form cannot tell a file nobody added yet from one that must never enter git history, and this loop pushes and opens a PR a step later. A deliberately-untracked file has to be able to survive a wrap.
+
+     Then ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: run `git commit -m "$msg"`. On `skip`: exit wrap (the lock is still cleared at the end). Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
 
    - **`push`** (local commits ahead of remote): Run `git push -u origin $(git rev-parse --abbrev-ref HEAD)`. On failure, surface the git error and exit. Loop continues on success.
 
