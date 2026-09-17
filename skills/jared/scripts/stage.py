@@ -46,6 +46,9 @@ from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
 from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     degraded_or_none,
 )
+from lib.neutral_items import (  # type: ignore[import-not-found]  # noqa: E402
+    neutral_open_rows,
+)
 
 
 @dataclass(frozen=True)
@@ -481,7 +484,17 @@ def fetch_items_for_stage(board: Any, *, skip_native_edges: bool = False) -> lis
     still fires for blocked detection. Pass ``native_edges_note`` to
     ``render()`` so the degradation is visible in the output.
     """
-    raw_items: list[dict[str, Any]] = board.board_items()
+    if board.backend != "github":
+        # board_items() is github-only and now raises BackendMismatch (#388).
+        # The provider is the source on any other backend; neutral_open_rows
+        # emits exactly the keys the normalisation below reads — status,
+        # priority, labels, milestone at top level, number/title/body under
+        # content. createdAt is absent, which is correct: KanbanFlow has no
+        # task creation timestamp, and the Backlog-age tiebreaker is already
+        # gated on VELOCITY_TIMESTAMPS.
+        raw_items: list[dict[str, Any]] = neutral_open_rows(board)
+    else:
+        raw_items = board.board_items()
     if not raw_items:
         return []
 
