@@ -61,3 +61,33 @@ def board_item_to_row(item: BoardItem) -> dict[str, Any]:
 def neutral_open_rows(board: Board) -> list[dict[str, Any]]:
     """Open board items as check-shaped rows, on any backend."""
     return [board_item_to_row(item) for item in board.provider.list_open_items()]
+
+
+def board_item_to_issue(item: BoardItem) -> dict[str, Any]:
+    """Map a neutral BoardItem to the `gh issue list --json` row shape.
+
+    A second projection alongside `board_item_to_row`, for the surfaces that
+    read issue rows rather than board rows: `dependency-graph.py` (#389) and
+    `fetch_audit_window` (#402). Both were built around
+    `gh issue list --json number,title,body,labels,state`.
+
+    `labels` are dicts with a `name` key, matching what `gh` emits — audit
+    passes them through verbatim to its consumers, so flattening them to
+    bare strings here would be a GitHub-visible behaviour change.
+
+    `state` is always "OPEN": every source feeding this is a list of open
+    items. The key exists because the GitHub shape carries it.
+    """
+    return {
+        "number": item.number,
+        "title": item.title,
+        "body": item.body,
+        "labels": [{"name": name} for name in item.labels],
+        "state": "OPEN",
+        "milestone": item.milestone,
+    }
+
+
+def neutral_issue_rows(board: Board) -> list[dict[str, Any]]:
+    """Open items as `gh issue list`-shaped rows, on any backend."""
+    return [board_item_to_issue(item) for item in board.provider.list_open_items()]
