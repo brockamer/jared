@@ -18,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 # --------------------------------------------------------------------------- #
@@ -324,6 +325,53 @@ def _parse_event(raw: dict[str, Any]) -> KfEvent:
     )
 
 
+TOKEN_ENV = "KANBANFLOW_API_TOKEN"
+
+
+def _config_home() -> Path:
+    """XDG config root, honouring XDG_CONFIG_HOME so tests can redirect it."""
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    return Path(xdg) if xdg else Path.home() / ".config"
+
+
+def board_token_path(board_id: str) -> Path:
+    """Credential file for one board.
+
+    KanbanFlow API tokens are board-scoped: one token per board, so a single
+    exported KANBANFLOW_API_TOKEN cannot serve a machine that drives several
+    boards. Each board keeps its own file, keyed by the Board ID that
+    docs/project-board.md already records.
+    """
+    return _config_home() / "jared" / "kanbanflow" / "boards" / f"{board_id}.env"
+
+
+def _read_token_file(path: Path) -> str | None:
+    """Read KANBANFLOW_API_TOKEN out of a shell-style env file.
+
+    Deliberately not a shell: no expansion, no command substitution. Accepts
+    `KEY=value`, a leading `export `, surrounding quotes, blank lines and
+    `#` comments -- enough to read a file that `set -a; . file` also works on.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep or key.strip() != TOKEN_ENV:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        return value or None
+    return None
+
+
 class KanbanFlowClient:
     """Typed, quota-aware KanbanFlow REST client."""
 
@@ -350,13 +398,30 @@ class KanbanFlowClient:
         self._cache: dict[str, object] = {}
 
     @classmethod
-    def from_env(cls, **kwargs: object) -> KanbanFlowClient:
-        token = os.environ.get("KANBANFLOW_API_TOKEN")
+    def from_env(cls, *, board_id: str | None = None, **kwargs: object) -> KanbanFlowClient:
+        """Build a client from the environment, falling back to the board's file.
+
+        Tokens are board-scoped, so the environment variable alone cannot serve
+        a machine with several boards -- and a single global export would point
+        every project at ONE board, silently writing cards to the wrong one.
+        When `board_id` is known (Board.board_id, read from docs/project-board.md)
+        we fall back to that board's own credential file. Absent both, we still
+        fail loudly rather than guessing.
+        """
+        token = os.environ.get(TOKEN_ENV)
+        if not token and board_id:
+            token = _read_token_file(board_token_path(board_id))
         if not token:
+            hint = (
+                f" Alternatively write it to {board_token_path(board_id)} "
+                f"as {TOKEN_ENV}=<token> (chmod 600)."
+                if board_id
+                else ""
+            )
             raise KanbanFlowError(
-                "KANBANFLOW_API_TOKEN is not set. Create an API token in a premium "
+                f"{TOKEN_ENV} is not set. Create an API token in a premium "
                 "KanbanFlow board (Settings -> API & Webhooks) and export it as "
-                "KANBANFLOW_API_TOKEN."
+                f"{TOKEN_ENV}.{hint}"
             )
         return cls(token, **kwargs)  # type: ignore[arg-type]
 
