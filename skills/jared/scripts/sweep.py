@@ -62,6 +62,7 @@ require_python()
 
 from lib import cache as board_cache  # type: ignore[import-not-found]  # noqa: E402
 from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
+    BackendMismatch,
     Board,
     GhInvocationError,
 )
@@ -95,6 +96,12 @@ from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
 from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     degraded_or_none,
 )
+from lib.kanbanflow_client import (  # type: ignore[import-not-found]  # noqa: E402
+    KanbanFlowError,
+)
+from lib.neutral_items import (  # type: ignore[import-not-found]  # noqa: E402
+    neutral_open_rows,
+)
 
 # ---------- Config discovery ----------
 
@@ -108,6 +115,24 @@ def parse_config(path: Path) -> tuple[str, str]:
             f"{path}: no https://github.com/(users|orgs)/<name>/projects/<N> URL found"
         )
     return m.group(2), m.group(3)
+
+
+def resolve_board_identity(board: Board | None, owner: str | None, project: str | None) -> str:
+    """The URL naming the actual board, on either backend (#386).
+
+    The old banner synthesised `https://github.com/users/{owner}/projects/{n}`
+    from the regex match in parse_config, so a KanbanFlow board either aborted
+    at the door or would have been mislabelled as a GitHub project.
+
+    `Board` has no `board_url` attribute — its KanbanFlow fields are `backend`,
+    `status_column_map` and `board_id` — so the URL is synthesised from
+    `board_id`, which is parsed with find_optional and can legitimately be None.
+    """
+    if board is not None and board.backend == "kanbanflow":
+        if board.board_id:
+            return f"https://kanbanflow.com/board/{board.board_id}"
+        return "KanbanFlow board (no Board ID in docs/project-board.md)"
+    return f"https://github.com/users/{owner}/projects/{project}"
 
 
 def find_config() -> Path | None:
@@ -766,28 +791,47 @@ def main() -> int:
     # Resolve owner/project — and the convention doc, if there is one,
     # so we can instantiate a Board for the closed-cache optimization path.
     cfg = find_config()
-    if not args.owner or not args.project:
-        if not cfg:
-            print("sweep: no project-board.md found and no --owner/--project", file=sys.stderr)
-            return 1
-        try:
-            owner, project = parse_config(cfg)
-        except RuntimeError as e:
-            print(f"sweep: {e}", file=sys.stderr)
-            return 1
-    else:
-        owner, project = args.owner, args.project
 
-    # Hoist a capability-aware Board for offline capability resolution (Phase 6).
-    # Board.capabilities() reads the static per-backend set from board_provider without
-    # constructing the provider (no live API calls). If the board doc is absent or
-    # fails to parse, capability_board stays None and gates are skipped (today's behavior).
-    capability_board: Board | None = None
+    # Build the Board FIRST (#386). It knows the backend, and the backend
+    # decides whether a GitHub owner/project pair is required at all. The old
+    # order called parse_config() unconditionally and aborted on any doc with
+    # no GitHub Projects URL — which is every KanbanFlow doc by construction,
+    # so /jared-init step 6 could never run on that backend.
+    #
+    # This Board also serves the Phase 6 capability gates below (it used to be
+    # a second, separately-constructed `board`). Board.capabilities()
+    # reads the static per-backend set without constructing the provider, so it
+    # stays offline. If the doc is absent or fails to parse, `board` stays None
+    # and the gates are skipped — today's behavior.
+    board: Board | None = None
     if cfg:
         try:  # noqa: SIM105
-            capability_board = Board.from_path(cfg)
+            board = Board.from_path(cfg)
         except Exception:  # noqa: BLE001 — offline doc parse; never fail the sweep
             pass
+
+    backend = board.backend if board is not None else "github"
+
+    owner: str | None = None
+    project: str | None = None
+    if backend == "github":
+        if not args.owner or not args.project:
+            if not cfg:
+                print("sweep: no project-board.md found and no --owner/--project", file=sys.stderr)
+                return 1
+            try:
+                owner, project = parse_config(cfg)
+            except RuntimeError as e:
+                print(f"sweep: {e}", file=sys.stderr)
+                return 1
+        else:
+            owner, project = args.owner, args.project
+    elif args.owner or args.project:
+        print(
+            f"sweep: --owner/--project are github-only; this board's backend is '{backend}'",
+            file=sys.stderr,
+        )
+        return 1
 
     # Resolve plan dirs
     if args.plan_dir:
@@ -798,8 +842,10 @@ def main() -> int:
             Path("docs/superpowers/specs"),
         ]
 
-    print(f"Sweep for https://github.com/users/{owner}/projects/{project}")
-    print("  (also tries /orgs/ URL if that's the project's form)")
+    print(f"Sweep for {resolve_board_identity(board, owner, project)}")
+    if backend == "github":
+        # Meaningless off GitHub; its presence on GitHub is pinned by the golden.
+        print("  (also tries /orgs/ URL if that's the project's form)")
     print(f"Run at: {dt.datetime.now(dt.UTC).isoformat()}")
     print()
 
@@ -811,12 +857,36 @@ def main() -> int:
     # cfg-default runs.
     explicit_args = bool(args.owner and args.project)
     try:
-        if cfg and not explicit_args:
-            board = Board.from_path(cfg)
+        if board is not None and board.backend != "github":
+            # No `gh project item-list` on this backend — the provider is the
+            # source (#386). The closed-items cache is a GitHub-only
+            # optimisation keyed on project_number, so the neutral path skips
+            # it. Done items are not needed: every check filters them out, and
+            # the only Done consumer is the cache warm-up itself.
+            #
+            # Tested via `board`, not `backend`, so the narrowing is real
+            # rather than an assert that `python -O` would strip — which is
+            # the defect #388 is about.
+            items = neutral_open_rows(board)
+        elif owner is None or project is None:
+            # Unreachable via the resolution above (the github branch either
+            # sets both or returns 1), but stated rather than asserted: an
+            # assert here would be stripped under `python -O` and fall through
+            # into a gh call with "None" in the URL. That is the #388 defect.
+            print(
+                "sweep: could not resolve owner/project for a github board",
+                file=sys.stderr,
+            )
+            return 1
+        elif cfg and not explicit_args and board is not None:
             items = fetch_items_with_closed_cache(board, owner, project)
         else:
             items = fetch_items(owner, project)
-    except (RuntimeError, GhInvocationError) as e:
+    except (RuntimeError, GhInvocationError, BackendMismatch, KanbanFlowError) as e:
+        # KanbanFlowError does not subclass RuntimeError. Removing the GitHub-URL
+        # door made it reachable here, so it is caught explicitly — otherwise an
+        # unset token or an auth failure leaks a raw traceback instead of
+        # sweep's one-line message (#8).
         print(f"sweep: {e}", file=sys.stderr)
         return 1
 
@@ -861,12 +931,12 @@ def main() -> int:
     print(f"== Stale High-priority Backlog (>{args.staleness_days}d) ==")
     note = (
         degraded_or_none(
-            capability_board,
+            board,
             Capability.VELOCITY_TIMESTAMPS,
             "stale High-priority Backlog",
             "no creation timestamps on this backend",
         )
-        if capability_board
+        if board
         else None
     )
     if note:
@@ -882,12 +952,12 @@ def main() -> int:
     print("== Stalled In Progress (>7d no activity) ==")
     note = (
         degraded_or_none(
-            capability_board,
+            board,
             Capability.VELOCITY_TIMESTAMPS,
             "stalled In Progress",
             "no activity timestamps on this backend",
         )
-        if capability_board
+        if board
         else None
     )
     if note:
@@ -903,12 +973,12 @@ def main() -> int:
     print(f"== Blocked-status hygiene (>{args.blocked_aging_days}d) ==")
     blocked_aging_note = (
         degraded_or_none(
-            capability_board,
+            board,
             Capability.VELOCITY_TIMESTAMPS,
             "Blocked-status aging",
             "no activity timestamps — the `## Blocked by` presence check still runs",
         )
-        if capability_board
+        if board
         else None
     )
     velocity_ok = blocked_aging_note is None
@@ -927,12 +997,12 @@ def main() -> int:
     print("== Native dependency hygiene ==")
     native_dep_note = (
         degraded_or_none(
-            capability_board,
+            board,
             Capability.NATIVE_DEPENDENCIES,
             "native-dependency hygiene",
             "native edges unavailable — emulated `blocked-by:` labels only",
         )
-        if capability_board
+        if board
         else None
     )
     if native_dep_note:
@@ -1025,12 +1095,12 @@ def main() -> int:
     print("== Session-note freshness (In Progress, last 3 days) ==")
     session_note = (
         degraded_or_none(
-            capability_board,
+            board,
             Capability.VELOCITY_TIMESTAMPS,
             "session-note freshness",
             "no comment timestamps on this backend",
         )
-        if capability_board
+        if board
         else None
     )
     if session_note:

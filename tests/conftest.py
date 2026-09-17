@@ -31,6 +31,7 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from textwrap import dedent
 from types import ModuleType
+from typing import TypedDict
 
 import pytest
 
@@ -516,7 +517,7 @@ def run_script_main(
     return rc, captured.out
 
 
-def write_minimal_kanbanflow_board(tmp_path: Path) -> Path:
+def write_minimal_kanbanflow_board(tmp_path: Path, *, board_id: str = "B1") -> Path:
     """Write a minimal valid KanbanFlow-backed docs/project-board.md.
 
     Mirrors write_minimal_board, which is GitHub-shaped. Board.from_path's
@@ -533,7 +534,7 @@ def write_minimal_kanbanflow_board(tmp_path: Path) -> Path:
         # Project board — project-b
 
         - Repo: brockamer/project-b
-        - Board ID: BOARDID2
+        - Board ID: __BOARD_ID__
 
         ## Jared config
 
@@ -546,6 +547,86 @@ def write_minimal_kanbanflow_board(tmp_path: Path) -> Path:
         - In Progress: In Progress
         - Blocked: Blocked
         - Done: Done
-        """)
+        """).replace("__BOARD_ID__", board_id)
     )
     return board_md
+
+
+class KfTaskSpec(TypedDict, total=False):
+    """One seeded KanbanFlow task for patch_kf_board_provider."""
+
+    number: int
+    name: str
+    column: str
+    priority: str
+    description: str
+    labels: list[str]
+
+
+def patch_kf_board_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tasks: list[KfTaskSpec],
+) -> object:
+    """Make every Board with backend=kanbanflow serve a faked provider.
+
+    `Board.provider` lazily builds a real KanbanFlowProvider via
+    `KanbanFlowClient.from_env`, which needs a token and hits the network.
+    This replaces the property with one returning a provider backed by
+    FakeKanbanFlowClient, so batch-surface tests (#386/#388/#389/#402) can
+    drive sweep/stage/dependency-graph end-to-end offline.
+
+    Like restrict_capabilities, this patches BOTH Board class objects — the
+    tests path (skills.jared.scripts.lib.board) and the scripts path
+    (lib.board) — because they are distinct objects in sys.modules and the
+    scripts under test reach the second one. See the module docstring.
+
+    `tasks` entries: {number, name, column, priority, labels, description}.
+    """
+    import importlib
+
+    from skills.jared.scripts.lib.board import Board as _SkillBoard
+    from skills.jared.scripts.lib.kanbanflow_provider import KanbanFlowProvider
+    from skills.jared.scripts.lib.kf_number_index import KfNumberIndex
+    from tests.fake_kanbanflow import FakeKanbanFlowClient
+
+    client = FakeKanbanFlowClient()
+    columns = {c.name: c.unique_id for c in client.board.columns}
+    priority_field = next(f for f in client.field_defs if f.name == "Priority")
+
+    for spec in tasks:
+        number = spec["number"]
+        task = client.create_task(
+            name=spec.get("name", f"task {number}"),
+            column_id=columns[spec.get("column", "Backlog")],
+            number_value=number,
+            description=spec.get("description", ""),
+        )
+        priority = spec.get("priority")
+        if priority is not None:
+            client.set_task_custom_field(task.id, priority_field.id, priority)
+        for label in spec.get("labels", []):
+            client.add_label(task.id, label)
+
+    index = KfNumberIndex(tmp_path / "kf-index-B1.json")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+        status_column_map={s: s for s in columns},
+    )
+
+    def _fake_provider(self: object) -> object:
+        return provider
+
+    monkeypatch.setattr(_SkillBoard, "provider", property(_fake_provider))
+    try:
+        lib_board = importlib.import_module("lib.board")
+        lib_cls = getattr(lib_board, "Board", None)
+        if lib_cls is not None and lib_cls is not _SkillBoard:
+            monkeypatch.setattr(lib_cls, "provider", property(_fake_provider))
+    except ModuleNotFoundError:
+        pass  # lib.board not loaded yet — scripts/ not on sys.path
+
+    return provider
