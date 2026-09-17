@@ -478,3 +478,74 @@ def patch_kf(
     monkeypatch.setattr(kf, "_sleep", lambda _s: None)
     monkeypatch.setattr(kf, "_now", lambda: 1_000_000)
     return calls
+
+
+# ---------------------------------------------------------------------------
+# Batch-surface harness helpers (#386/#388/#389/#402)
+# ---------------------------------------------------------------------------
+
+
+def run_script_main(
+    mod: ModuleType,
+    argv: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    include_stderr: bool = False,
+) -> tuple[int, str]:
+    """Drive a batch script's main() and return (exit_code, output).
+
+    `include_stderr=True` appends a labelled stderr section to the returned
+    output. dependency-graph.py writes its entire human-readable report to
+    stderr and nothing to stdout, so a stdout-only golden for it would pin
+    the empty string and pass for the wrong reason.
+
+    sweep.main() and dependency-graph.main() take NO argv parameter — they
+    read sys.argv — and they locate docs/project-board.md by autodiscovery
+    relative to cwd (find_config -> Board.find_default_path). So both inputs
+    have to be staged rather than passed. stage.main() does accept argv; call
+    it directly and only chdir.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", argv)
+    rc: int = mod.main()
+    captured = capsys.readouterr()
+    if include_stderr:
+        return rc, f"{captured.out}--- stderr ---\n{captured.err}"
+    return rc, captured.out
+
+
+def write_minimal_kanbanflow_board(tmp_path: Path) -> Path:
+    """Write a minimal valid KanbanFlow-backed docs/project-board.md.
+
+    Mirrors write_minimal_board, which is GitHub-shaped. Board.from_path's
+    kanbanflow branch requires `Repo:` and a non-empty `### Status column
+    map`; `Board ID:` is parsed with find_optional and so is strictly
+    optional, but every real doc carries it and the banner is built from it.
+    Every GitHub Project identifier is deliberately absent — that absence is
+    what #386 tripped over.
+    """
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True, exist_ok=True)
+    board_md.write_text(
+        dedent("""\
+        # Project board — thirtytwo
+
+        - Repo: brockamer/thirtytwo
+        - Board ID: PY4hdDY
+
+        ## Jared config
+
+        - backend: kanbanflow
+
+        ### Status column map
+
+        - Backlog: Backlog
+        - Up Next: Up Next
+        - In Progress: In Progress
+        - Blocked: Blocked
+        - Done: Done
+        """)
+    )
+    return board_md

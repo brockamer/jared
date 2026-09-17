@@ -1,0 +1,47 @@
+Sweep for https://github.com/users/brockamer/projects/7
+  (also tries /orgs/ URL if that's the project's form)
+Run at: <SCRUBBED>
+
+Open items on board: 2
+Open issues in brockamer/findajob: 2
+
+== Metadata completeness ==
+  All open items have required metadata
+
+== WIP (In Progress cap = 4) ==
+  Healthy
+
+== Up Next size ==
+  Healthy
+
+== Stale High-priority Backlog (>14d) ==
+  #1: <N>d old — alpha
+
+== Stalled In Progress (>7d no activity) ==
+  #2: no activity in <N>d — beta
+
+== Blocked-status hygiene (>7d) ==
+  None
+
+== Native dependency hygiene ==
+  None
+
+== Legacy 'priority: *' labels ==
+  None
+
+== Plan/spec drift ==
+  (no plan/spec directories found — skipping)
+
+== Doc-sync gate (operator docs not updated alongside code) ==
+  (skipped — no ### Current-state operator docs block on this board)
+
+== Release/CHANGELOG gate (release PRs that skipped CHANGELOG.md) ==
+  None
+
+== Off-board issues (open in repo, missing from project) ==
+  None
+
+== Session-note freshness (In Progress, last 3 days) ==
+  #2: In Progress with no Session note comment ever
+
+Sweep complete. Advisory only — review and propose before applying.
