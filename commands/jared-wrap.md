@@ -81,7 +81,7 @@ Flow:
    **Precondition — repo and branch guard.** The back-end flow assumes two facts, and neither is safe to assume. First, that `origin` is the repo this board tracks: jared is often paired with a clone of a project the operator cannot push to, and the loop would push and open a PR against that upstream. Second, that the session worked on a feature branch rather than the repo's default branch: a repo whose default branch is `master` fell straight through the old `main`-only check and ran the PR loop on its default branch. Both are F72 (#393). Establish the facts before any network write. Anything the guard cannot establish is a skip — the flow errs toward doing nothing rather than toward writing somewhere:
 
    ```bash
-   BOARD_REPO=$(sed -n 's/^- Repo: *//p' docs/project-board.md 2>/dev/null | head -1)
+   BOARD_REPO=$(sed -n 's/^- Repo: *\([^ ]*\).*/\1/p' docs/project-board.md 2>/dev/null | head -1)
    ORIGIN_SLUG=$(git remote get-url origin 2>/dev/null \
      | sed -E 's#^(git@[^:]+:|ssh://[^/]+/|https?://[^/]+/)##; s#/+$##; s#\.git$##')
    DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
@@ -102,7 +102,7 @@ Flow:
 
    On any `SKIP:` line, skip the loop entirely and jump directly to the lock-clear + worktree-removal bullets below; print the line so the operator knows which fact was missing. The lock-clear still runs (the session may have written one), and the worktree-removal bullet is a no-op after the default-branch skip (worktrees are never created against the default branch). On `PROCEED:`, enter the loop.
 
-   Three notes on the mechanism. The ownership check compares `origin` against the `- Repo:` bullet `docs/project-board.md` already carries, so it needs no new configuration and makes no network call; the `sed -E` normalises the four remote-URL shapes (`git@host:o/r.git`, `ssh://git@host/o/r.git`, `https://host/o/r.git`, and either with a trailing slash) to a bare `owner/repo`. The default branch is read from `refs/remotes/origin/HEAD`, which `git clone` writes and `git remote add` does not — when it is absent the guard refuses to guess rather than falling back to the literal `main`, because that fallback is the defect. And a `- Repo:` bullet that is missing, or escaped by a Markdown formatter (#381), produces the first skip rather than a silent pass.
+   Three notes on the mechanism. The ownership check compares `origin` against the `- Repo:` bullet `docs/project-board.md` already carries, so it needs no new configuration and makes no network call. It takes the first whitespace-delimited token of that bullet, matching `lib/board.py`'s own `Repo:\s*(\S+)` parse, so a bullet with trailing prose reads the same to the guard as it does to `Board`. The `sed -E` normalises the four remote-URL shapes (`git@host:o/r.git`, `ssh://git@host/o/r.git`, `https://host/o/r.git`, and either with a trailing slash) to a bare `owner/repo`. The default branch is read from `refs/remotes/origin/HEAD`, which `git clone` writes and `git remote add` does not — when it is absent the guard refuses to guess rather than falling back to the literal `main`, because that fallback is the defect. And a `- Repo:` bullet that is missing, or escaped by a Markdown formatter (#381), produces the first skip rather than a silent pass.
 
    `tests/test_wrap_stub_guards.py` extracts this block and runs it against synthetic repositories — a `master` default branch, a foreign `origin`, all four URL shapes, and a repo with no `origin/HEAD`. Edit the block and the tests exercise the edit; rephrase a `SKIP:` or `PROCEED:` line and they fail first.
 
@@ -145,7 +145,9 @@ Flow:
 
      Show `git status` as before. If that second command lists anything, show the list and ask: *"Also stage these N untracked path(s)? (y/N)"* — default **No**. On `y`, stage them by explicit path (`git add -- <path> ...`); a blanket form cannot tell a file nobody added yet from one that must never enter git history, and this loop pushes and opens a PR a step later. A deliberately-untracked file has to be able to survive a wrap.
 
-     Then ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: run `git commit -m "$msg"`. On `skip`: exit wrap (the lock is still cleared at the end). Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
+     Then ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: run `git commit -m "$msg"`. Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
+
+     On `skip`: exit wrap (the lock is still cleared at the end). Note that the staging above has already run, so `skip` leaves tracked changes in the index. Say so, and do **not** `git reset` to tidy it: a reset would also discard staging the operator did before wrap started, and re-running wrap re-runs `git add -u` anyway. Nothing is committed and nothing untracked was added, which is what `skip` promises.
 
    - **`push`** (local commits ahead of remote): Run `git push -u origin $(git rev-parse --abbrev-ref HEAD)`. On failure, surface the git error and exit. Loop continues on success.
 
