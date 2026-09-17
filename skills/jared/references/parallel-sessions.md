@@ -118,6 +118,10 @@ Concurrent merge safety: two sessions reaching the merge step around the same ti
 
 The back-end flow does not auto-commit. If the working tree is dirty at wrap time, wrap pauses and asks for a commit message — your commit discipline (phase-numbered prefixes, "why not what" bodies) is preserved.
 
+Staging scope: the commit step stages tracked modifications and deletions only (`git add -u`). Untracked paths are listed and offered separately, default No, and staged by explicit path if you opt in — never with a blanket add. A file you keep in the working tree and deliberately never `git add` survives a wrap (F71, #392).
+
+Precondition: before any push or PR, wrap confirms that `origin` matches the `- Repo:` bullet in `docs/project-board.md` and that the current branch is not the repo's default branch, which it derives from `refs/remotes/origin/HEAD` rather than assuming `main`. Any fact it cannot establish skips the back-end flow with a `SKIP:` line naming the missing one; Session notes still post and locks still clear (F72, #393). A clone of an upstream you cannot push to therefore wraps without a network write against it.
+
 ## Integrate `main` before the PR
 
 Parallel sessions branch from the same `origin/main` and then diverge. By
