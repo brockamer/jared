@@ -19,6 +19,9 @@ Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` h
 **Refactor**
 - New `lib/neutral_items.py` — the single backend-neutral row source for every batch surface, closing the #314 Phase-1 boundary. GitHub output is pinned byte-for-byte by `tests/golden/*.txt`.
 
+**Behaviour change (github)**
+- `dependency-graph.py --repo` is no longer an argparse-required argument, so omitting it on a github board now reports `dependency-graph: --repo is required on the github backend` instead of argparse's usage error. Same exit code (2). It could not stay `required=True` because a KanbanFlow board legitimately has no repo. (#389)
+
 ## v0.30.0 — 2026-06-10
 
 Completes epic #313 — jared's board backend is now fully pluggable (GitHub Projects v2 or KanbanFlow), end to end.
