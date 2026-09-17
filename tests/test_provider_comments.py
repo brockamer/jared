@@ -78,3 +78,107 @@ def test_github_file_ignores_number(monkeypatch: pytest.MonkeyPatch) -> None:
     # comes from GitHub's URL (42 here), not from the number= kwarg.
     item = provider.file(title="t", body="b", priority="High", status="Backlog", number=999)
     assert item.number == 42
+
+
+# --- list_comments_batch (#395) --------------------------------------------
+# next-session-prompt needs every in-flight item's comments at once. The
+# GitHub implementation keeps the single aliased round trip; KanbanFlow loops
+# over list_comments. Both return neutral Comments keyed by IssueRef, with the
+# same author/body/created_at contract list_comments promises.
+
+
+def test_github_list_comments_batch_uses_one_cached_gh_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[list[str]] = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+        stdout = (
+            '{"data": {"repository": {'
+            '"i10": {"comments": {"nodes": ['
+            '  {"author": {"login": "brockamer"},'
+            '   "body": "## Session 2026-04-30", "createdAt": "2026-04-30T12:00:00Z"}'
+            "]}},"
+            '"i11": {"comments": {"nodes": []}}'
+            "}}}"
+        )
+
+    def fake_run(args: list[str], **kw: object) -> FakeResult:
+        captured.append(args)
+        return FakeResult()
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    result = _gh_provider().list_comments_batch([10, 11])
+    assert len(captured) == 1, "N refs must still cost exactly one gh call"
+    # The 60s cache is part of "the GitHub path is unchanged" — dropping it
+    # would be an invisible regression in round-trip cost.
+    assert "--cache" in captured[0] and "60s" in captured[0]
+    # Pin the author selection itself: the fixture supplies an author key, so
+    # without this the test would still pass if the query stopped asking for
+    # one — and list_comments_batch's author contract would silently go empty.
+    assert "author { login }" in " ".join(captured[0])
+    assert result == {
+        10: [
+            Comment(
+                author="brockamer",
+                body="## Session 2026-04-30",
+                created_at="2026-04-30T12:00:00Z",
+            )
+        ],
+        11: [],
+    }
+
+
+def test_github_list_comments_batch_empty_refs_skips_gh(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(args: list[str], **kw: object) -> object:
+        raise AssertionError("gh must not be called for empty refs")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+    assert _gh_provider().list_comments_batch([]) == {}
+
+
+def test_kanbanflow_list_comments_batch_returns_comments_per_ref() -> None:
+    from tests.fake_kanbanflow import make_kf_provider_with_tasks
+
+    provider, _client = make_kf_provider_with_tasks(
+        users={"u1": "Daniel Brock"},
+        tasks={
+            12: [
+                {
+                    "text": "## Session 2026-09-16\n\n**Next action:** wire the provider seam.",
+                    "createdTimestamp": "2026-09-16T10:00:00Z",
+                    "authorUserId": "u1",
+                }
+            ],
+            13: [],
+        },
+    )
+
+    assert provider.list_comments_batch([12, 13]) == {
+        12: [
+            Comment(
+                author="Daniel Brock",
+                body="## Session 2026-09-16\n\n**Next action:** wire the provider seam.",
+                created_at="2026-09-16T10:00:00Z",
+            )
+        ],
+        13: [],
+    }
+
+
+def test_kanbanflow_list_comments_batch_never_invokes_gh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC4: a KanbanFlow board has no GitHub repo — this path must not shell to gh."""
+    from tests.fake_kanbanflow import make_kf_provider_with_tasks
+
+    def fake_run(args: list[str], **kw: object) -> object:
+        raise AssertionError(f"gh must not be invoked on the KanbanFlow path: {args}")
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", fake_run)
+
+    provider, _client = make_kf_provider_with_tasks(tasks={12: []})
+    assert provider.list_comments_batch([12]) == {12: []}

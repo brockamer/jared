@@ -422,6 +422,16 @@ class KanbanFlowProvider:
             for c in self._client.list_comments(task_id)
         ]
 
+    def list_comments_batch(self, refs: list[IssueRef]) -> dict[IssueRef, list[Comment]]:
+        """Return `{ref: comments}` for many tasks, looping over list_comments.
+
+        KanbanFlow has no aliased-batch endpoint, so this is N calls where the
+        GitHub provider makes one. Acceptable: the only caller is
+        `next-session-prompt`, whose N is the In Progress column bounded by the
+        WIP cap (~4). No `gh` is involved on this path (#395).
+        """
+        return {ref: self.list_comments(ref) for ref in refs}
+
     # --- writes ---
     def validate_fields(
         self,
