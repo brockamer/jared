@@ -69,6 +69,10 @@ class FakeKanbanFlowClient:
         self.board_events: list[KfEvent] = []
         self._next_id = 0
         self.fail_set_custom_field = False
+        # Counts *public* get_task calls only. The write methods below go
+        # through _require, so a test can assert how many fetches a provider
+        # method costs without the fake's own bookkeeping inflating the count.
+        self.get_task_calls = 0
 
     # --- reads ---
     def get_board(self) -> KfBoard:
@@ -93,10 +97,15 @@ class FakeKanbanFlowClient:
     ) -> list[KfEvent]:
         return list(self.board_events)
 
-    def get_task(self, task_id: str) -> KfTask:
+    def _require(self, task_id: str) -> KfTask:
+        """Look a task up without counting it as a caller-visible fetch."""
         if task_id not in self.tasks:
             raise KanbanFlowNotFoundError(f"no task {task_id}")
         return self.tasks[task_id]
+
+    def get_task(self, task_id: str) -> KfTask:
+        self.get_task_calls += 1
+        return self._require(task_id)
 
     # --- writes ---
     def create_task(
@@ -138,7 +147,7 @@ class FakeKanbanFlowClient:
         color: str | None = None,
         responsible_user_id: str | None = None,
     ) -> KfTask:
-        t = self.get_task(task_id)
+        t = self._require(task_id)
         if name is not None:
             t.name = name
         if column_id is not None:
@@ -157,7 +166,7 @@ class FakeKanbanFlowClient:
     def set_task_custom_field(self, task_id: str, custom_field_id: str, value: str | float) -> None:
         if self.fail_set_custom_field:
             raise RuntimeError("forced custom-field failure")
-        t = self.get_task(task_id)
+        t = self._require(task_id)
         for cf in t.custom_fields:
             if cf.custom_field_id == custom_field_id:
                 cf.value = value
@@ -165,7 +174,7 @@ class FakeKanbanFlowClient:
         t.custom_fields.append(KfCustomFieldValue(custom_field_id=custom_field_id, value=value))
 
     def add_comment(self, task_id: str, text: str, **_: object) -> str:
-        self.get_task(task_id)
+        self._require(task_id)
         bucket = self.comments.setdefault(task_id, [])
         cid = f"c-{len(bucket) + 1}"
         bucket.append(KfComment(id=cid, text=text, created_timestamp="t"))
@@ -175,16 +184,16 @@ class FakeKanbanFlowClient:
         return self.comments.get(task_id, [])
 
     def add_label(self, task_id: str, name: str, *, pinned: bool = False) -> None:
-        t = self.get_task(task_id)
+        t = self._require(task_id)
         if not any(label.name == name for label in t.labels):
             t.labels.append(KfLabel(name=name, pinned=pinned))
 
     def remove_label(self, task_id: str, name: str) -> None:
-        t = self.get_task(task_id)
+        t = self._require(task_id)
         t.labels = [label for label in t.labels if label.name != name]
 
     def list_labels(self, task_id: str) -> list[KfLabel]:
-        return self.get_task(task_id).labels
+        return self._require(task_id).labels
 
 
 def make_kf_provider_with_task(
