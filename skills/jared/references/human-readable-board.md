@@ -38,7 +38,9 @@ The board's value is that a human glancing at it understands the state of the wo
 
 ## Issue body template
 
-The default template lives at `assets/issue-body.md.template`. The skeleton:
+The default template lives at `assets/issue-body.md.template`, which is
+authoritative. The skeleton below reproduces it — if the two ever disagree,
+the asset wins and this block is the one to correct:
 
 ```markdown
 One-sentence summary.
