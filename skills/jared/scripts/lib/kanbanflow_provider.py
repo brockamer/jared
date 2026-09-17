@@ -268,33 +268,31 @@ class KanbanFlowProvider:
 
         self._index.replace({number: sorted(ids)[0] for number, ids in by_number.items()})
 
-    def _resolve_id(self, ref: IssueRef) -> str:
-        task_id = self._index.get(ref)
-        if task_id is None:
-            self._reseed_index()
-            task_id = self._index.get(ref)
-        if task_id is None:
-            raise ItemNotFound(f"#{ref} not found on the KanbanFlow board")
-        return task_id
+    def _resolve_task(self, ref: IssueRef) -> KfTask:
+        """Resolve #`ref` to a live task, or raise `ItemNotFound` (#385, F70).
 
-    def _set_custom_field(self, field_name: str, value: str, task_id: str) -> None:
-        definition = self._check_option(field_name, value)
-        self._client.set_task_custom_field(task_id, definition.id, value)
+        This is the one seam where a jared #N becomes a KanbanFlow `_id`, so it
+        is the one place the on-disk index can be checked against the board.
+        Three staleness shapes get the same single reseed-and-retry:
 
-    # --- reads ---
-    def get_item(self, ref: IssueRef) -> BoardItem | None:
-        """Read #`ref`, reseeding once if the on-disk index proves stale.
-
-        Three staleness shapes are handled by the same retry (F3, #371):
-
-        * **miss** — no entry for `ref` (the original behavior),
+        * **miss** — no entry for `ref` (the original `_resolve_id` behavior),
         * **dangling** — the entry's task was deleted, so the fetch 404s,
-        * **stale hit** — the entry's task was renumbered in the KanbanFlow
-          UI, so it resolves fine but is no longer #`ref`.
+        * **stale hit** — the entry's task was renumbered in the KanbanFlow UI,
+          so it resolves fine but is no longer #`ref`.
 
-        The third was silent: `get(ref)` returned an id, nothing reseeded, and
-        jared reported one task's data under another task's number. The check
-        uses the task already fetched, so a fresh hit costs no extra call.
+        Only the first was handled before. `_resolve_id` returned the index hit
+        without fetching, so a renumbered task silently absorbed every write
+        aimed at its old number — `move`, `set_field`, `close`, `comment`,
+        `add_blocked_by`, `set_milestone` and the rest of the 13 call sites.
+        #371 (F3) fixed the same shape in `get_item` for free, because a read
+        already had the task in hand; the write path is the residual it left.
+
+        **Cost.** One `GET /tasks/<id>` per resolution. That is the deliberate
+        price of Option 1 in #385: the write path had no fetch to reuse, so
+        correctness here is not free. Returning the *task* rather than the id
+        keeps the callers that do read it — `get_item`, `get_body` — flat
+        instead of doubling them; `_resolve_id` is the thin wrapper for the
+        write path, which needs only the id.
         """
         for attempt in (0, 1):
             task_id = self._index.get(ref)
@@ -302,21 +300,44 @@ class KanbanFlowProvider:
                 if attempt == 0:
                     self._reseed_index()
                     continue
-                return None
+                break
             try:
                 task = self._client.get_task(task_id)
             except KanbanFlowNotFoundError:
                 if attempt == 0:
                     self._reseed_index()
                     continue
-                return None
+                break
             if task.number_value != ref:
                 if attempt == 0:
                     self._reseed_index()
                     continue
-                return None
-            return self._item_from_task(task)
-        return None
+                break
+            return task
+        raise ItemNotFound(f"#{ref} not found on the KanbanFlow board")
+
+    def _resolve_id(self, ref: IssueRef) -> str:
+        """The write path's view of `_resolve_task` — a validated task `_id`."""
+        return self._resolve_task(ref).id
+
+    def _set_custom_field(self, field_name: str, value: str, task_id: str) -> None:
+        definition = self._check_option(field_name, value)
+        self._client.set_task_custom_field(task_id, definition.id, value)
+
+    # --- reads ---
+    def get_item(self, ref: IssueRef) -> BoardItem | None:
+        """Read #`ref`, or `None` when it does not resolve.
+
+        The staleness handling lives in `_resolve_task` (F3 #371, F70 #385),
+        which every other ref-taking method shares. This method only converts
+        that seam's `ItemNotFound` into the `None` the BoardProvider contract
+        asks for on a read. The retry loop used to be duplicated here, which is
+        how the write path came to be missing it.
+        """
+        try:
+            return self._item_from_task(self._resolve_task(ref))
+        except ItemNotFound:
+            return None
 
     def list_open_items(self) -> list[BoardItem]:
         done_id = self._column_id_by_status.get("Done")
@@ -332,7 +353,9 @@ class KanbanFlowProvider:
         ]
 
     def get_body(self, ref: IssueRef) -> str:
-        return self._client.get_task(self._resolve_id(ref)).description
+        # _resolve_task, not _resolve_id + get_task: the seam already fetched
+        # the task to validate it, so reading the body off it costs nothing.
+        return self._resolve_task(ref).description
 
     def fetch_blocked_by_edges(self) -> list[Edge]:
         edges: list[Edge] = []
