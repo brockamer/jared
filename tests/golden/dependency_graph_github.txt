@@ -1,0 +1,10 @@
+Dependency graph: 1 issues, 1 dependencies.
+  Cycles: none
+  Critical path (2): #2 → #1
+  Priority inversions: none
+  Orphaned: none
+
+All dependencies:
+  #2 → #1 (alpha)
+--- stderr ---
+Fetching open issues from brockamer/findajob...
