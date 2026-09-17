@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -825,7 +826,7 @@ def test_get_board_events_ascending_does_not_page(monkeypatch: pytest.MonkeyPatc
 # docs/project-board.md already records.
 
 
-def _write_board_env(tmp_path, board_id: str, body: str):
+def _write_board_env(tmp_path: Path, board_id: str, body: str) -> Path:
     boards = tmp_path / "jared" / "kanbanflow" / "boards"
     boards.mkdir(parents=True, exist_ok=True)
     path = boards / f"{board_id}.env"
@@ -834,7 +835,7 @@ def _write_board_env(tmp_path, board_id: str, body: str):
 
 
 def test_from_env_falls_back_to_board_token_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
@@ -847,7 +848,7 @@ def test_from_env_falls_back_to_board_token_file(
 
 
 def test_from_env_prefers_environment_over_board_token_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("KANBANFLOW_API_TOKEN", "envtok")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
@@ -860,7 +861,7 @@ def test_from_env_prefers_environment_over_board_token_file(
 
 
 def test_from_env_board_token_file_tolerates_export_comments_and_quotes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
@@ -877,7 +878,7 @@ def test_from_env_board_token_file_tolerates_export_comments_and_quotes(
 
 
 def test_from_env_error_names_the_board_token_file_when_board_id_known(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
@@ -887,7 +888,7 @@ def test_from_env_error_names_the_board_token_file_when_board_id_known(
 
 
 def test_from_env_board_token_file_ignores_unrelated_keys(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("KANBANFLOW_API_TOKEN", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))

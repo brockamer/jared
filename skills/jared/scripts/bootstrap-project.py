@@ -886,6 +886,11 @@ def bootstrap_kanbanflow(args: argparse.Namespace) -> int:
     from lib.kanbanflow_client import KanbanFlowClient  # noqa: PLC0415
 
     try:
+        # Env-only on purpose: the board-scoped token file that Board.provider
+        # falls back to is keyed by Board ID, and /jared-init learns that id
+        # *from* this connection's response. There is no id to key a lookup on
+        # until the connection has already succeeded, so bootstrapping a new
+        # board still needs a one-time KANBANFLOW_API_TOKEN export.
         client = KanbanFlowClient.from_env()
         board = client.get_board()
         field_defs = client.list_custom_field_defs()
