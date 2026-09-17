@@ -67,8 +67,8 @@ def test_next_session_prompt_renders_basic_sections(
     assert "#273" in out and "#274" in out
     # Recently closed
     assert "#251" in out and "v0.4 release" in out
-    # Footer warning
-    assert "Regenerated each wrap" in out
+    # Footer — states the posture is computed live, never a stored file
+    assert "Assembled live from board state on each invocation" in out
     # Section ordering — the slash command depends on this contract
     in_flight_at = out.find("## In flight")
     up_next_at = out.find("## Top of Up Next")
