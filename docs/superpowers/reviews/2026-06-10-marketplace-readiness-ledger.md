@@ -384,6 +384,10 @@ syntactic question and cannot substantiate a runtime one.
 | **F66** | P2 | 1c | CLAUDE.md's two batch-script enumerations omit stage.py, contradicting the same file's later references to it | `CLAUDE.md:41, :125` |
 | **F67** | P2 | 1c | CLAUDE.md's multi-session background pointer cites a spec path that was archived out from under it | `CLAUDE.md:201` |
 | **F68** | P2 | 1c | CLAUDE.md's "What this repo is" still defines jared as GitHub-Projects-only, which its own architecture section contradicts | `CLAUDE.md:7` |
+| **F69** | P1 | 1a | Session locks are written into the consuming repo's working tree with no `.gitignore` entry; a committed lock is a permanent false sibling-session detection | `skills/jared/scripts/lib/session_lock.py:46,110` |
+| **F70** | P1 | 1a | KanbanFlow `_resolve_id` reseeds only on a miss and never validates the hit, so a stale index routes a mutation to the wrong task | `skills/jared/scripts/lib/kanbanflow_provider.py:271-278` |
+| **F71** | P1 | 1b | `/jared-wrap`'s commit step runs `git add -A`, staging deliberately-untracked private files, then the same loop pushes and opens a PR | `commands/jared-wrap.md:122` |
+| **F72** | P1 | 1b | `/jared-wrap`'s back-end flow guard tests only `main` and never checks `origin` is owned; it can run the loop on a `master` default branch or push/PR to a non-owned upstream | `commands/jared-wrap.md:81,124` |
 
 ### P1 — must-fix before release
 
@@ -993,3 +997,56 @@ semantic checks against the authoritative record, not path-existence checks.
 The `voice:` row is recorded deliberately: it is the trap this round was most likely to fall into,
 since criterion 3 asks for the `## Jared config` knobs to be verified against the parser and the
 naive reading of "documented but unparsed" is "dead config".
+
+## Round 4 — bake-site and review-residual defects graded into the exit gate  *(recorded 2026-09-16, /jared-audit)*
+
+**Result: 4 findings — 0 P0, 4 P1, 0 P2. Ledger total: 69 findings — 0 P0, 26 P1, 43 P2.**
+
+**Why this round exists.** Four defects landed on the `Marketplace readiness` milestone between
+2026-09-14 and 2026-09-16 — three from bake-site sessions (trailscribe) and one carved out of Phase 3c —
+without a ledger row. The exit gate is defined over this ledger ("zero P0 + zero P1"), so an ungraded
+release-scope defect is invisible to the gate. This round grades them so the gate is honest; it adds
+no new investigation. The four KanbanFlow cold-install defects added to the milestone on 2026-09-12
+(#361, #362, #363, #391) remain outside the rubric by that reshape's decision — the epic's acceptance
+criteria carry them as "done or named as known/deferred in the writeup".
+
+**Verification bar.** Each entry was reproduced in code by the recording session (one self-check) and
+carries the reporter's live observation. That is below F3–F59's two-verifier standard and equal to
+round 3's. The severities are the recording session's judgement against the P1 definition above
+("must-fix before release"); an operator may re-grade with a rationale.
+
+#### F69 · P1 · dim 1a — Session locks are written into the consuming repo's working tree, where a commit becomes a guaranteed false sibling-session detection
+
+- **Location:** `skills/jared/scripts/lib/session_lock.py:46` (lock dir = `<repo>/.jared`), `:110` (`list_active_locks`)
+- **Claim:** `/jared-start` writes `<repo>/.jared/session-<N>.lock` inside the consuming project's tree; nothing adds `.jared/` to that project's `.gitignore` (jared's own `.gitignore:38` has it; the bootstrap assets do not). `list_active_locks` performs no PID-liveness check by design (the recorded PID is the exited CLI subprocess), so every lock file on disk counts as an active sibling. A lock committed once — e.g. by F71's `git add -A` — makes every later `/jared-start` in every clone refuse.
+- **Evidence:** `session_lock.py:46` `return repo_root.resolve() / ".jared"`; `:110-113` docstring "Walks `<repo>/.jared/session-*.lock` and reads each"; grep of `skills/jared/assets/` for `.jared` — no hits. Reported live from a trailscribe session on jared 0.30.0 (#376).
+- **Suggested fix:** Move the lock out of the working tree (under `$XDG_STATE_HOME/jared/<repo-hash>/` or `<repo>/.git/jared/`), or have bootstrap/init add `.jared/` to the consuming repo's `.gitignore` and have `list_active_locks` ignore any lock that is git-tracked.
+- **Verification:** 1 self-check · reproduced in code · reporter's live observation. Below the two-verifier standard.
+- **Tracked:** #376 (`Marketplace readiness`).
+
+#### F70 · P1 · dim 1a — KanbanFlow `_resolve_id` reseeds only on a miss and never validates a hit, so a stale index routes a mutation to the wrong task
+
+- **Location:** `skills/jared/scripts/lib/kanbanflow_provider.py:271-278`
+- **Claim:** Every KanbanFlow mutation resolves `#N` to a task `_id` via `_resolve_id`, which returns the on-disk index entry without a fetch; it reseeds only when the entry is absent. After a renumber or a delete-and-recreate on the board, a stale hit sends `move`/`set`/`comment`/`close` to the wrong task, silently. Phase 3c (F3) hardened the read path (`get_item` now validates `number_value` and retries once) and deliberately left the write path as a cost decision.
+- **Evidence:** the eight lines at `:271-278` — `task_id = self._index.get(ref)`; reseed only `if task_id is None`; no fetch, no `number_value` comparison. F3's done-marker above records the residual: "`_resolve_id` returns an `_id` without fetching … Tracked as #385."
+- **Suggested fix:** On the mutation path, fetch the task once and compare `number_value` to `ref` before the write (one extra GET per write), reseed-and-retry once on mismatch, and raise `ItemNotFound` if the retry also mismatches — the same shape F3 gave `get_item`.
+- **Verification:** 1 self-check · reproduced in code. Below the two-verifier standard.
+- **Tracked:** #385 (`Marketplace readiness`).
+
+#### F71 · P1 · dim 1b — `/jared-wrap`'s commit step runs `git add -A`, staging deliberately-untracked private files
+
+- **Location:** `commands/jared-wrap.md:122`
+- **Claim:** The back-end loop's `commit` step is `git add -A && git commit -m "$msg"`. It cannot distinguish a file that is untracked because nobody added it yet from one that is untracked on purpose. The same loop then runs `push` (`:124`) and `create_pr`, so one `y` at the commit prompt can publish private material. The step shows `git status` first, which is the only mitigation; the operator is asked for a message, not for a per-file confirmation.
+- **Evidence:** `commands/jared-wrap.md:122` verbatim: "On a message: run `git add -A && git commit -m "$msg"`". Reported live from a trailscribe session (#392).
+- **Suggested fix:** Stage tracked changes only (`git add -u`) and list untracked files separately with an explicit opt-in per file or per glob; never auto-stage untracked paths in an automated flow.
+- **Verification:** 1 self-check · reproduced in the stub text · reporter's live observation. Below the two-verifier standard.
+- **Tracked:** #392 (`Marketplace readiness`).
+
+#### F72 · P1 · dim 1b — `/jared-wrap`'s back-end flow guard is `main`-only and never checks that `origin` is owned
+
+- **Location:** `commands/jared-wrap.md:81` (guard), `:124` (unconditional `git push -u origin`)
+- **Claim:** The precondition guard skips the loop only when the current branch is literally `main`. A repo whose default branch is `master` falls through, and the loop attempts a PR from the default branch. Nothing checks that `origin` is a remote the operator can push to, so on a clone of someone else's repo the loop pushes and opens a PR against the upstream.
+- **Evidence:** `:81` "If the current branch is `main`, skip the loop entirely"; `:124` "Run `git push -u origin $(git rev-parse --abbrev-ref HEAD)`"; no ownership check anywhere in the stub or in `lib/wrap_state.py` (grep for `origin` there: no hits). Reported live from a bake-site session (#393).
+- **Suggested fix:** Resolve the default branch from `origin/HEAD` (or `gh repo view --json defaultBranchRef`) instead of the literal `main`; before push/PR, confirm `origin` resolves to a repo the authenticated user can push to (`gh repo view --json viewerPermission`), and refuse with a message otherwise.
+- **Verification:** 1 self-check · reproduced in the stub text · reporter's live observation. Below the two-verifier standard.
+- **Tracked:** #393 (`Marketplace readiness`).
