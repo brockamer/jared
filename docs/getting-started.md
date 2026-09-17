@@ -107,7 +107,7 @@ soon as the column has at least one item.
 
 Jared will:
 
-- Check WIP (default cap: 3 In Progress at once).
+- Check WIP (default cap: 4 In Progress at once, counted in workstreams).
 - Read the issue body and verify it's "pullable" — has a summary,
   acceptance criteria, no open dependencies.
 - Move it to In Progress.
