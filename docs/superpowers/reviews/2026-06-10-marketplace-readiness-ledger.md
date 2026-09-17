@@ -385,7 +385,7 @@ syntactic question and cannot substantiate a runtime one.
 | **F67** | P2 | 1c | CLAUDE.md's multi-session background pointer cites a spec path that was archived out from under it | `CLAUDE.md:201` |
 | **F68** | P2 | 1c | CLAUDE.md's "What this repo is" still defines jared as GitHub-Projects-only, which its own architecture section contradicts | `CLAUDE.md:7` |
 | **F69** | P1 | 1a | Session locks are written into the consuming repo's working tree with no `.gitignore` entry; a committed lock is a permanent false sibling-session detection | `skills/jared/scripts/lib/session_lock.py:46,110` · **resolved** #376 (`feature/376-lock-under-git-common-dir`, `af3efbe`) |
-| **F70** | P1 | 1a | KanbanFlow `_resolve_id` reseeds only on a miss and never validates the hit, so a stale index routes a mutation to the wrong task | `skills/jared/scripts/lib/kanbanflow_provider.py:271-278` |
+| **F70** | P1 | 1a | KanbanFlow `_resolve_id` reseeds only on a miss and never validates the hit, so a stale index routes a mutation to the wrong task | `skills/jared/scripts/lib/kanbanflow_provider.py:271-278` · **resolved** #385 (`feature/385-resolve-id-validation`, `759c1be`) |
 | **F71** | P1 | 1b | `/jared-wrap`'s commit step runs `git add -A`, staging deliberately-untracked private files, then the same loop pushes and opens a PR | `commands/jared-wrap.md:122` · **resolved** #392 (`fix/392-393-wrap-backend-guards`, `c237a8a`) |
 | **F72** | P1 | 1b | `/jared-wrap`'s back-end flow guard tests only `main` and never checks `origin` is owned; it can run the loop on a `master` default branch or push/PR to a non-owned upstream | `commands/jared-wrap.md:81,124` · **resolved** #393 (`fix/392-393-wrap-backend-guards`, `c237a8a`) |
 
