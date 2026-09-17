@@ -227,3 +227,43 @@ def make_kf_provider_with_task(
         index=index,
     )
     return provider, client, 1
+
+
+def make_kf_provider_with_tasks(
+    *,
+    tasks: dict[int, list[dict[str, str]]],
+    users: dict[str, str] | None = None,
+) -> tuple[KanbanFlowProvider, FakeKanbanFlowClient]:
+    """Build a (KanbanFlowProvider, FakeKanbanFlowClient) pair holding N tasks.
+
+    `tasks` maps the board-visible number (the IssueRef) to that task's seeded
+    comments, each a dict with text/createdTimestamp/authorUserId keys. Sibling
+    of `make_kf_provider_with_task` for the batch paths (#395), which need more
+    than one resolvable ref.
+    """
+    client = FakeKanbanFlowClient()
+    for uid, name in (users or {}).items():
+        client.users.append(KfUser(id=uid, name=name))
+    for number, raw_comments in tasks.items():
+        task = client.create_task(
+            name=f"task {number}", column_id="col-inprog", number_value=number
+        )
+        for raw in raw_comments:
+            bucket = client.comments.setdefault(task.id, [])
+            bucket.append(
+                KfComment(
+                    id=f"c-{len(bucket) + 1}",
+                    text=raw.get("text", ""),
+                    created_timestamp=raw.get("createdTimestamp", ""),
+                    author_user_id=raw.get("authorUserId", ""),
+                )
+            )
+    tmp_dir = Path(tempfile.mkdtemp())
+    index = KfNumberIndex(tmp_dir / "kf-index-B1.json")
+    provider = KanbanFlowProvider(
+        client=client,
+        board=client.board,
+        field_defs=client.field_defs,
+        index=index,
+    )
+    return provider, client

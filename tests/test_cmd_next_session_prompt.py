@@ -7,6 +7,7 @@ here (it lives in commands/jared-wrap.md, not in code).
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -459,3 +460,74 @@ def test_next_session_prompt_session_flag_backlog_only_no_false_empty_marker(
     assert "(none labeled session-1 in Up Next or Backlog)" not in out
     # Unlabeled Up Next item still excluded — no silent fall-through
     assert "#300" not in out
+
+
+# --- provider-routed comment fetch (#395) ----------------------------------
+
+
+def test_latest_session_note_oneliner_reads_neutral_comments() -> None:
+    """The one-liner extractor consumes provider Comments, not gh JSON dicts.
+
+    Routing the fetch through `BoardProvider.list_comments_batch` means this
+    helper now receives neutral `Comment` dataclasses on every backend; reading
+    them as dicts is what made the command GitHub-only.
+    """
+    from skills.jared.scripts.lib.board_provider import Comment
+
+    mod = import_cli()
+    comments = [
+        Comment(author="brockamer", body="ordinary reply", created_at="2026-09-15T00:00:00Z"),
+        Comment(
+            author="brockamer",
+            body="## Session 2026-09-16\n\n**Next action:** route the fetch through the provider.",
+            created_at="2026-09-16T00:00:00Z",
+        ),
+    ]
+    assert mod._latest_session_note_oneliner(comments) == "route the fetch through the provider."
+
+
+def test_backend_failure_emits_no_partial_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failing comment fetch must abort before the first print.
+
+    The bug this guards (#395) half-emitted the handoff header and `## In
+    flight` heading before dying, so a truncated posture looked like a valid
+    one. Every backend read now happens above the first emit.
+    """
+    from tests.conftest import FakeGhResult
+
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[{"number": 12, "title": "In-flight item", "state": "OPEN"}],
+        statuses={12: ("In Progress", "High")},
+    )
+
+    # patch_gh_multi set subprocess.run on the shared module object (both Board
+    # import paths see the one global `subprocess` — see conftest's docstring),
+    # so reading it back here yields that fake, which we delegate to.
+    import subprocess
+
+    inner: Any = subprocess.run
+
+    def failing_on_comments(args: list[str], **kw: object) -> object:
+        if "comments(last:" in " ".join(args):
+            return FakeGhResult(
+                stdout="",
+                returncode=1,
+                stderr="gh: Could not resolve to an Issue with the number of 12.",
+            )
+        return inner(args, **kw)
+
+    monkeypatch.setattr("skills.jared.scripts.lib.board.subprocess.run", failing_on_comments)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert captured.out == "", f"stdout must be empty on backend failure, got: {captured.out!r}"
+    assert "Could not resolve" in captured.err
