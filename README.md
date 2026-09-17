@@ -60,6 +60,12 @@ The shape Jared enforces:
 - **A GitHub Projects v2 board.** Either an existing one, or a fresh
   empty project at `https://github.com/users/<you>/projects`. Jared
   introspects the field schema during bootstrap, so any board works.
+- **Python 3.11+ on PATH.** Every slash command shells out to the `jared`
+  CLI, which is a `#!/usr/bin/env python3` script. Confirm with
+  `python3 --version`.
+- **`git` installed.** `/jared-start` resolves the repository root with
+  `git rev-parse --git-common-dir` on every session, not only multi-session
+  ones. Confirm with `git --version`.
 
 ### Install
 

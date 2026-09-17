@@ -27,9 +27,12 @@ In order:
 5. Close it.
 6. Wrap the session.
 
-Everything is typed into Claude Code (slash commands) or your shell (the
-`jared` CLI). They produce the same results — slash commands are the
-discoverable surface, the CLI is what slash commands call under the hood.
+Everything is typed into Claude Code. Slash commands are the discoverable
+surface; the `jared` CLI is what they call under the hood. The CLI ships
+inside the plugin and is **not** placed on your PATH, so the CLI steps below
+are written as commands to hand to Claude Code — it resolves
+`${CLAUDE_PLUGIN_ROOT}` from its session environment. Typing a bare `jared`
+into your own shell will fail with `command not found`.
 
 ---
 
@@ -129,10 +132,12 @@ Reply `go` (or amend the plan first) and the work begins.
 
 Session notes are how Jared keeps continuity across sessions. The simplest
 way to add one manually is via the `jared comment` CLI — body is passed
-via `--body` (inline) or `--body-file` (from a file):
+via `--body` (inline) or `--body-file` (from a file).
+
+In Claude Code, ask it to run:
 
 ```
-jared comment <your-issue-#> --body "Started on the typo fix; localized to README line 47."
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <your-issue-#> --body "Started on the typo fix; localized to README line 47."
 ```
 
 You'll see:
@@ -155,10 +160,10 @@ notes automatically. This step shows you the manual path.
 
 When the work is done, close the issue. For a real fix you'd open a PR
 that uses GitHub's auto-close keywords (`Closes #<N>`) and let the merge
-close it; the equivalent direct call is:
+close it. The equivalent direct call — ask Claude Code to run it:
 
 ```
-jared close <your-issue-#>
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <your-issue-#>
 ```
 
 You'll see two lines:

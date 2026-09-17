@@ -58,11 +58,15 @@ Not started. (Or: living summary of where the implementation stands.)
 
 </details>
 
-## Depends on
-(none)
+<!--
+Dependencies are tracked natively via GitHub's `blockedBy` API, not in body markup.
+Add an edge with: addBlockedBy(issueId, blockingIssueId). See references/dependencies.md.
 
-## Blocks
-(none)
+Add a "## Blocked by" section ONLY when this issue is in the Blocked Status column.
+Format:
+  ## Blocked by
+  Waiting on <person/event>, expected by <date>. <one-line context>
+-->
 
 ## Planning
 (none)
@@ -78,7 +82,7 @@ Not started. (Or: living summary of where the implementation stands.)
   Chose Redis over Memcached because we already run Redis for session state; adding a second cache layer wasn't worth the operational cost.
   ```
 - **`## Acceptance criteria`** — in a `<details>` block. The testable conditions that mean the issue is done.
-- **`## Depends on`** / **`## Blocks`** — `#N` references. Used when native GitHub issue dependencies aren't available, or for cross-repo. See `references/dependencies.md`.
+- **`## Blocked by`** — added **only** while the issue sits in the Blocked Status column; names the unblock owner and what is being waited on. Dependencies themselves are native `blockedBy` edges, not body markup. **`## Blocks` is retired** — express the inverse direction by adding a `blockedBy` edge on the dependent issue. `## Depends on` survives only as non-authoritative prose for cross-repo references. See `references/dependencies.md`.
 - **`## Planning`** — link to plan/spec files if Superpowers-style planning is in use. See `references/plan-spec-integration.md`.
 
 ### Constraints
@@ -109,7 +113,6 @@ Don't use comments for:
 Labels describe *kind*, not priority or status:
 
 - `bug` / `enhancement` / `refactor` / `documentation` / `test` — type
-- `blocked` — state (must pair with `## Blocked by` section in body)
 - `good-first-issue` — contributor signal
 - Project-specific scope labels (e.g., `job-search`, `pipeline-quality`, or `demo`, `rough-in`, `finish` for renovation)
 
