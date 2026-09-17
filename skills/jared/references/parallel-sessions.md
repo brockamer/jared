@@ -99,8 +99,14 @@ git worktree remove ~/Code/<repo>-<issue>
 git branch -d feature/<issue>-<slug>
 ```
 
-Each worktree needs its own `.venv` — `uv sync` or `uv pip install -e .`
-inside the new worktree before running tests.
+Each worktree needs its own `.venv`. The dev extras carry pytest, ruff and
+mypy, so a bare `uv pip install -e .` leaves the worktree unable to run the
+tests:
+
+```bash
+uv venv .venv && source .venv/bin/activate
+uv pip install -e ".[dev]"    # or: uv sync --extra dev
+```
 
 ## The wrap back-end
 
