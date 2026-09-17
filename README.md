@@ -310,8 +310,10 @@ When two Claude sessions work the same repo at once, they share one
 other's branch state. Jared layers four defenses:
 
 - **Presence locks.** Every `/jared-start` writes
-  `<repo>/.jared/session-<pid>.lock`. A second session sees the lock
-  and refuses to start in the shared checkout unless you opt in.
+  `<repo>/.git/jared/session-<issue>.lock`. A second session sees the lock
+  and refuses to start in the shared checkout unless you opt in. The lock
+  sits under the git common dir so it can never be committed — a tracked
+  lock would refuse every later session in every clone (#376).
 - **Worktree isolation.** `/jared-start <N> --session N` creates
   `~/Code/<repo>-<N>/` via `git worktree add`, checks out a fresh
   feature branch from `origin/main`, and shifts CWD into the worktree.
