@@ -370,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     slw = sub.add_parser(
         "session-lock-write",
-        help="Write a lock file for this issue into <repo-root>/.jared/.",
+        help="Write a lock file for this issue into <repo-root>/.git/jared/.",
     )
     slw.add_argument("--repo-root", required=True, help="Path to the main checkout.")
     slw.add_argument("--issue", type=int, required=True, help="Issue number being worked.")
@@ -2109,6 +2109,7 @@ def main(argv: list[str] | None = None) -> int:
         OptionNotFound,
         ItemNotFound,
         GhInvocationError,
+        session_lock.NotAGitCheckout,
     ) as e:
         print(f"jared: {e}", file=sys.stderr)
         return 1

@@ -195,8 +195,11 @@ When running two or more Claude sessions against this repo simultaneously, pass
 `--session N` to `/jared-start` to opt into worktree isolation:
 
 - `/jared-start <issue>` (solo, default) — no worktree. CWD unchanged. Writes
-  a session-presence lock at `<repo>/.jared/session-<pid>.lock` so a later
-  session can detect this one.
+  a session-presence lock at `<repo>/.git/jared/session-<issue>.lock` so a later
+  session can detect this one. The lock lives under the **git common dir**, not
+  in the working tree: `list_active_locks` does no liveness sweep, so a lock that
+  got committed would make `/jared-start` refuse in every clone forever (#376).
+  Keyed by issue, not PID — the writing subprocess exits immediately (#259).
 - `/jared-start <issue> --session 1` — creates `~/Code/<repo>-<issue>/`, checks
   out a fresh `feature/<issue>-<slug>` branch from `origin/main`, shifts CWD
   into the worktree. The `session=1` claim is the durable per-session identity
@@ -219,7 +222,8 @@ surfaces the orphan in its refusal, and the operator clears it explicitly with
 `jared session-lock-clear --issue N` after confirming the session is actually dead.
 
 For background and the recovery-sequence incident that motivated this mechanism,
-see issue #231 and `docs/superpowers/specs/2026-05-23-multi-session-impl-design.md`.
+see issue #231 and
+`docs/superpowers/specs/archived/2026-05/2026-05-23-multi-session-impl-design.md`.
 
 ## Versioning
 

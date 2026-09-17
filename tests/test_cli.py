@@ -195,6 +195,9 @@ def test_session_resolve_refuses_when_sibling_present(
 ) -> None:
     from skills.jared.scripts.lib import session_lock
 
+    # Locks anchor under `<repo_root>/.git/jared/` (#376), so the root must be a
+    # checkout root.
+    (tmp_path / ".git").mkdir()
     # Write a sibling lock with the current PID (alive).
     session_lock.write_lock(
         repo_root=tmp_path,
@@ -214,6 +217,7 @@ def test_session_resolve_refuses_when_sibling_present(
 
 
 def test_session_lock_write_creates_file(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
     mod = import_cli()
     result = mod.main(
         [
@@ -229,13 +233,14 @@ def test_session_lock_write_creates_file(tmp_path: Path) -> None:
         ]
     )
     assert result == 0
-    lock_path = tmp_path / ".jared" / "session-231.lock"
+    lock_path = tmp_path / ".git" / "jared" / "session-231.lock"
     assert lock_path.exists()
 
 
 def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
     from skills.jared.scripts.lib import session_lock
 
+    (tmp_path / ".git").mkdir()
     session_lock.write_lock(
         repo_root=tmp_path,
         lock=session_lock.Lock(
@@ -249,7 +254,7 @@ def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
     mod = import_cli()
     result = mod.main(["session-lock-clear", "--repo-root", str(tmp_path), "--issue", "231"])
     assert result == 0
-    lock_path = tmp_path / ".jared" / "session-231.lock"
+    lock_path = tmp_path / ".git" / "jared" / "session-231.lock"
     assert not lock_path.exists()
 
 
@@ -387,6 +392,7 @@ def test_session_resolve_refuse_bleg_renders_solo_sibling_mode(
     import tests.conftest as conftest
     from skills.jared.scripts.lib import session_lock
 
+    (tmp_path / ".git").mkdir()
     session_lock.write_lock(
         repo_root=tmp_path,
         lock=session_lock.Lock(
