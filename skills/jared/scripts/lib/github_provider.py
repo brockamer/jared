@@ -29,6 +29,9 @@ from .board import (
 from .board import (
     fetch_blocked_by_edges as _fetch_blocked_by_edges,
 )
+from .board import (
+    fetch_recent_comments_batch as _fetch_recent_comments_batch,
+)
 from .board_provider import (
     BoardItem,
     Capability,
@@ -466,6 +469,32 @@ class GitHubProjectsProvider:
             )
             for c in raw
         ]
+
+    def list_comments_batch(self, refs: list[IssueRef]) -> dict[IssueRef, list[Comment]]:
+        """Return `{ref: comments}` for many issues in ONE aliased GraphQL call.
+
+        Same neutral Comment contract as `list_comments`, batched: the
+        per-issue `gh issue view` fan-out would be an N+1 on every
+        `next-session-prompt` invocation. `limit` and `cache` are GitHub-side
+        optimizations, not protocol parameters, so they stay pinned here to the
+        values the old direct call site used (#395).
+
+        Comments come back oldest -> newest, capped at the most recent 10.
+        """
+        if not refs:
+            return {}
+        raw_by_number = _fetch_recent_comments_batch(self.repo, list(refs), limit=10, cache="60s")
+        return {
+            ref: [
+                Comment(
+                    author=str((c.get("author") or {}).get("login") or ""),
+                    body=str(c.get("body", "")),
+                    created_at=str(c.get("createdAt") or ""),
+                )
+                for c in raw_by_number.get(ref, [])
+            ]
+            for ref in refs
+        }
 
     # ------------------------------------------------------------------ #
     # Private write helpers                                               #

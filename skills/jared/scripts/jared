@@ -39,7 +39,6 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     _find_project_root,
     fetch_issue_title_from_cwd,
     fetch_project_items_batch,
-    fetch_recent_comments_batch,
     gh_env,
     pre_flight_check,
     print_redaction_diff,
@@ -49,6 +48,7 @@ from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
     BoardItem,
     Capability,
     ClosedItem,
+    Comment,
 )
 from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     degraded_or_none,
@@ -1152,7 +1152,7 @@ def _fetch_recently_closed(board: Board, *, days: int) -> list[ClosedItem]:
     return closed
 
 
-def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
+def _latest_session_note_oneliner(comments: list[Comment]) -> str | None:
     """From a pre-fetched list of comments (chronological order, oldest →
     newest), pull the most recent one whose body starts with `## Session `
     and extract the **Next action:** sentence. Returns None if no Session
@@ -1162,16 +1162,14 @@ def _latest_session_note_oneliner(comments: list[dict[str, Any]]) -> str | None:
     `references/session-continuity.md` — comments that don't match are
     ordinary discussion and are skipped.
 
-    Comments are passed in pre-fetched (rather than fetched here per
-    issue) so the caller can batch all in-flight issues into one
-    GraphQL round-trip via `fetch_recent_comments_batch`.
+    Takes neutral `Comment`s rather than raw gh JSON, so the same extractor
+    serves every backend; the caller batches all in-flight items into one
+    provider call via `BoardProvider.list_comments_batch`.
     """
-    session_notes = [c for c in comments if (c.get("body") or "").startswith("## Session ")]
+    session_notes = [c for c in comments if c.body.startswith("## Session ")]
     if not session_notes:
         return None
-    latest = session_notes[-1]
-    body = latest.get("body", "")
-    return _extract_next_action(body)
+    return _extract_next_action(session_notes[-1].body)
 
 
 def _render_in_flight(item: BoardItem, note_one_liner: str | None) -> None:
@@ -1227,17 +1225,18 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     )
     closed = [] if recently_closed_note else _fetch_recently_closed(board, days=7)
 
+    # Every backend read happens before the first print. A failure here used to
+    # surface as a half-emitted handoff — header and "## In flight" already on
+    # stdout — which reads like a valid (but empty) posture (#395).
+    comments_by_number: dict[int, list[Comment]] = board.provider.list_comments_batch(
+        [item.number for item in in_progress]
+    )
+
     print(f"# Session handoff — {board.repo} — {_now_local_iso()}")
     print()
     print("## In flight")
     print()
     if in_progress:
-        # One aliased GraphQL call covers every in-flight issue's comments,
-        # replacing the per-issue `gh issue view --json comments` fan-out.
-        in_flight_numbers = [item.number for item in in_progress]
-        comments_by_number = fetch_recent_comments_batch(
-            board.repo, in_flight_numbers, limit=10, cache="60s"
-        )
         for item in in_progress:
             note_one_liner = _latest_session_note_oneliner(comments_by_number.get(item.number, []))
             _render_in_flight(item, note_one_liner)
