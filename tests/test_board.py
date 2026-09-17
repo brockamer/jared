@@ -1114,8 +1114,8 @@ def test_git_remote_inference_returns_none_on_failure(
 
 
 def test_board_parses_jared_config_section(tmp_path: Path) -> None:
-    """Board surfaces session-handoff-prompt and session-start-checks from the
-    optional sections in docs/project-board.md.
+    """Board surfaces the `## Jared config` bullets and session-start-checks
+    from the optional sections in docs/project-board.md.
 
     The Jared config bullets are name: value pairs; the Session start checks
     are fenced bash blocks. Boards without these sections leave both fields
@@ -1135,7 +1135,7 @@ def test_board_parses_jared_config_section(tmp_path: Path) -> None:
 
         ## Jared config
 
-        - session-handoff-prompt: always
+        - backend: github
 
         ## Session start checks
 
@@ -1150,7 +1150,12 @@ def test_board_parses_jared_config_section(tmp_path: Path) -> None:
     )
 
     board = Board.from_path(board_md)
-    assert board.session_handoff_prompt == "always"
+    # Assert on the parsed config dict directly: `backend` is the only
+    # consumer of a Jared config bullet, and its value here equals the
+    # default, so an assertion on `board.backend` alone could not tell a
+    # parsed bullet from a parse that found nothing.
+    assert Board._parse_jared_config(board_md.read_text()) == {"backend": "github"}
+    assert board.backend == "github"
     assert board.session_start_checks == [
         "${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary",
         "ssh docker.lan 'sudo -u lad docker compose ps'",
@@ -1159,7 +1164,7 @@ def test_board_parses_jared_config_section(tmp_path: Path) -> None:
 
 def test_board_defaults_when_jared_config_absent(tmp_path: Path) -> None:
     """A board doc with no Jared config / Session start checks sections
-    leaves both fields at their defaults — empty list, ask mode."""
+    leaves both fields at their defaults — empty list, github backend."""
     from skills.jared.scripts.lib.board import Board
 
     board_md = tmp_path / "docs" / "project-board.md"
@@ -1174,7 +1179,7 @@ def test_board_defaults_when_jared_config_absent(tmp_path: Path) -> None:
         """)
     )
     board = Board.from_path(board_md)
-    assert board.session_handoff_prompt == "ask"
+    assert board.backend == "github"
     assert board.session_start_checks == []
 
 
@@ -1284,7 +1289,7 @@ def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) ->
 
         ## Jared config
 
-        - session-handoff-prompt: always
+        - backend: github
 
         ### Status
 
@@ -1297,8 +1302,11 @@ def test_board_jared_config_does_not_leak_field_block_bullets(tmp_path: Path) ->
     )
     board = Board.from_path(board_md)
     # Only the real config bullet should land in the parsed config; the
-    # option bullets from `### Status` must NOT leak in.
-    assert board.session_handoff_prompt == "always"
+    # option bullets from `### Status` must NOT leak in. Asserting on the
+    # parsed dict itself is what actually pins the leak shut — an assertion
+    # on a single consumer would pass even if `Backlog`/`Done` leaked in
+    # alongside it.
+    assert Board._parse_jared_config(board_md.read_text()) == {"backend": "github"}
     # The `### Status` block should still parse as a field block — its
     # option IDs land in `_field_options`, not the config dict.
     assert board._field_options.get("Status", {}).get("Backlog") == "0369b485"

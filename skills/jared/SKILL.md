@@ -113,7 +113,7 @@ For any board operation, pick the right tier:
 
 **MCP routing when graphql is pressured.** For issue + PR work — never ProjectV2, which MCP can't reach — the conversational MCP path saves graphql at the cost of REST core: `mcp__plugin_github_github__issue_read` costs ~2 REST core vs `gh issue view --json`'s ~1 graphql, and `mcp__plugin_github_github__add_issue_comment` skips the `gh` subprocess overhead. Worth switching when `graphql_budget()` reports < 1000 remaining, or when graphql exhaustion is being observed. When graphql is healthy, either path is fine — choose on UX. Per-call costs, capability matrix, and the full investigation: [`docs/github-api-tool-selection.md`](../../docs/github-api-tool-selection.md). *(GraphQL budget is GitHub-only — see backend gate above.)*
 
-**Tier 2 — multi-step orchestrations.** Any operation that would take more than one underlying call: filing an issue (create + add-to-board + set fields), moving an issue (lookup item-id + set Status), closing with verification (close + confirm auto-move), dependency edges (resolve both node-IDs + graphql mutation). Always use the `jared` CLI:
+**Tier 2 — multi-step orchestrations.** Any operation that would take more than one underlying call: filing an issue (create + add-to-board + set fields), moving an issue (lookup item-id + set Status), closing with verification (close + force-set Status=Done), dependency edges (resolve both node-IDs + graphql mutation). Always use the `jared` CLI:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." (--body "..." | --body-file <path or ->) --priority High
@@ -201,9 +201,9 @@ See `references/context-capture.md` for the trigger patterns and the helper scri
 
 ### When completing work — close and verify
 
-**Backend gate (CLOSED_STATE).** The auto-move poll below is GitHub Projects v2-specific. If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, `jared close` sets the Done column directly without polling — the Done column is the sole closed signal: `degraded: CLOSED_STATE unavailable — auto-move polling is GitHub Projects v2-specific; close sets Done directly on this backend` (CLOSED_STATE absent).
+**Backend gate (CLOSED_STATE).** `jared close` behaves the same way on both backends — it never polls. What differs is the native closed state: on GitHub the issue is closed *and* Status is set to Done, whereas on KanbanFlow the Done column is the sole closed signal. If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, render: `degraded: native close state unavailable on kanbanflow — no native closed state on this backend` (CLOSED_STATE absent).
 
-Close via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>` — the CLI closes the issue and polls for the board's auto-move to Done, falling back to an explicit `Status=Done` set if the auto-move hasn't fired. A PR merge closes the issue too; same verification applies, so re-run `jared close` (idempotent) or `jared summary` to confirm the item landed in Done.
+Close via `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N>` — the CLI closes the issue, then **always** sets `Status=Done` explicitly. There is no poll and no wait loop: the explicit set is a cheap no-op when the board's built-in "Item closed → Done" workflow already fired, and a genuine save when it did not (defense-in-depth, #137). A PR merge closes the issue too, but it does not set the field, so re-run `jared close` (idempotent) or `jared summary` to confirm the item landed in Done.
 
 After close, Jared asks two questions:
 
@@ -329,7 +329,7 @@ See `references/new-board.md` for the full bootstrap flow and `assets/project-bo
 - **Hand-rolling a next-session prompt as a tmp file.** Don't. `/jared-start` invokes `jared next-session-prompt` to assemble the cross-issue posture on-demand from board state — no file ever exists, so there's nothing to hand-roll. A handwritten tmp file becomes a parallel source of truth and rots. See `references/session-continuity.md` § "The posture assembly".
 - **In Progress > WIP limit.** Focus is scattered. Finish or move out.
 - **High-priority Backlog items >14 days old without review.** Promote, downgrade, or close.
-- **Closing an issue without verifying board auto-moved to Done.**
+- **Closing an issue without confirming it landed in Done.**
 - **Exceeding any limit "just this once."** The limits exist because every project that discovers them the hard way wishes it hadn't.
 
 ## Slash commands
