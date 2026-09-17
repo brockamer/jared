@@ -42,6 +42,29 @@ class ItemNotFound(Exception):
     """Raised when no project item corresponds to the given issue number."""
 
 
+class BackendMismatch(Exception):
+    """A GitHub-only Board method was called on a non-GitHub backend.
+
+    Replaces three bare `assert self.project_number is not None` guards
+    (#388). `assert` was wrong here for two reasons: it produced a bare
+    `AssertionError` with no message, so `/jared-stage` on a KanbanFlow board
+    gave the operator a traceback and no diagnosis; and it is stripped under
+    `python -O`, which let execution fall through into the GitHub path and
+    fail later with a `gh` error about a repository that does not exist —
+    pointing the reader at their GitHub config rather than at the backend
+    mismatch. A raise cannot be stripped.
+    """
+
+    def __init__(self, method: str, backend: str) -> None:
+        super().__init__(
+            f"{method}() is a github-only method; this board's backend is "
+            f"'{backend}'. Route through board.provider instead — see "
+            f"references/operations.md § 'Capabilities & degradation'."
+        )
+        self.method = method
+        self.backend = backend
+
+
 def _demarkdown(value: str) -> str:
     """Strip Markdown presentation from a config bullet value.
 
@@ -468,7 +491,8 @@ class Board:
             if self.backend == "github":
                 from .github_provider import GitHubProjectsProvider
 
-                assert self.project_number is not None  # github docs always carry it
+                if self.project_number is None:
+                    raise BackendMismatch("provider", self.backend)
                 self._provider = GitHubProjectsProvider(
                     project_number=self.project_number,
                     project_id=self.project_id,
@@ -535,7 +559,8 @@ class Board:
 
         Opt-out: `JARED_NO_CACHE=1` skips both cache layers.
         """
-        assert self.project_number is not None  # github-only method
+        if self.project_number is None:
+            raise BackendMismatch("board_items", self.backend)
         if self._items is not None:
             return self._items
         no_cache = os.environ.get("JARED_NO_CACHE") == "1"
@@ -644,7 +669,8 @@ class Board:
         Raises GhInvocationError if there are >100 open issues — pagination
         is not implemented and a silent truncation would mis-report status.
         """
-        assert self.project_number is not None  # github-only method
+        if self.project_number is None:
+            raise BackendMismatch("open_items", self.backend)
         owner, repo_name = self.repo.split("/", 1)
         data = self.run_graphql(
             self._OPEN_ITEMS_QUERY,
