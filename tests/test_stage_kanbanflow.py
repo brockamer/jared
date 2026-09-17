@@ -89,3 +89,46 @@ def test_stage_sees_the_providers_items_on_kanbanflow(
     _, out = _run_kf_stage(tmp_path, capsys, monkeypatch)
 
     assert "#1" in out
+
+
+def test_stage_uses_the_providers_emulated_edges_on_kanbanflow(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blocker detection must use the edges the provider actually has.
+
+    NATIVE_DEPENDENCIES is absent, but the DATA is not: the KanbanFlow
+    provider parses `blocked-by:` labels into BoardItem.blocked_by. Treating
+    "no native capability" as "no edges" would hide real blockers and let
+    stage promote a blocked item. dependency-graph (#389) and audit (#402)
+    both consume these edges; stage must agree.
+
+    #4 is blocked by #2, which is In Progress and therefore still open, so #4
+    must not be proposed for promotion.
+    """
+    write_minimal_kanbanflow_board(tmp_path)
+    monkeypatch.setenv("JARED_NO_CACHE", "1")
+    stage = import_stage()
+    patch_kf_board_provider(
+        monkeypatch,
+        tmp_path,
+        [
+            *KF_TASKS,
+            {
+                "number": 4,
+                "name": "delta",
+                "column": "Backlog",
+                "priority": "High",
+                "labels": ["blocked-by:2"],
+                "description": "A summary.\n\n## Acceptance criteria\n\n- it works\n",
+            },
+        ],
+    )
+    monkeypatch.chdir(tmp_path)
+
+    stage.main([])
+    out = capsys.readouterr().out
+
+    promote_block = out.split("== Blocked revisit ==")[0]
+    assert "#4" not in promote_block, (
+        "#4 is blocked by open #2 via an emulated edge and must not be promoted"
+    )

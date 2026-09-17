@@ -508,7 +508,17 @@ def fetch_items_for_stage(board: Any, *, skip_native_edges: bool = False) -> lis
         number: int | None = content.get("number")
         if number is None:
             continue
-        blocked_by_native: list[int] = [edge["number"] for edge in edges_map.get(number, [])]
+        # On a non-github backend the neutral row carries the provider's own
+        # blocked_by — emulated from `blocked-by:` labels on KanbanFlow, but
+        # real edges all the same. Treating "no NATIVE_DEPENDENCIES capability"
+        # as "no edges" hid real blockers and let stage propose a blocked item
+        # for promotion. dependency-graph (#389) and audit (#402) consume these
+        # same edges; stage agrees with them.
+        blocked_by_native: list[int] = (
+            list(raw.get("blocked_by") or [])
+            if board.backend != "github"
+            else [edge["number"] for edge in edges_map.get(number, [])]
+        )
         normalised.append(
             {
                 "number": number,
@@ -548,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         board,
         Capability.NATIVE_DEPENDENCIES,
         "native blocked-by edges",
-        "blocker detection from `## Blocked by` body sections only",
+        "blockers from emulated `blocked-by:` labels and `## Blocked by` body sections",
     )
     milestone_proximity_note = degraded_or_none(
         board,

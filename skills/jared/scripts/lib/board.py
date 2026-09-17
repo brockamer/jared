@@ -2021,25 +2021,41 @@ def fetch_audit_window(
     )
 
     if entity_type in ("issues", "both"):
-        raw = (
-            run_gh(
-                [
-                    "issue",
-                    "list",
-                    "--repo",
-                    board.repo,
-                    "--state",
-                    "open",
-                    "--limit",
-                    "500",
-                    "--json",
-                    "number,title,body,createdAt,labels,milestone",
-                ],
-                cache=cache,
+        if board.backend != "github":
+            # The data SOURCE, not just the sort order (#402). The
+            # VELOCITY_TIMESTAMPS gate above only chose how to order the rows;
+            # it never stopped `gh issue list` from running against a repo that
+            # may have no issues at all — which is why every window flag
+            # returned "items": [] on a KanbanFlow board.
+            from .neutral_items import board_item_to_issue
+
+            raw = [board_item_to_issue(i) for i in board.provider.list_open_items()]
+        else:
+            raw = (
+                run_gh(
+                    [
+                        "issue",
+                        "list",
+                        "--repo",
+                        board.repo,
+                        "--state",
+                        "open",
+                        "--limit",
+                        "500",
+                        "--json",
+                        "number,title,body,createdAt,labels,milestone",
+                    ],
+                    cache=cache,
+                )
+                or []
             )
-            or []
-        )
-        raw_sorted = raw if window_note else sorted(raw, key=lambda i: i["createdAt"])
+        if window_note:
+            # No creation timestamps to sort by. Order by number so `--count N`
+            # is reproducible across calls — an unsorted list would return a
+            # different N each time.
+            raw_sorted = sorted(raw, key=lambda i: i["number"])
+        else:
+            raw_sorted = sorted(raw, key=lambda i: i["createdAt"])
         if issues is not None:
             wanted = set(issues)
             items = [i for i in raw_sorted if i["number"] in wanted]
@@ -2052,14 +2068,20 @@ def fetch_audit_window(
                 threshold = max(14.0, min(60.0, 2.0 * velocity["median_age_at_close"]))
             else:
                 threshold = float(age_days)
-            now = dt.datetime.now(dt.UTC)
-            kept = []
-            for i in raw_sorted:
-                created = dt.datetime.fromisoformat(i["createdAt"].replace("Z", "+00:00"))
-                age = (now - created).total_seconds() / 86400.0
-                if age >= threshold:
-                    kept.append(i)
-            items = kept
+            if window_note:
+                # Age filtering needs createdAt, which this backend does not
+                # carry. Documented fallback: all open items. Not an empty
+                # list, and not a KeyError from indexing a missing key.
+                items = raw_sorted
+            else:
+                now = dt.datetime.now(dt.UTC)
+                kept = []
+                for i in raw_sorted:
+                    created = dt.datetime.fromisoformat(i["createdAt"].replace("Z", "+00:00"))
+                    age = (now - created).total_seconds() / 86400.0
+                    if age >= threshold:
+                        kept.append(i)
+                items = kept
 
     if entity_type in ("milestones", "both"):
         # Phase 6: gate the milestones REST call on MILESTONE_STATE availability.
@@ -2104,14 +2126,27 @@ def fetch_audit_window(
             "blocked-by edges",
             "native edges unavailable on this backend",
         )
+        dependents: dict[int, list[int]] = {}
+        enriched = False
         if not edges_note:
             # Invert repo-wide blockedBy edges: who depends on each candidate?
             edges = fetch_blocked_by_edges(board.repo, cache=cache)
-            dependents: dict[int, list[int]] = {}
             for dependent_num, blocked_by in edges.items():
                 for blocker in blocked_by:
                     if blocker.get("state") == "OPEN":
                         dependents.setdefault(blocker["number"], []).append(dependent_num)
+            enriched = True
+        elif board.backend != "github":
+            # The capability is absent but the DATA is not (#402). The provider
+            # emulates edges with `blocked-by:` labels and exposes them as Edges,
+            # and the note above already says "emulated labels only" rather than
+            # "no edges" — so populating from them agrees with what the reader
+            # is told. Every item in the working set is open by construction, so
+            # no OPEN-state filter is needed.
+            for edge in board.provider.fetch_blocked_by_edges():
+                dependents.setdefault(edge.blocker, []).append(edge.dependent)
+            enriched = True
+        if enriched:
             for item in items:
                 item["open_dependents"] = sorted(dependents.get(item["number"], []))
 
