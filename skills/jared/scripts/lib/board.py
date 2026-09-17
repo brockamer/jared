@@ -1432,17 +1432,21 @@ def fetch_recent_comments_batch(
     limit: int = 10,
     cache: str | None = None,
 ) -> dict[int, list[dict[str, Any]]]:
-    """One aliased GraphQL call → `{issue_number: [{body, createdAt}, ...]}`
+    """One aliased GraphQL call → `{issue_number: [{author, body, createdAt}, ...]}`
     for the given numbers. Returns the most recent `limit` comments per
     issue, in chronological order (oldest → newest), matching what gh's
     REST `/comments` endpoint and `gh issue view --json comments` both
     return.
 
-    Replaces the per-issue N+1 in `sweep.py:fetch_recent_comments` and
-    the per-issue `gh issue view --json comments` in
-    `jared:_latest_session_note_oneliner`. Aliased query — one alias per
-    requested number — keeps it a single round trip; cap callers at a
-    reasonable N (≤10 typical, the WIP cap is the natural ceiling).
+    Replaces the per-issue N+1 in `sweep.py:fetch_recent_comments`. Aliased
+    query — one alias per requested number — keeps it a single round trip;
+    cap callers at a reasonable N (≤10 typical, the WIP cap is the natural
+    ceiling).
+
+    GitHub-native by construction (it names `repository(owner:, name:)`), so
+    it is not a cross-backend entry point. `next-session-prompt` reaches it
+    only through `GitHubProjectsProvider.list_comments_batch`, which is what
+    keeps that command working on a board with no GitHub repo (#395).
 
     Empty input → empty dict, no gh call.
     """
@@ -1450,7 +1454,8 @@ def fetch_recent_comments_batch(
         return {}
     owner, name = repo.split("/", 1)
     aliases = "\n".join(
-        f"  i{n}: issue(number: {n}) {{ comments(last: {limit}) {{ nodes {{ body createdAt }} }} }}"
+        f"  i{n}: issue(number: {n}) {{ comments(last: {limit}) "
+        f"{{ nodes {{ author {{ login }} body createdAt }} }} }}"
         for n in issue_numbers
     )
     query = (
