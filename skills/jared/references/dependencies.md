@@ -4,7 +4,7 @@
 - **Primary: native GitHub issue dependencies** — not available: `degraded: NATIVE_DEPENDENCIES unavailable — native blockedBy edges are GitHub-only; dependency tracking uses label-marker emulation on this backend` (NATIVE_DEPENDENCIES absent).
 - **`jared blocked-by` CLI subcommand** — uses label emulation instead of GraphQL mutation: `degraded: NATIVE_DEPENDENCIES unavailable — jared blocked-by uses label emulation on this backend; edges do not render natively in the board` (NATIVE_DEPENDENCIES absent).
 - **`gh api graphql blockedBy/blocking` queries** — unavailable: `degraded: NATIVE_DEPENDENCIES unavailable — gh api graphql dependency queries are GitHub-only` (NATIVE_DEPENDENCIES absent).
-- **`dependency-graph.py` native edges** — reads label-emulation: `degraded: NATIVE_DEPENDENCIES unavailable — dependency-graph.py reads label emulation; output is advisory only, not backed by native relation edges` (NATIVE_DEPENDENCIES absent).
+- **`dependency-graph.py` native edges** — the script gates this itself and prints its own note to stderr; do not hand-render one here. It does **not** read the `blocked-by:<N>` label markers. It falls back to parsing the `## Blocked by` body-text section (`dependency-graph.py:176-184`). **Functional gap:** an edge that `jared blocked-by` records as a label on this backend never reaches the graph unless the same edge is also written into the issue body.
 
 Dependencies between issues — "A must ship before B can start" — are first-class planning concerns. When buried in prose, blocking chains aren't obvious and work starts on implicitly-blocked items.
 

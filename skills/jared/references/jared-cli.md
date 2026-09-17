@@ -111,13 +111,14 @@ conventional columns are Backlog / Up Next / In Progress / Blocked / Done.
 
 ## `jared close <issue_number> [--body TEXT | --body-file PATH]`
 
-**Backend gate (CLOSED_STATE absent — KanbanFlow).** Auto-move polling is not applicable — the Done column is the sole closed signal. `jared close` sets Status=Done directly without polling: `degraded: CLOSED_STATE unavailable — auto-move polling is GitHub-specific; jared close sets Done directly without polling on this backend` (CLOSED_STATE absent). The OK line will include `(column-move only)`.
+**Backend gate (CLOSED_STATE absent — KanbanFlow).** The Done column is the sole closed signal, so no native closed state is set. The OK line gains `(column-move only — no native closed state on this backend)`. `_cmd_close` computes its own note through `degraded_or_none`; read `lib/capabilities.py` for the one note phrasing rather than trusting a literal quoted here.
 
-**Purpose.** Close an issue and verify the board auto-moves it to Done.
-GitHub's project-v2 auto-move is eventually consistent; this subcommand
-polls for up to ~3 attempts, and if the auto-move hasn't fired, forces
-`Status=Done` explicitly. Either way you get a definitive Done state
-before the command returns. *(Auto-move polling is GitHub-specific — see backend gate above.)*
+**Purpose.** Close an issue and leave it in a definitive Done state.
+The subcommand runs `gh issue close`, then **always** sets `Status=Done`
+explicitly. This is defense-in-depth (#137), not a poll: GitHub's
+project-v2 auto-move is eventually consistent, so the explicit set is a
+cheap no-op when the auto-move already fired and a genuine save when it
+did not. There is no retry loop and no conditional fallback.
 
 Optionally post a Session note in the same atom — `--body` / `--body-file`
 mirror `jared comment` and `jared file`. When supplied, the comment is
@@ -251,7 +252,7 @@ lives on `jared file` (or raw `gh issue edit --milestone`).
 
 ## `jared blocked-by <dependent> <blocker> [--remove]`
 
-**Backend gate (NATIVE_DEPENDENCIES absent — KanbanFlow).** GraphQL mutations are unavailable; label-marker emulation is used instead: `degraded: NATIVE_DEPENDENCIES unavailable — on KanbanFlow, jared blocked-by uses label emulation; edges do not appear in a native panel` (NATIVE_DEPENDENCIES absent). The command still works — edges are recorded as `blocked-by:<N>` label markers.
+**Backend gate (NATIVE_DEPENDENCIES absent — KanbanFlow).** GraphQL mutations are unavailable; label-marker emulation is used instead. The command still works — edges are recorded as `blocked-by:<N>` label markers — and the OK line gains `(label emulation — NATIVE_DEPENDENCIES not supported on this backend)`. `_cmd_blocked_by` computes its own note through `degraded_or_none`; read `lib/capabilities.py` for the one note phrasing rather than trusting a literal quoted here. Note that `dependency-graph.py` does not consume these label markers — see `references/dependencies.md`.
 
 **Purpose.** Add or remove a native GitHub `blockedBy` edge between two
 issues. This uses the `addBlockedBy` / `removeBlockedBy` GraphQL mutations;
