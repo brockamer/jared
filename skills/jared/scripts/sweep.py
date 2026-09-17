@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-sweep.py — audit a GitHub Projects v2 board for drift.
+sweep.py — audit a jared board for drift, on any backend.
 
-Reads the project via `gh project item-list` and runs the checks from
+Reads the board via `gh project item-list` (github) or `board.provider`
+(any other backend, #386) and runs the checks from
 references/board-sweep.md:
 
   1. Metadata completeness — every open item has Status + Priority + any
@@ -146,10 +147,13 @@ def find_config() -> Path | None:
 #
 # Uses module-level helpers from lib/board.py (board_run_gh / board_run_gh_raw).
 # Higher-level GraphQL calls (paginated blockedBy lookup) live in lib.board so
-# dependency-graph.py can share them. sweep.py doesn't need a full Board
-# instance — it only extracts owner + project-number from the convention doc
-# (see parse_config) and reads field values from gh JSON, not field IDs from
-# the convention doc.
+# dependency-graph.py can share them.
+#
+# sweep DOES need a Board instance (#386): main() builds one first, because the
+# backend decides whether a GitHub owner/project pair is required at all and
+# where the rows come from. parse_config/fetch_items are the github-only path;
+# on any other backend the rows come from neutral_open_rows(board). The Board
+# also serves the Phase 6 capability gates, resolved offline.
 
 
 def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
