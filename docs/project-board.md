@@ -161,6 +161,14 @@ To inspect or toggle workflows: open the project's *Workflows* tab in the GitHub
 
 **Discipline reminder:** when describing past PRs in commit bodies, avoid the closing keywords `closes #N` / `fixes #N` / `resolves #N` in narrative prose — GitHub's auto-link parser doesn't distinguish parentheticals from directives. Refer to past PRs by number alone (`PR #152`) or paraphrase (`addressed in #152`). Reserve closing keywords for the current PR's own intent, on a dedicated line.
 
+The parser reads the **commit message, the PR title and the PR body**, and it honours neither negation, nor quotation, nor backticks, nor markdown. It has fired three times here — 2026-06-11 and 2026-09-12 (both on #350), and 2026-09-16 during #369, where markdown emphasis sat between the keyword and the number. Check all three surfaces before `git commit`, not before `gh pr create`:
+
+```bash
+grep -nEi '(close[sd]?|fix(e[sd])?|resolve[sd]?)[^A-Za-z0-9]{0,4}#[0-9]'
+```
+
+Do not narrow that pattern to whitespace-only separators — any intervening punctuation then walks through it. `CLAUDE.md` § "Branch + PR workflow" carries the full rule and the incident record, and `tests/test_autoclose_guard.py` pins the pattern so a narrowing fails the suite.
+
 ## Triage checklist — new issue
 
 When a new issue is filed:
