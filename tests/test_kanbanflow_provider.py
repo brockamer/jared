@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from skills.jared.scripts.lib.board import FieldNotFound, OptionNotFound
+from skills.jared.scripts.lib.board import FieldNotFound, ItemNotFound, OptionNotFound
 from skills.jared.scripts.lib.board_provider import BoardProvider
 from skills.jared.scripts.lib.kanbanflow_client import (
     KfChangedProperty,
@@ -647,3 +647,114 @@ class TestStaleIndexHit:
 
         assert item is not None
         assert item.number == 1
+
+
+class TestStaleIndexHitOnAWrite:
+    """The write-path half of the same defect (#385, ledger F70).
+
+    `TestStaleIndexHit` above covers the read path, which #371 could fix for
+    free: `get_item` already fetched the task, so comparing `number_value` to
+    the ref cost nothing. `_resolve_id` hands back an id *without* fetching, so
+    every caller that goes through it inherits the stale-hit bug — the index
+    says #1 -> task-1, the board says task-1 is now #9, and the write lands on
+    task-1 regardless.
+
+    These pin the corrected contract: a stale hit reseeds once, and a ref that
+    still does not resolve raises `ItemNotFound` rather than writing.
+    """
+
+    def _numbered_task(
+        self, tmp_path: Path
+    ) -> tuple[KanbanFlowProvider, FakeKanbanFlowClient, str]:
+        provider, client = _provider(tmp_path)
+        item = provider.file(title="a", body="body-of-1", priority="Low", status="Backlog")
+        assert item.number == 1
+        task_id = client.tasks[item.provider_ref or ""].id
+        return provider, client, task_id
+
+    def test_a_write_does_not_land_on_a_renumbered_task(self, tmp_path: Path) -> None:
+        provider, client, task_id = self._numbered_task(tmp_path)
+
+        # Someone renumbers the task in the KanbanFlow UI. The on-disk index
+        # still says 1 -> this task, and nothing on the board is #1 any more.
+        client.tasks[task_id].number_value = 9
+        assert provider._index.get(1) == task_id
+
+        with pytest.raises(ItemNotFound):
+            provider.move(1, "In Progress")
+
+        assert client.tasks[task_id].column_id == "col-backlog", (
+            "move(1) wrote to the task that is now #9 — a stale index hit routed "
+            "the mutation to the wrong task"
+        )
+
+    def test_a_read_through_resolve_id_does_not_serve_a_renumbered_task(
+        self, tmp_path: Path
+    ) -> None:
+        """`get_body` resolves through `_resolve_id` too, so it has the same hole.
+
+        The issue body named six mutations; `_resolve_id` in fact has 13 call
+        sites, two of which are reads that `get_item`'s own validation never
+        covered.
+        """
+        provider, client, task_id = self._numbered_task(tmp_path)
+        client.tasks[task_id].number_value = 9
+
+        with pytest.raises(ItemNotFound):
+            provider.get_body(1)
+
+    def test_a_write_against_a_deleted_task_raises_item_not_found(self, tmp_path: Path) -> None:
+        """The dangling shape must surface as the neutral exception.
+
+        Before the fix the raw `KanbanFlowNotFoundError` escaped from the client
+        through the provider, which the CLI's error handling does not catch —
+        the two classes are unrelated (`KanbanFlowError` vs `Exception`).
+        """
+        provider, client, task_id = self._numbered_task(tmp_path)
+        client.delete_task(task_id)
+        assert provider._index.get(1) == task_id
+
+        with pytest.raises(ItemNotFound):
+            provider.move(1, "In Progress")
+
+    def test_a_write_follows_a_renumbered_task_to_its_new_number(self, tmp_path: Path) -> None:
+        """The reseed-and-retry success path: #9 resolves after one reseed."""
+        provider, client, task_id = self._numbered_task(tmp_path)
+        client.tasks[task_id].number_value = 9
+
+        provider.move(9, "In Progress")
+
+        assert client.tasks[task_id].column_id == "col-inprog"
+
+    def test_a_write_costs_exactly_one_fetch(self, tmp_path: Path) -> None:
+        """The price of the guard, pinned (#385 Option 1).
+
+        `FakeKanbanFlowClient.get_task_calls` counts public fetches only — the
+        fake's own writes go through `_require` — so this is the extra GET the
+        validation adds, not the fake's bookkeeping. Verified against the
+        unguarded code, where it read 0.
+        """
+        provider, client, _ = self._numbered_task(tmp_path)
+        client.get_task_calls = 0
+
+        provider.move(1, "In Progress")
+
+        assert client.get_task_calls == 1
+
+    def test_a_read_that_already_fetched_pays_nothing_extra(self, tmp_path: Path) -> None:
+        """`get_body` and `get_item` reuse the validated task, so they stay flat.
+
+        Validating inside `_resolve_id` alone would have made these two fetches
+        each: one to validate, one to read. The resolution seam returns the task
+        so the caller can reuse it.
+        """
+        provider, client, _ = self._numbered_task(tmp_path)
+
+        client.get_task_calls = 0
+        assert provider.get_body(1) == "body-of-1"
+        assert client.get_task_calls == 1
+
+        client.get_task_calls = 0
+        item = provider.get_item(1)
+        assert item is not None and item.number == 1
+        assert client.get_task_calls == 1
