@@ -6,6 +6,14 @@ for resolution. Because the jared CLI runs as one-shot processes, this map
 lives on disk (the same reason cache.py exists). It is rebuildable: a lost or
 corrupt file costs one full board scan to reseed, never correctness.
 
+That "never correctness" claim covers a *stale* entry only because
+`KanbanFlowProvider._resolve_task` enforces it (#385, F70): every #N -> _id
+resolution now fetches the task and compares `number_value` to the ref before
+any caller sees the id, and reseeds once when they disagree. Until then a
+stale hit was trusted, so an entry whose task had been renumbered in the
+KanbanFlow UI routed the write to the wrong task and this paragraph was
+false for the one failure mode nobody notices.
+
 Stored as {"numbers": {"<N>": "<task_id>"}}. Writes use atomic-rename
 (os.replace on a .tmp sibling), matching cache.py.
 
