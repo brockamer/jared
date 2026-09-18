@@ -1,3 +1,7 @@
+---
+**Shipped in #386, #388, #389, #402 on 2026-09-17. Final decisions captured in issue body.**
+---
+
 # KanbanFlow batch-surface parity — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -15,6 +19,15 @@
 - #402 — `jared audit fetch` reads `gh issue list`, not the board
 
 Milestone context: `docs/superpowers/specs/2026-06-11-kanbanflow-parity-design.md` (KanbanFlow parity, milestone #10). That spec governs *capability* gates; it does not treat any of these four entry points.
+
+## Issue(s)
+
+- #386 — `sweep.py` aborts at its entry point on a KanbanFlow board
+- #388 — `stage.py` raises a bare `AssertionError`, stripped under `python -O`
+- #389 — `dependency-graph.py` reads `gh issue list`, not the board
+- #402 — `jared audit fetch` reads `gh issue list`, not the board
+
+All four merged in PR #419 and went out in v0.31.0.
 
 ## Global Constraints
 
