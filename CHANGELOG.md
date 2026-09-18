@@ -7,9 +7,26 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
-## Unreleased
+## v0.31.0 — 2026-09-17
+
+Interim release. Ships epic #348's Phase 3a and 3c fix waves, the KanbanFlow batch-surface parity that completes the #314 Phase-1 provider boundary, and the `voice: ste` dialogue mode. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
+
+**Features**
+- **`voice: ste` — an ASD-STE100 dialogue mode.** A third value beside `voice: enabled|disabled` in a project's `docs/project-board.md`. All nine slash-command stubs branch on it and void every aside slot; the mode is specced in `references/voice-ste.md`. Doctrine only — no subcommand parses the bullet. (#374)
+- **Board-scoped KanbanFlow token files.** `KANBANFLOW_API_TOKEN` still wins, and a token now also resolves from `$XDG_CONFIG_HOME/jared/kanbanflow/boards/<Board ID>.env`, so one machine can drive several boards without a wrapper. `bootstrap-project.py` stays env-only, because `/jared-init` learns the Board ID from the connection itself. (#409)
+- **KanbanFlow `recently_closed` reads board events.** A windowed, descending-paged `get_board_events` client with a guarded dedup boundary backs the VELOCITY-gated consumer. (#357)
 
 **Bug fixes**
+- Session-presence locks now live under the git common dir (`<repo>/.git/jared/`) rather than `<repo>/.jared/` inside the consuming project's working tree. Because `list_active_locks` performs no liveness sweep by design, a committed lock was not a stale PID but a permanent false sibling-session detection — `/jared-start` refusing on every fresh clone, on every machine. A leftover `.jared/` is inert and safe to delete. (#376)
+- A stale number-index hit no longer routes a KanbanFlow mutation to the wrong task; the index is validated at the resolution seam before any write. (#385)
+- `/jared-wrap`'s commit step stages tracked changes only, instead of letting `git add -A` sweep in deliberately-untracked private files, and it now says what `skip` leaves staged. Its back-end flow guard derives the precondition instead of assuming `main` and an `origin` that is ours. (#392, #393)
+- Five P1 code-correctness findings from the Phase-1 review: reseed collisions surface instead of colliding silently, allocation reads live board state, seven entry points gained guards, and F34's date key is UTC. (#371)
+- Fifteen document-surface P1 findings cleared; two of them change behaviour — see below. (#369)
+- `next-session-prompt` fetches comments through the provider, so it works off the GitHub backend. (#395)
+- An unknown KanbanFlow author renders as `""` rather than a raw internal id. (#414)
+- `SKILL.md`'s frontmatter is valid YAML. Claude Code's own reader was lenient enough to accept the old form, so this hardens against stricter parsers rather than repairing a live break. (#365)
+- The documented `## Issue: #N` plan-header convention is recognised by the plan-reference scan. (#346)
+- `Board` unescapes doc-sync config bullets before matching, so a Prettier-formatted convention doc parses. (#381)
 - `sweep.py` no longer aborts at its entry point on a KanbanFlow board. Board identity resolves through the provider, the banner names the actual board, and `/jared-init` step 6 completes. (#386)
 - `Board.provider()` / `board_items()` / `open_items()` raise a typed `BackendMismatch` instead of a bare `assert`, which `python -O` stripped — turning a backend mismatch into a misleading `gh` error about a missing repository. (#388)
 - `dependency-graph.py` reads issues and edges from `board.provider`; `--repo` is now optional and required only on the github backend. Its priority-inversion check works off github too. (#389)
@@ -17,10 +34,21 @@ Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` h
 - `/jared-stage` no longer proposes a blocked item for promotion on backends whose edges are emulated: an absent `NATIVE_DEPENDENCIES` capability does not mean absent edge data. (#402)
 
 **Refactor**
-- New `lib/neutral_items.py` — the single backend-neutral row source for every batch surface, closing the #314 Phase-1 boundary. GitHub output is pinned byte-for-byte by `tests/golden/*.txt`.
+- New `lib/neutral_items.py` — the single backend-neutral row source for every batch surface, completing the #314 Phase-1 boundary. GitHub output is pinned byte-for-byte by `tests/golden/*.txt`. (#386)
+- The `session-handoff-prompt` config knob and its two fossils are deleted rather than wired to a consumer. Session notes on issues plus `/jared-start`'s on-demand assembly already serve the goal without a second, staler source of truth; a parsed field no surface gates on is dead code (the #114 precedent). (#369)
 
-**Behaviour change (github)**
-- `dependency-graph.py --repo` is no longer an argparse-required argument, so omitting it on a github board now reports `dependency-graph: --repo is required on the github backend` instead of argparse's usage error. Same exit code (2). It could not stay `required=True` because a KanbanFlow board legitimately has no repo. (#389)
+**Doctrine**
+- **Marketplace-readiness review, rounds 0–4** (epic #348): a coverage inventory and clean-room baseline (#349), a six-dimension read-only fan-out landing 57 findings (#350), a third round over the three top-level docs Phase 1 never read (#368), and a fourth grading four bake-site defects into the exit gate. The ledger stands at **69 findings — 0 P0, 26 P1, 43 P2**, with 24 of 26 P1s done; F4 and F5 remain, gated on #351.
+- The auto-close guard runs at commit time, and its grep was widened so punctuation between a keyword and an issue number cannot hide a live landmine. `tests/test_autoclose_guard.py` reads the pattern out of `CLAUDE.md` and asserts it against known-armed fixtures, so narrowing it fails the suite rather than failing silently. (#398)
+- The CLI entry point sits inside the lint and type gates — `ruff` and `mypy` previously skipped the extension-less `jared` script. (#364)
+- Milestone follows the fix, not the symptom's backend: a correction inside a shipped path is release scope, while provider routing or a capability flip is parity scope. (#404)
+- Structural reshape — plan/spec hygiene plus the two-milestone convention. (#373)
+
+**Behaviour changes**
+- **Session-lock location moved** from `<repo>/.jared/` to `<repo>/.git/jared/`. Locks do not survive the upgrade, and a leftover `.jared/` directory is inert and safe to delete. (#376)
+- **`session-handoff-prompt` removed** from the `docs/project-board.md` config block. The bullet is no longer parsed; no surface ever read it. (#369)
+- **Groom WIP cap default 3 → 4** in `bootstrap-project.py --wip-limit`. Issue #245 raised the cap on every other surface but not bootstrap's default, so freshly bootstrapped projects baked the stale figure into their generated convention doc. Existing convention docs keep whatever value they already hold. (#369)
+- **`dependency-graph.py --repo` is no longer an argparse-required argument**, so omitting it on a github board reports `dependency-graph: --repo is required on the github backend` instead of argparse's usage error. Same exit code (2). It could not stay `required=True` because a KanbanFlow board legitimately has no repo. (#389)
 
 ## v0.30.0 — 2026-06-10
 
