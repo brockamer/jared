@@ -43,8 +43,27 @@ Status in particular is easy to miss: GitHub's auto-add-to-project workflow adds
 ### 3. Up Next queue and pullable check
 
 - More than 8 items in Up Next? Overstocked. Propose moving lower items back to Backlog. (8 is `sweep.py`'s `check_up_next_size` default and there is no override flag, so a lower threshold here would flag boards the tool itself reports as healthy.)
-- Is the top item **pullable**? Specifically: does it have (a) a clear next action stated in the body, (b) acceptance criteria, (c) all dependencies unblocked? If not, propose reshaping it or pulling the next pullable item instead.
+- Is the top item **pullable**? Specifically: does it have (a) a clear next action stated in the body, (b) acceptance criteria, (c) all dependencies unblocked? If not, propose reshaping it or pulling the next pullable item instead. Clauses (a) and (b) are mechanical — `sweep.py`'s `== Pullability gaps (Backlog) ==` section already reports them for the whole Backlog. Clause (c), dependency resolution, stays a judgment call here.
 - Up Next items without Priority set — fix.
+
+### 3b. Pullability gaps across the Backlog (#429)
+
+`sweep.py` runs `lib/pullable.py` — the same classifier `/jared-stage` ranks
+with — over every non-epic Backlog item and reports the ones that fail, with
+the reason (`empty body`, `placeholder summary`, `no acceptance section`,
+`non-canonical acceptance heading`, `acceptance section has no bullets`).
+
+This closes a loop that used to run forever: `/jared-stage` flags these items
+in "Deferred (this pass)" on **every** pass but repairs nothing, so the same
+names recur until a human shapes them by hand. Groom is the repair surface —
+see `commands/jared-groom.md` step 4 for the drafting flow.
+
+Epics are exempt, matching `/jared-stage`'s #146 exemption: an epic is a
+durable container and legitimately carries no acceptance criteria.
+
+The section prints `(skipped — no issue data)` when no Backlog row has a body
+to judge — an unfetched body is not an empty body, and reporting the whole
+Backlog as broken because the issue fetch failed would be worse than silence.
 
 ### 4. Blocked-status items
 
