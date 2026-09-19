@@ -355,6 +355,7 @@ Detailed `gh` / MCP command reference: `references/operations.md`. Covers file, 
 - `references/operations.md` — raw `gh` escape-hatch card (Tier 3)
 - `references/voice.md` — full voice spec: ten style rules, anchor quotes, on/off boundary table, worked examples by situation
 - `references/voice-ste.md` — the `voice: ste` rendering contract: ASD-STE100 rules by effect, the aside rule, passthrough classes, names for drift, voice/`ste` example pairs, diagnostics
+- `references/model-and-effort.md` — the `/jared-start` model + reasoning-effort recommendation: the two axes, the floor triggers, the worked contrast pair, and why Jared recommends rather than sets
 - `references/structural-review.md` — the Seven Questions for periodic deep review
 - `references/board-sweep.md` — grooming checklist
 - `references/dependencies.md` — dependency graph routine
