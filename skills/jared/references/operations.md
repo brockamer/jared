@@ -40,6 +40,21 @@ Two distinctions worth keeping straight:
 
 A github-only `Board` method called on another backend raises `BackendMismatch`, which names the method and the configured backend. It replaced three bare `assert`s that `python -O` stripped (#388).
 
+### Reaching a provider method — the two layers a method can be stranded at
+
+A `BoardProvider` method can be fully implemented and still unreachable, and it strands at one of two layers. Both present to an operator as "jared has no way to do this" and they need different fixes, so triage to the layer before proposing one.
+
+| Layer | Symptom | Fix |
+|---|---|---|
+| **No CLI surface** — implemented on both backends, but only `migrate` or another internal caller reaches it | Unavailable on *both* backends. Workaround is raw `gh` on GitHub, and reaching into the provider's private client on KanbanFlow | Add the subcommand or flag. Instances: `get_body()` (#410), `set_milestone()` (#427), `set_body()` (#403) |
+| **Capability denies** — implemented, but the backend omits the capability, so the gate refuses before reaching the method | Works on GitHub, refuses on KanbanFlow with a `degraded:` note, although the provider code is present and correct | Correct what the backend advertises, or correct the note. Instances: `MILESTONE_STATE` (#390), `NATIVE_DEPENDENCIES` (#407) |
+
+**The rule when adding a `BoardProvider` method: give it an operator-facing surface in the same change, or record why it has none.** `migrate` is not a surface — it is an internal consumer. A method reachable only from `migrate` is invisible to every operator, and to every slash-command stub that instructs an agent to perform the operation.
+
+**Prefer a flag on the subcommand that already owns the object over a new subcommand — but only when it is the same kind of operation.** `get_body()` became `get-item --body` because the caller (`/jared-start` step 5) wants fields and body together and `get-item` already returns that object as JSON. `set_milestone()` deliberately did **not** become `jared set <N> Milestone "<title>"`: `jared set` is a generic dispatch to `provider.set_field()` for single-select *project fields*, and a milestone is not one — it is a repo-level object on GitHub and a swimlane on KanbanFlow. Overloading the generic verb costs a special case ahead of the dispatch, a help string that then misdescribes itself, and another case in the cache-invalidation logic that currently keys only on `field_name == "Status"`.
+
+**The two layers compose, and layer 1 does not wait on layer 2.** A new surface built with the standard `degraded_or_none` gate is correct on both backends the day it lands: it works where the capability is advertised and refuses with the documented note where it is not. When the capability layer is later corrected, the gate returns `None`, execution falls through to the provider method that was already there, and **the subcommand needs no change**. Recording this mattered once already: #427 was nearly filed as blocked-by #390 before the fall-through was traced.
+
 Primary reference is `references/jared-cli.md` — use the `jared` CLI for any
 board operation it covers (file, move, set, close, comment, blocked-by,
 get-item, summary). This file is the **escape hatch**: commands for things
@@ -84,11 +99,12 @@ keep conversational sessions inside that budget:
 2. **Prefer the `jared` CLI for board-shaped queries.** `jared summary` and
    `jared get-item <N>` share a per-process snapshot of `gh project
    item-list`, so a session that asks "what's on the board?" then "what's
-   the state of #51?" pays for one `item-list` fetch, not two. Reach for
-   `gh issue view --json …` only when you actually need body / title /
-   labels / milestone — the fields the CLI doesn't expose. For Status /
-   Priority / item-id / field values, `jared get-item` is cheaper and
-   bounded.
+   the state of #51?" pays for one `item-list` fetch, not two. For the body, use
+   `jared get-item <N> --body` — it is CLI-exposed as of #410 and is the
+   only route that works on a non-GitHub backend. Reach for `gh issue view
+   --json …` only when you actually need title / labels / milestone, the
+   fields the CLI still doesn't expose. For Status / Priority / item-id /
+   field values, `jared get-item` is cheaper and bounded.
 
 The escape-hatch examples below are written with these rules applied.
 

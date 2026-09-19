@@ -581,6 +581,14 @@ def patch_kf_board_provider(
     (lib.board) — because they are distinct objects in sys.modules and the
     scripts under test reach the second one. See the module docstring.
 
+    ORDERING: a CLI-level test must call `import_cli()` BEFORE this helper.
+    The `lib.board` branch below is wrapped in `except ModuleNotFoundError`,
+    and `lib.board` only enters sys.modules when the CLI is loaded. Patch
+    first and that branch silently no-ops, so `mod.main([...])` builds a real
+    KanbanFlowProvider and dies on a missing KANBANFLOW_API_TOKEN. Tests that
+    drive a batch surface directly (sweep/stage/dependency-graph) are
+    unaffected — they never load the CLI.
+
     `tasks` entries: {number, name, column, priority, labels, description}.
     """
     import importlib
