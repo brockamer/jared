@@ -8,6 +8,8 @@ description: Propose Backlog → Up Next promotions and Blocked revisits. Adviso
 - Milestone-proximity ranking is unavailable: `degraded: milestone proximity unavailable on kanbanflow — staging ranked by Priority and age only` (MILESTONE_STATE absent).
 - Native blocked-by edges are unavailable — the script runs with body-ref detection only: `degraded: native blocked-by edges unavailable on kanbanflow — blocker detection relies on ## Blocked by body sections only` (NATIVE_DEPENDENCIES absent).
 
+**No advisor pass.** Routine board operation — fetch, render, approve, apply. It does not warrant an `advisor()` call; Jared prescribes exactly one, the optional batch pass in `/jared-audit`. A genuine design decision arising mid-session still does — the trigger is the finding, not the command. (`SKILL.md` § "The lane".)
+
 Invoke the Jared skill to evaluate the board and propose staging changes. The flow is advisory — Jared proposes; you approve per item or as a batch before any `jared move` runs.
 
 Flow:
