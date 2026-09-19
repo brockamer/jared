@@ -58,15 +58,24 @@ Blocked (1):
 
 ---
 
-## `jared get-item <issue_number>`
+## `jared get-item <issue_number> [--body]`
 
 **Purpose.** Print a JSON blob with the item-id, Status, Priority, and all
 field values for one issue. Useful as a scripting helper — pipe to `jq`
 when composing shell flows.
 
 ```
-jared get-item <issue_number>
+jared get-item <issue_number> [--body]
 ```
+
+**Flags.**
+
+- `--body` — also return the issue's full Markdown body under a `body` key.
+  This is the supported route to an issue body on **either** backend (#410),
+  and the one `/jared-start` step 5 cites: `gh issue view --json body` has no
+  equivalent where there is no GitHub repo. Opt-in, because the body costs an
+  extra read and most callers want only the field values. Without the flag the
+  output shape is unchanged and no body read is issued.
 
 **Example.**
 
@@ -74,6 +83,9 @@ jared get-item <issue_number>
 $ jared get-item 7 | jq '.status, .priority'
 "Backlog"
 "Medium"
+
+$ jared get-item 7 --body | jq -r '.body' | head -1
+One-sentence summary of what this issue is about and why it matters.
 ```
 
 ---

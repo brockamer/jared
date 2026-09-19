@@ -123,7 +123,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> [(--body "..." | --body-file <path or ->)]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --body-file <path or ->)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
-${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N>     # JSON lookup helper
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> [--body]   # JSON lookup helper; --body adds the issue body (#410)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary          # fast one-screen status
 ```
 
