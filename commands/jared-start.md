@@ -101,7 +101,7 @@ Flow:
    ```
 
 5. **Load context.** Fetch:
-   - Full issue body (including `## Current state`, `## Decisions`, acceptance criteria in `<details>`)
+   - Full issue body (including `## Current state`, `## Decisions`, acceptance criteria in `<details>`) — run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, which returns the project field values and the body markdown in one call on both backends (#410). Prefer it to `gh issue view --json body`, which has no equivalent on a non-GitHub backend.
    - Most recent Session note comment (matches `## Session YYYY-MM-DD` header)
    - Any plan or spec linked from `## Planning` — read and summarize
    - Git state: current branch, uncommitted changes, last 5 commits touching related files
