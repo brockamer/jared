@@ -808,6 +808,61 @@ class TestRender:
         assert "#4" in out
         assert "Low tier" in out
 
+    def test_render_deferred_footer_fires_on_a_shape_reason(self) -> None:
+        """#429: a `not pullable — …` deferral means groom has work to do."""
+        stage = import_stage()
+        result = stage.StageProposals(
+            deferred=[
+                stage.DeferredItem(
+                    {"number": 9, "priority": "High", "title": "shapeless"},
+                    "not pullable — empty body",
+                )
+            ]
+        )
+        out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+        assert "/jared:jared-groom" in out
+
+    def test_render_deferred_footer_stays_quiet_on_rank_reasons(self) -> None:
+        """Low tier / no milestone / below slot cap are healthy deferrals.
+
+        The item is well-formed and simply lost the slot race, so groom has
+        nothing to repair. Pointing at it anyway would train the operator to
+        ignore the line on the passes where it matters.
+        """
+        stage = import_stage()
+        for reason in ("Low tier", "no milestone with due date", "ranked below slot cap"):
+            result = stage.StageProposals(
+                deferred=[
+                    stage.DeferredItem({"number": 9, "priority": "Low", "title": "x"}, reason)
+                ]
+            )
+            out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+            assert "/jared:jared-groom" not in out, f"footer fired on a rank reason: {reason}"
+
+    def test_render_deferred_footer_fires_once_for_a_mixed_batch(self) -> None:
+        stage = import_stage()
+        result = stage.StageProposals(
+            deferred=[
+                stage.DeferredItem({"number": 8, "priority": "Low", "title": "a"}, "Low tier"),
+                stage.DeferredItem(
+                    {"number": 9, "priority": "High", "title": "b"},
+                    "not pullable — no acceptance section",
+                ),
+                stage.DeferredItem(
+                    {"number": 10, "priority": "High", "title": "c"},
+                    "not pullable — empty body",
+                ),
+            ]
+        )
+        out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+        assert out.count("/jared:jared-groom") == 1
+
+    def test_render_no_footer_when_nothing_is_deferred(self) -> None:
+        stage = import_stage()
+        result = stage.stage_proposals([], up_next_cap=3, today=date.today())
+        out = stage.render(result, now=datetime(2026, 5, 14, 16, 45, tzinfo=UTC))
+        assert "/jared:jared-groom" not in out
+
     def test_render_report_only_omits_approve_prompt(self) -> None:
         stage = import_stage()
         result = stage.stage_proposals([], up_next_cap=3, today=date.today())
