@@ -344,6 +344,7 @@ Triggers handle most invocations. Slash commands exist for explicit, guaranteed 
 - **`/jared-wrap`** — end session: Session notes, drift reconciliation, discovered-scope filing, plan archival proposals.
 - **`/jared-audit`** — Skeptical kanban-manager audit. Walks the backlog oldest-first, runs a seven-question per-item checklist (necessity, scope realism, YAGNI, antipattern, framing accuracy, dependency edges, calibration), produces operator-approved close / reshape / leave-alone verdicts. Velocity-aware date heuristics so proposed milestone dates calibrate to recent shipping cadence. Use when the backlog has aged, when reviewing a body of work before a milestone close, or when the operator wants confidence before pulling from old items.
 - **`/jared-groom`** — routine sweep: metadata, WIP, aging, blocked, pullable check, plan/spec drift, label hygiene. Proposes, you approve.
+- **`/jared-stage`** — staging proposals: Backlog → Up Next promotions, filtered by pullable + dependency-ready and ranked by Priority > milestone proximity > age, plus Blocked revisits. Advisory — you approve before any `jared move` runs. `--sessions N` proposes `session-N` label assignments across the candidate set for parallel work.
 - **`/jared-reshape`** — structural review: shape, phasing, milestones, dependency graph, long-horizon arc. Replaces the kickoff-prompt pattern.
 - **`/jared-init`** — bootstrap: introspect a project's fields, write `docs/project-board.md`, optionally create missing fields.
 
