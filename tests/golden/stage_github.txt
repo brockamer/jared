@@ -6,6 +6,7 @@
 
 Deferred (this pass):
   #1 [High] alpha — not pullable — empty body
+  → some items above are deferred for shape, not rank. /jared:jared-groom drafts the missing summary + acceptance criteria.
 
 == Blocked revisit ==
 

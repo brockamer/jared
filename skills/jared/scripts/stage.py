@@ -267,6 +267,16 @@ def render(
             lines.append(
                 f"  #{it['number']} [{it.get('priority', '?')}] {it.get('title', '')} — {d.reason}"
             )
+        # Only shape gaps get the pointer (#429). "Low tier", "no milestone
+        # with due date" and "ranked below slot cap" are healthy deferrals —
+        # the item is well-formed and simply lost the slot race, and groom has
+        # nothing to repair. Pointing at groom for those would train the
+        # operator to ignore the line.
+        if any(d.reason.startswith("not pullable — ") for d in proposals.deferred):
+            lines.append(
+                "  → some items above are deferred for shape, not rank. "
+                "/jared:jared-groom drafts the missing summary + acceptance criteria."
+            )
         lines.append("")
     lines.append("== Blocked revisit ==")
     lines.append("")
