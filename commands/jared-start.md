@@ -179,15 +179,55 @@ Flow:
    >   2. <second>
    >   3. <commit / PR boundary>
    >
+   > Suggested settings for this session:
+   >   model:  <name> — <one-line reason drawn from this issue>
+   >   effort: <level> — <one-line reason drawn from this issue>  (current: <$CLAUDE_EFFORT>)
+   >   Apply with: /model <name> · /effort <level>
+   > *(Under `- voice: ste` the heading is `Recommended settings:`. The three lines themselves are unchanged — model names, level names, `/model` and `/effort` are machine strings and pass through verbatim.)*
+   >
    > Git: branch <name>, <clean | N modified, listed below>, last relevant commit <hash> — <msg>.
    >
    > Please tell me if anything looks off before I touch a file.
+
+   **Settings block (unless suppressed).** The announce is the last thing the operator
+   reads before work begins, and it is the only point where the scope is known and no file
+   has been touched. Recommend a model and a reasoning effort here, derived from data
+   steps 1–6 already fetched — no new API call. The full rubric (two axes, floor triggers,
+   the worked contrast pair) is `${CLAUDE_PLUGIN_ROOT}/skills/jared/references/model-and-effort.md`;
+   load it when composing the block.
+
+   Read the live effort level in the same batch as the other step-7 reads:
+
+   ```bash
+   echo "$CLAUDE_EFFORT"
+   ```
+
+   Annotate the effort line with `(current: <value>)`. When the live level already equals
+   the recommendation, say `already set` and drop the `/effort` half of `Apply with:` —
+   telling an operator to set what is already set trains them to ignore the block. Omit the
+   note entirely if the variable is empty.
+
+   **Never annotate the model line.** There is no `$CLAUDE_MODEL` and no substitution
+   variable carries it, so the current model is not knowable here. A guessed one is worse
+   than none.
+
+   **Jared recommends; it does not set.** A command stub's `model:` frontmatter applies only
+   for the rest of its own turn and reverts at handback, so it would change the model that
+   prints this announce and not the model that writes the code. No hook, setting or env var
+   switches a live session either. Naming `/model` and `/effort` *is* the deliverable — see
+   `references/model-and-effort.md` § "The control question — settled 2026-09-19".
+
+   **Advisory, exactly as the ties block is advisory.** It never gates the start.
+
+   **Suppression.** If `docs/project-board.md` § `## Jared config` contains
+   `- model-advice: off`, omit the block entirely. The bullet is doctrine-only — read it
+   from the doc as you read `voice:`; no CLI subcommand parses it.
 
    The posture block is always present (the CLI runs in step 1). Up to three visually-separated blocks when all are present: posture (cross-issue), ties (cross-issue), per-issue announcement.
 
    **A note on restraint.** Voice carries the framing — the structural content (acceptance criteria, plan steps, git state) stays scannable. If a voice-y phrasing would obscure a fact the user needs to read at a glance, the fact wins. Voice supports the answer; it never replaces it.
 
-   **STE headings.** Under `- voice: ste` the template headings render as: "Picking up from the last Session note (<date>):" → "Last Session note (<date>):"; "Next action was:" → "Next action:"; "Watch out for:" → "Cautions:"; "Where it was when paused:" → "State at pause:"; "What we need to be true to call this done:" → "Acceptance criteria:"; "Here's a proposed plan for this session:" → "Session plan:"; "Please tell me if anything looks off before I touch a file." → "Tell me if a step is not correct before I change a file." The "Drift since filing" note in step 5 renders as "The issue body is not correct: `<path>` does not exist." Block order (posture, ties, per-issue) does not change.
+   **STE headings.** Under `- voice: ste` the template headings render as: "Picking up from the last Session note (<date>):" → "Last Session note (<date>):"; "Next action was:" → "Next action:"; "Watch out for:" → "Cautions:"; "Where it was when paused:" → "State at pause:"; "What we need to be true to call this done:" → "Acceptance criteria:"; "Here's a proposed plan for this session:" → "Session plan:"; "Suggested settings for this session:" → "Recommended settings:"; "Please tell me if anything looks off before I touch a file." → "Tell me if a step is not correct before I change a file." The "Drift since filing" note in step 5 renders as "The issue body is not correct: `<path>` does not exist." Block order (posture, ties, per-issue) does not change.
 
 8. **Wait for confirmation** before starting work. User may amend the plan, ask questions, or say "go."
 
