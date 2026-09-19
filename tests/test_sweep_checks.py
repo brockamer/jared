@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import import_sweep, patch_gh
+from tests.conftest import import_stage, import_sweep, patch_gh
 
 
 def _item(number: int, status: str, title: str = "") -> dict[str, Any]:
@@ -1197,3 +1197,169 @@ def test_check_session_note_freshness_passes_recent_note(
     comments = {1: [{"body": "## Session 2026-06-09\nfresh note", "createdAt": _iso_days_ago(0)}]}
     monkeypatch.setattr(sweep, "board_fetch_recent_comments_batch", lambda *a, **k: comments)
     assert sweep.check_session_note_freshness(items, repo="owner/repo", days=3) == []
+
+
+# ---------------------------------------------------------------------------
+# Pullability gaps (#429)
+# ---------------------------------------------------------------------------
+
+_UNSHAPED_BODY = "Some prose with no acceptance section at all."
+_SHAPED_BODY = (
+    "Real summary paragraph describing the work.\n\n## Acceptance criteria\n\n- Real criterion 1\n"
+)
+
+
+def _gh_issue(number: int, body: str, labels: list[str] | None = None) -> dict[str, Any]:
+    """`gh issue list --json …,labels,body` shape: labels are {"name": …} dicts."""
+    return {
+        "number": number,
+        "title": f"Issue {number}",
+        "body": body,
+        "labels": [{"name": name} for name in (labels or [])],
+    }
+
+
+def _neutral_row(
+    number: int, status: str, body: str, labels: list[str] | None = None
+) -> dict[str, Any]:
+    """`neutral_open_rows` shape: body under content, labels as bare strings."""
+    return {
+        "status": status,
+        "labels": list(labels or []),
+        "content": {"number": number, "title": f"Issue {number}", "body": body},
+    }
+
+
+def test_sweep_reexports_the_shared_classifier_not_a_local_copy() -> None:
+    """sweep and stage must ask ONE classifier — see tests/test_pullable.py."""
+    mod = import_sweep()
+    for name in ("is_pullable", "not_pullable_reason", "is_epic"):
+        assert getattr(mod, name).__module__.endswith("pullable")
+
+
+def test_pullability_gaps_flags_an_unshaped_backlog_item() -> None:
+    mod = import_sweep()
+    items = [_item(1, "Backlog", "alpha")]
+    issues = {1: _gh_issue(1, _UNSHAPED_BODY)}
+    assert mod.check_pullability_gaps(items, issues) == [
+        "#1: not pullable — no acceptance section — alpha"
+    ]
+
+
+def test_pullability_gaps_ignores_a_well_shaped_backlog_item() -> None:
+    mod = import_sweep()
+    items = [_item(1, "Backlog")]
+    assert mod.check_pullability_gaps(items, {1: _gh_issue(1, _SHAPED_BODY)}) == []
+
+
+def test_pullability_gaps_scans_backlog_only() -> None:
+    """The whole point vs stage: Backlog-wide — but still only Backlog."""
+    mod = import_sweep()
+    items = [
+        _item(1, "Up Next"),
+        _item(2, "In Progress"),
+        _item(3, "Blocked"),
+        _item(4, "Done"),
+    ]
+    issues = {n: _gh_issue(n, _UNSHAPED_BODY) for n in (1, 2, 3, 4)}
+    assert mod.check_pullability_gaps(items, issues) == []
+
+
+def test_pullability_gaps_exempts_epics() -> None:
+    """Matches stage's #146 exemption — epics are durable containers."""
+    mod = import_sweep()
+    items = [_item(1, "Backlog"), _item(2, "Backlog", "beta")]
+    issues = {
+        1: _gh_issue(1, _UNSHAPED_BODY, labels=["epic"]),
+        2: _gh_issue(2, _UNSHAPED_BODY, labels=["enhancement"]),
+    }
+    assert mod.check_pullability_gaps(items, issues) == [
+        "#2: not pullable — no acceptance section — beta"
+    ]
+
+
+def test_pullability_gaps_reads_bodies_off_neutral_rows() -> None:
+    """The non-github path carries the body on the row, not in issues_by_number."""
+    mod = import_sweep()
+    items = [_neutral_row(7, "Backlog", _UNSHAPED_BODY)]
+    assert mod.check_pullability_gaps(items, {}) == [
+        "#7: not pullable — no acceptance section — Issue 7"
+    ]
+
+
+def test_pullability_gaps_exempts_epics_on_neutral_rows() -> None:
+    mod = import_sweep()
+    items = [_neutral_row(7, "Backlog", _UNSHAPED_BODY, labels=["epic"])]
+    assert mod.check_pullability_gaps(items, {}) == []
+
+
+def test_pullability_gaps_skips_items_with_no_body_source() -> None:
+    """An unfetched body is not an empty body.
+
+    The github row shape carries no body at all, so when the issue fetch
+    fails (or the repo cannot be determined) `issues_by_number` is empty and
+    there is nothing to judge. Defaulting to "" instead would report every
+    Backlog item as "not pullable — empty body" — a whole-board false alarm
+    at exactly the moment the operator has least information.
+    """
+    mod = import_sweep()
+    items = [_item(1, "Backlog"), _item(2, "Backlog")]
+    assert mod.check_pullability_gaps(items, {}) == []
+
+
+def test_pullability_gaps_still_flags_a_genuinely_empty_fetched_body() -> None:
+    """The other side of that guard: a fetched, genuinely empty body is a gap."""
+    mod = import_sweep()
+    items = [_item(1, "Backlog", "alpha")]
+    assert mod.check_pullability_gaps(items, {1: _gh_issue(1, "")}) == [
+        "#1: not pullable — empty body — alpha"
+    ]
+
+
+def test_pullability_data_available_is_false_with_no_source() -> None:
+    mod = import_sweep()
+    assert mod.check_pullability_data_available([_item(1, "Backlog")], {}) is False
+
+
+def test_pullability_data_available_is_true_from_either_source() -> None:
+    mod = import_sweep()
+    assert (
+        mod.check_pullability_data_available([_item(1, "Backlog")], {1: _gh_issue(1, "x")}) is True
+    )
+    assert mod.check_pullability_data_available([_neutral_row(7, "Backlog", "x")], {}) is True
+
+
+def test_pullability_data_available_ignores_non_backlog_rows() -> None:
+    """A fetched In Progress body does not make the Backlog judgeable."""
+    mod = import_sweep()
+    items = [_item(1, "In Progress")]
+    assert mod.check_pullability_data_available(items, {1: _gh_issue(1, "x")}) is False
+
+
+def test_pullability_gap_reason_text_matches_stage_exactly() -> None:
+    """The acceptance criterion: same reason wording stage.py already produces.
+
+    Asserted against the live `not_pullable_reason` rather than a copied
+    string literal, so a future rewording of the reason cannot leave sweep
+    and stage disagreeing while both test suites stay green.
+    """
+    mod = import_sweep()
+    stage = import_stage()
+    bodies = {
+        1: "",
+        2: (
+            "One-sentence summary of what this issue is about and why it matters."
+            "\n\n## Acceptance criteria\n\n- Real one\n"
+        ),
+        3: "Summary.\n\n## Acceptance criteria\n\n1. numbered\n",
+        4: "Summary.\n\n## Acceptance\n\n- bullet\n",
+        5: _UNSHAPED_BODY,
+    }
+    items = [_item(n, "Backlog") for n in bodies]
+    issues = {n: _gh_issue(n, b) for n, b in bodies.items()}
+
+    findings = mod.check_pullability_gaps(items, issues)
+    assert len(findings) == len(bodies)
+    for n, body in bodies.items():
+        expected = stage.not_pullable_reason({"body": body})
+        assert f"#{n}: {expected} — Issue {n}" in findings
