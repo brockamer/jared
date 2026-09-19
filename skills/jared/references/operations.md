@@ -99,11 +99,12 @@ keep conversational sessions inside that budget:
 2. **Prefer the `jared` CLI for board-shaped queries.** `jared summary` and
    `jared get-item <N>` share a per-process snapshot of `gh project
    item-list`, so a session that asks "what's on the board?" then "what's
-   the state of #51?" pays for one `item-list` fetch, not two. Reach for
-   `gh issue view --json …` only when you actually need body / title /
-   labels / milestone — the fields the CLI doesn't expose. For Status /
-   Priority / item-id / field values, `jared get-item` is cheaper and
-   bounded.
+   the state of #51?" pays for one `item-list` fetch, not two. For the body, use
+   `jared get-item <N> --body` — it is CLI-exposed as of #410 and is the
+   only route that works on a non-GitHub backend. Reach for `gh issue view
+   --json …` only when you actually need title / labels / milestone, the
+   fields the CLI still doesn't expose. For Status / Priority / item-id /
+   field values, `jared get-item` is cheaper and bounded.
 
 The escape-hatch examples below are written with these rules applied.
 
