@@ -13,7 +13,10 @@ references/board-sweep.md:
      items without populating Status; items landing as Status=None sort
      below everything and vanish until someone sets it manually.
   2. WIP cap — In Progress within limit, flag stalled items
-  3. Up Next queue — size and pullable-top check
+  3. Up Next queue — size
+  3b. Pullability gaps — non-epic Backlog items with no real summary or no
+     substantive acceptance criteria. /jared-groom offers to draft the
+     missing sections (#429); /jared-stage defers these items every pass.
   4. Aging — High-priority Backlog items >14 days old
   5. Blocked-status hygiene — items in Blocked column have `## Blocked by` section;
      flag Blocked items >7 days
@@ -102,6 +105,11 @@ from lib.kanbanflow_client import (  # type: ignore[import-not-found]  # noqa: E
 )
 from lib.neutral_items import (  # type: ignore[import-not-found]  # noqa: E402
     neutral_open_rows,
+)
+from lib.pullable import (  # type: ignore[import-not-found]  # noqa: E402
+    is_epic,
+    is_pullable,
+    not_pullable_reason,
 )
 
 # ---------- Config discovery ----------
@@ -386,6 +394,102 @@ def check_up_next_size(items: list[dict[str, Any]], limit: int = 8) -> list[str]
             "consider moving lower items back to Backlog"
         ]
     return []
+
+
+def _pullability_inputs(
+    item: dict[str, Any], issues_by_number: dict[int, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Body + labels for one row, or None when neither source has them.
+
+    The two fetch paths carry an item's body in different places, and neither
+    one carries it on both:
+
+    - github (`gh project item-list`) rows have no `body` and no `labels` at
+      all (see the GOLDEN_ITEMS fixture in
+      tests/test_golden_github_surfaces.py for that shape). The bodies arrive
+      separately, via `fetch_open_issues_bulk`, as `issues_by_number` — where
+      labels are `gh`'s `{"name": …}` dicts, not bare strings.
+    - the neutral path (`neutral_open_rows`) carries `content.body` and
+      top-level string `labels` on the row itself, because
+      `kanbanflow_provider._item_from_task` maps the task description in.
+
+    Returning None for "no source" rather than defaulting to `""` is the whole
+    point: an unfetched body is not an empty body, and treating it as one
+    would report every Backlog item as "not pullable — empty body" the moment
+    the issue fetch fails.
+    """
+    content = item.get("content") or {}
+    number = content.get("number")
+    issue = issues_by_number.get(number) if isinstance(number, int) else None
+
+    if issue is not None and "body" in issue:
+        raw_labels = issue.get("labels") or []
+        labels = [lab["name"] for lab in raw_labels if isinstance(lab, dict) and "name" in lab] or [
+            lab for lab in raw_labels if isinstance(lab, str)
+        ]
+        return {"body": issue.get("body") or "", "labels": labels}
+
+    if "body" in content:
+        return {
+            "body": content.get("body") or "",
+            "labels": [lab for lab in (item.get("labels") or []) if isinstance(lab, str)],
+        }
+
+    return None
+
+
+def check_pullability_gaps(
+    items: list[dict[str, Any]], issues_by_number: dict[int, dict[str, Any]]
+) -> list[str]:
+    """Every non-epic Backlog item that fails `is_pullable`, with its reason.
+
+    The same classifier /jared-stage uses (`lib/pullable.py`, extracted in
+    #429), applied to the whole Backlog rather than to the top of Up Next.
+    stage flags these items in "Deferred (this pass)" on every run but never
+    repairs them, so without this section the operator sees the same names
+    recur indefinitely with no surface that fixes them.
+
+    Epic-labeled items are exempt, matching stage's #146 exemption: epics are
+    durable containers and legitimately carry no acceptance criteria.
+
+    Items with no resolvable body source are skipped silently — see
+    `_pullability_inputs`. `check_pullability_data_available` is what tells
+    main whether the section had anything to judge at all.
+    """
+    gaps = []
+    for item in items:
+        if item.get("status") != "Backlog":
+            continue
+        content = item.get("content") or {}
+        number = content.get("number")
+        if number is None:
+            continue
+        probe = _pullability_inputs(item, issues_by_number)
+        if probe is None:
+            continue
+        if is_epic(probe) or is_pullable(probe):
+            continue
+        title = str(content.get("title", ""))[:50]
+        gaps.append(f"#{number}: {not_pullable_reason(probe)} — {title}")
+    return gaps
+
+
+def check_pullability_data_available(
+    items: list[dict[str, Any]], issues_by_number: dict[int, dict[str, Any]]
+) -> bool:
+    """True if at least one Backlog row has a body to judge.
+
+    Separate from the check so main can print the established
+    "(skipped — no issue data)" line instead of an empty, falsely-reassuring
+    "None". Keyed on data presence, not on backend: the neutral path supplies
+    bodies on the row while github supplies them via issues_by_number, and
+    either one is enough.
+    """
+    return any(
+        _pullability_inputs(i, issues_by_number) is not None
+        for i in items
+        if i.get("status") == "Backlog"
+    )
 
 
 def check_stale_high_backlog(
@@ -930,6 +1034,14 @@ def main() -> int:
     print("== Up Next size ==")
     for line in check_up_next_size(items) or ["Healthy"]:
         print(f"  {line}")
+    print()
+
+    print("== Pullability gaps (Backlog) ==")
+    if not check_pullability_data_available(items, issues_by_number):
+        print("  (skipped — no issue data)")
+    else:
+        for line in check_pullability_gaps(items, issues_by_number) or ["None"]:
+            print(f"  {line}")
     print()
 
     print(f"== Stale High-priority Backlog (>{args.staleness_days}d) ==")

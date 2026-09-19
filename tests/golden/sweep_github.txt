@@ -14,6 +14,9 @@ Open issues in brockamer/findajob: 2
 == Up Next size ==
   Healthy
 
+== Pullability gaps (Backlog) ==
+  #1: not pullable — empty body — alpha
+
 == Stale High-priority Backlog (>14d) ==
   #1: <N>d old — alpha
 
