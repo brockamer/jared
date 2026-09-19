@@ -8,6 +8,8 @@ description: Begin work on an issue — move to In Progress, load full context (
 - Step 5 (load context): MCP tools are not available for board operations on this backend — skip Tier 1 MCP tool suggestions: `degraded: MCP tier unavailable on kanbanflow — GitHub MCP plugin not applicable; use jared CLI for all board operations` (MCP_TIER absent).
 - Step 3 (pullable check): `## Acceptance criteria` section relies on plain-text parsing, not `##` header detection: `degraded: markdown body rendering unavailable on kanbanflow — pullable check parses plain text` (MARKDOWN_BODY absent).
 
+**No advisor pass.** Routine board operation — fetch, render, approve, apply. It does not warrant an `advisor()` call; Jared prescribes exactly one, the optional batch pass in `/jared-audit`. A genuine design decision arising mid-session still does — the trigger is the finding, not the command. (`SKILL.md` § "The lane".)
+
 Invoke the Jared skill to start work on an issue. Takes an optional argument: the issue reference (number or URL).
 
 Argument parsing: `$ARGUMENTS` may contain `#14`, `14`, a URL, a short string like "the excluded employers issue", or be empty. Resolve to a specific issue number, asking to clarify if ambiguous.
