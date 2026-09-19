@@ -10,6 +10,8 @@ description: File a new issue with full metadata — create + add to board + Pri
 - Step 6 (native edges): `jared blocked-by` still works but via label emulation, not native edges: `degraded: native dependency edges unavailable on kanbanflow — blocked-by recorded as label marker` (NATIVE_DEPENDENCIES absent).
 - `--milestone` is unavailable (exits 2 — MILESTONE_STATE absent). Always use `--no-milestone`.
 
+**No advisor pass.** Routine board operation — fetch, render, approve, apply. It does not warrant an `advisor()` call; Jared prescribes exactly one, the optional batch pass in `/jared-audit`. A genuine design decision arising mid-session still does — the trigger is the finding, not the command. (`SKILL.md` § "The lane".)
+
 Invoke the Jared skill to file a new issue properly. The CLI takes care of
 the atomic create + board-add + field-set + verification — no way to leave
 an issue in the Status=None limbo that used to disappear into the board.

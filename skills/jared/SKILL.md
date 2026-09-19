@@ -49,6 +49,8 @@ Jared *reads* memory, `CLAUDE.md`, project settings, and any gitignored claude-s
 
 Two writers diverge. Jared consumes those surfaces; it does not author them. The PII pre-flight (`references/pii-pre-flight.md`) enforces the read-only side of this contract in code; the doctrine here is the authoritative statement.
 
+**`advisor()` — Jared prescribes exactly one.** The optional batch pass in `/jared-audit` is the only `advisor()` call Jared asks for (`commands/jared-audit.md`, restated in `references/operations.md`). Routine board operations — `/jared`, `/jared-start`, `/jared-stage`, `/jared-file` — do not warrant one: they fetch, render, ask for approval, and apply moves, with no design decision to pressure-test. This describes Jared's own commands rather than ranking work in general — #265 removed a generalized advisor tier-scheme as outside the "kanban steward, no opinions about model choices" lane, and that boundary stays closed. A genuine design decision arising mid-session still warrants one; the trigger is the finding, not the command.
+
 **Canonical vs legacy surfaces.** Some projects carry both a Priority field and legacy `priority:*` labels (or similar duplication). The convention doc (`docs/project-board.md`) names which surface is canonical — Jared writes only there. Legacy duplicates are read-only; reconcile by removing the legacy label, never by writing to it.
 
 ## Voice — situational examples
