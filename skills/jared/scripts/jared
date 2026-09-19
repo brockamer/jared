@@ -123,7 +123,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     get_item = sub.add_parser(
         "get-item",
-        help="Return JSON: issue number, item-id, and project field values.",
+        help=(
+            "Return JSON: issue number, item-id, and project field values; "
+            "--body adds the issue body."
+        ),
     )
     get_item.add_argument("issue_number", type=int)
     get_item.add_argument(
