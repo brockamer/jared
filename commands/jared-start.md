@@ -88,7 +88,7 @@ Flow:
 
    Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
-3. **Check pullable state.** Read the target issue's body and verify:
+3. **Check pullable state.** Read the target issue's body — `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, the same portable route step 5 uses, since this check runs before the move and on every backend — and verify:
    - First paragraph is a clear summary
    - `## Acceptance criteria` is populated (not empty or placeholder)
    - `## Depends on` — all referenced issues are closed or already done
