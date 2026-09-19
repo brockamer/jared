@@ -879,6 +879,17 @@ KanbanFlow Settings -> API). The token is never stored in this file.
   settings, no SessionStart hooks, no memory entries required); this bullet is the only way to
   change it. See SKILL.md § "Project-level kill switch" (under the voice doctrine),
   `references/voice.md` and `references/voice-ste.md`.
+
+- `model-advice: on` — controls whether `/jared-start`'s announce carries the model and
+  reasoning-effort recommendation (the `Suggested settings for this session:` block). Values:
+  `on` (default) — render the block; `off` — omit it. An operator who always runs one model
+  reads the line as noise every session. Only the literal value `off` changes the rendering;
+  any other value falls back to `on`. **The bullet is doctrine-only:**
+  `commands/jared-start.md` reads it from this doc exactly as it reads `voice:`, and no CLI
+  subcommand parses it — the #114 rule, where a knob no CLI surface gates on belongs in prose.
+  Note that Jared recommends settings but cannot apply them: a command stub's `model:`
+  frontmatter reverts at handback, so the announce names `/model` and `/effort` for the
+  operator to run. See `references/model-and-effort.md`.
 """
 
 
