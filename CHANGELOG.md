@@ -7,6 +7,18 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.32.0 — 2026-09-19
+
+Interim release. Ships the model + reasoning-effort recommendation in `/jared-start`'s announce, a `/jared-groom` remediation step for Backlog pullability gaps, and `get-item --body`. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
+
+**Features**
+- **`/jared-start` recommends a model and reasoning effort in its announce.** Two axes — model for breadth/stakes, effort for depth — scored with floor triggers over the signals steps 1–6 already fetched, plus landmine triggers read from the consuming project's own `CLAUDE.md`. The effort line drops its own advice when `$CLAUDE_EFFORT` already matches, since a command stub cannot set the model or effort for the turns that follow it — verified against Claude Code's own docs before this was built. Doctrine plus a `- model-advice: off` config bullet; drift-guarded, not behaviour-guarded. (#430)
+- **`/jared-groom` repairs Backlog pullability gaps instead of only naming them.** `sweep.py` gains a `== Pullability gaps (Backlog) ==` section, and groom gains a remediation step: draft a summary plus acceptance-criteria bullets per flagged item, present for accept-all / cherry-pick / edit / skip, apply via `gh issue edit --body-file`. The classifier (`is_pullable` / `not_pullable_reason` / `is_epic`) moved out of `stage.py` into `lib/pullable.py` so both surfaces share it. (#429)
+- **`jared get-item --body`** returns the project field values and the body markdown in one call on either backend, replacing the unsupported fallbacks `/jared-start` step 5 previously had to reach for (`gh issue view --json body` on GitHub, a private KanbanFlow client method). Opt-in flag — no existing caller pays for the extra round-trip. (#410, #428)
+
+**Refactor**
+- The 2026-09-17 KanbanFlow batch-surface-parity plan gained the `## Issue(s)` section `archive-plan.py --scan` keys on, and archived — it had sat unarchivable since all four of its issues shipped in v0.31.0. (#422)
+
 ## v0.31.0 — 2026-09-17
 
 Interim release. Ships epic #348's Phase 3a and 3c fix waves, the KanbanFlow batch-surface parity that completes the #314 Phase-1 provider boundary, and the `voice: ste` dialogue mode. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
