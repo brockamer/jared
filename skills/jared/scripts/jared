@@ -123,9 +123,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     get_item = sub.add_parser(
         "get-item",
-        help="Return JSON: issue number, item-id, and project field values.",
+        help=(
+            "Return JSON: issue number, item-id, and project field values; "
+            "--body adds the issue body."
+        ),
     )
     get_item.add_argument("issue_number", type=int)
+    get_item.add_argument(
+        "--body",
+        action="store_true",
+        help=(
+            "Also return the issue's full Markdown body under a 'body' key. "
+            "Opt-in: the body costs an extra read, and most callers only want fields."
+        ),
+    )
     get_item.set_defaults(func=_cmd_get_item)
 
     summary = sub.add_parser("summary", help="One-screen board status summary.")
@@ -507,13 +518,20 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
     if item.priority is not None:
         fields_out["priority"] = item.priority
     fields_out.update(item.fields)
-    output = {
+    output: dict[str, object] = {
         "issue_number": args.issue_number,
         "item_id": item.provider_ref,
         "status": item.status,
         "priority": item.priority,
         "fields": fields_out,
     }
+    # #410: the body is the one BoardProvider method /jared-start step 5 needs
+    # and no subcommand exposed. Fetched only under --body, and only after the
+    # not-found check above, so a missing issue raises ItemNotFound rather than
+    # printing an empty body. Keeping it opt-in preserves the default output
+    # shape (no 'body' key) and spares every existing caller the extra read.
+    if args.body:
+        output["body"] = board.provider.get_body(args.issue_number)
     print(json.dumps(output, indent=2))
     return 0
 

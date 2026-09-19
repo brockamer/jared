@@ -88,7 +88,7 @@ Flow:
 
    Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
 
-3. **Check pullable state.** Read the target issue's body and verify:
+3. **Check pullable state.** Read the target issue's body — `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, the same portable route step 5 uses, since this check runs before the move and on every backend — and verify:
    - First paragraph is a clear summary
    - `## Acceptance criteria` is populated (not empty or placeholder)
    - `## Depends on` — all referenced issues are closed or already done
@@ -101,7 +101,7 @@ Flow:
    ```
 
 5. **Load context.** Fetch:
-   - Full issue body (including `## Current state`, `## Decisions`, acceptance criteria in `<details>`)
+   - Full issue body (including `## Current state`, `## Decisions`, acceptance criteria in `<details>`) — run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, which returns the project field values and the body markdown in one call on both backends (#410). Prefer it to `gh issue view --json body`, which has no equivalent on a non-GitHub backend.
    - Most recent Session note comment (matches `## Session YYYY-MM-DD` header)
    - Any plan or spec linked from `## Planning` — read and summarize
    - Git state: current branch, uncommitted changes, last 5 commits touching related files
