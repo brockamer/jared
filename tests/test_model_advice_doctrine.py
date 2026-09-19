@@ -72,7 +72,13 @@ def _frontmatter(path: Path) -> str:
     "stub", sorted((REPO_ROOT / "commands").glob("*.md")), ids=lambda p: p.name
 )
 def test_no_stub_carries_model_or_effort_frontmatter(stub: Path) -> None:
-    """A stub-level `model:`/`effort:` override reverts at handback — a silent no-op.
+    """A stub-level `model:`/`effort:` override cannot govern the work after handback.
+
+    `model:` is documented as reverting at the end of the command's own turn. `effort:`
+    exists too, but its row does not state reversion — same-turn scope is inferred by
+    parallel construction, not quoted. Both are blocked here anyway: frontmatter is a
+    static string and this recommendation is computed per issue, so one pinned value
+    could not express it even with session scope.
 
     Jared's contract is to recommend and let the operator run `/model` / `/effort`.
     If a future Claude Code release gives these keys session scope, delete this test

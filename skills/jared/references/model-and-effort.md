@@ -167,6 +167,12 @@ handback, which is where the implementation work starts. It would change the mod
 prints the plan and not the model that writes the code. That is the opposite of what #430
 wants.
 
+**An `effort:` frontmatter key also exists** (`low`, `medium`, `high`, `xhigh`, `max`)
+and is likewise skill-scoped. Its row does not state reversion the way the `model:` row
+does, so same-turn scope is *inferred* by parallel construction rather than quoted —
+record it that way and do not assert it as documented. It is unusable here regardless,
+for the reason below, which does not depend on scope at all.
+
 **A second reason frontmatter is the wrong shape, independent of scope:** frontmatter is a
 static string and this recommendation is computed per issue. Even with session scope, one
 pinned value could not express "Haiku for the changelog fix, Opus for the refactor."
@@ -217,8 +223,8 @@ through as ordinary prompt text and do nothing. Never recommend a keyword in pla
 
 ## Sibling convention — subagent defaults
 
-A user's `CLAUDE.md` may already set subagent model defaults (the convention on this
-machine is implementation → Sonnet, review → Opus). That convention governs agents Jared
+A user's `CLAUDE.md` may already set subagent model defaults (for example,
+implementation → Sonnet, review → Opus). That convention governs agents Jared
 *dispatches*. This rubric governs the model the *session itself* runs on. They agree on
 direction and they are not the same setting — do not let one overwrite the other, and
 prefer the project's own `CLAUDE.md` when it speaks to the question directly.
@@ -243,6 +249,16 @@ variable is empty, omit the `current:` note rather than guessing.
 
 **Never print a `current:` note for the model.** It is not knowable, and a guessed one is
 worse than none.
+
+**Name the model the way that install's `/model` lists it.** Two identifier vocabularies
+are in circulation — short aliases (`sonnet`) and full ids (`claude-opus-5`) — and both
+appear in a real `settings.json`. The `/model` list is the authority. Do not invent a
+third form: a recommendation that sends the operator to an error is worse than none,
+which is the whole reason the block names the command at all.
+
+**Available effort levels depend on the model.** If the level you would recommend is not
+offered by the model you are recommending, name the highest level that model does offer
+rather than a level the operator cannot select.
 
 Under `- voice: enabled` and `- voice: disabled` the heading is
 `Suggested settings for this session:`. Under `- voice: ste` it is
