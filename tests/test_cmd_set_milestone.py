@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -174,16 +175,17 @@ def test_set_milestone_rejects_title_and_none_together(
 
 
 # ---------------------------------------------------------------------------
-# Criterion 4: MILESTONE_STATE whole-scope-absent refusal (Phase 6, #319)
+# Criterion 4: MILESTONE_ASSIGNMENT whole-scope-absent refusal (Phase 6, #319;
+# capability refined from MILESTONE_STATE to MILESTONE_ASSIGNMENT by #390)
 # ---------------------------------------------------------------------------
 
 
-def test_set_milestone_refuses_when_milestone_state_absent(
+def test_set_milestone_refuses_when_milestone_assignment_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The whole subcommand is scope-absent without MILESTONE_STATE.
+    """The whole subcommand is scope-absent without MILESTONE_ASSIGNMENT.
 
-    Matches `_cmd_file`'s MILESTONE_STATE gate — exit 2 with the standard
+    Matches `_cmd_file`'s MILESTONE_ASSIGNMENT gate — exit 2 with the standard
     `degraded:` note. The assertion that no milestones listing was
     fetched is what proves the gate runs *first*: reaching validation would
     mean a capability-absent backend reports "no open milestones" instead of
@@ -217,15 +219,16 @@ def test_set_milestone_works_the_moment_the_capability_is_present(
     A guard, not a driver — it passes on arrival, and that is the claim being
     pinned. `_cmd_set_milestone` reaches the board solely through
     `provider.list_milestones` and `provider.set_milestone`, with no `run_gh`,
-    `field_id` or `option_id` of its own. So when #390 removes MILESTONE_STATE
-    from `_OMITTED_CAPABILITIES`, this gate returns None, execution falls
-    through to `kanbanflow_provider.set_milestone`, and this subcommand does
-    not change. Granting the capability alone is the whole experiment.
+    `field_id` or `option_id` of its own. #390 added `MILESTONE_ASSIGNMENT`
+    (KanbanFlow already advertises it, via swimlanes) — when this gate keys on
+    that capability and it is present, execution falls through to
+    `kanbanflow_provider.set_milestone`, and this subcommand does not change.
+    Granting the capability alone is the whole experiment.
     """
     from skills.jared.scripts.lib.board_provider import Capability
 
     board_md = write_minimal_board(tmp_path)
-    restrict_capabilities(monkeypatch, keep={Capability.MILESTONE_STATE})
+    restrict_capabilities(monkeypatch, keep={Capability.MILESTONE_ASSIGNMENT})
     calls = patch_gh_by_arg(
         monkeypatch,
         {"milestones": OPEN_MILESTONES, "issue edit": GH_ISSUE_EDIT_STDOUT},
@@ -328,7 +331,7 @@ def test_set_milestone_does_not_invalidate_the_closed_cache(
     assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) == seeded
 
 
-def test_set_milestone_none_refuses_when_milestone_state_absent(
+def test_set_milestone_none_refuses_when_milestone_assignment_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The clear path is gated too — the capability governs the whole scope."""
@@ -343,3 +346,93 @@ def test_set_milestone_none_refuses_when_milestone_state_absent(
     assert rc == 2, captured.err
     assert "degraded" in captured.err
     assert not [c for c in calls if "edit" in c], "must not mutate on a capability-absent backend"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end against a real KanbanFlowProvider (fake client, no network) — #390.
+# Mirrors test_cmd_move.py's KanbanFlow wiring pattern: patch
+# KanbanFlowClient.from_env on the CLI's `lib.*` import path, not the test's
+# `skills.*` one (see AGENTS.md "Dual import path").
+# ---------------------------------------------------------------------------
+
+
+def _write_kf_board(tmp_path: Path) -> Path:
+    board_md = tmp_path / "docs" / "project-board.md"
+    board_md.parent.mkdir(parents=True)
+    board_md.write_text(
+        dedent("""\
+        - Project URL: https://github.com/users/brockamer/projects/7
+        - Project number: 7
+        - Project ID: PVT_kwHO_xyz
+        - Owner: brockamer
+        - Repo: brockamer/findajob
+
+        ### Status column map
+        - Backlog: Backlog
+        - Up Next: Up Next
+        - In Progress: In Progress
+        - Blocked: Blocked
+        - Done: Done
+
+        ## Jared config
+        - backend: kanbanflow
+    """)
+    )
+    return board_md
+
+
+def test_set_milestone_assigns_on_kanbanflow_via_swimlane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The MILESTONE_ASSIGNMENT gate opens the path straight through to the
+    already-working `_swimlane_id` machinery (#390) — granting the capability
+    is the whole experiment; `_cmd_set_milestone` itself does not change.
+    """
+    mod = import_cli()  # inserts scripts/ on sys.path, so the CLI's lib.* path resolves
+
+    from tests.fake_kanbanflow import FakeKanbanFlowClient
+
+    fake = FakeKanbanFlowClient()
+    task = fake.create_task(name="work", column_id="col-backlog", number_value=1)
+    monkeypatch.setattr(
+        "lib.kanbanflow_client.KanbanFlowClient.from_env",
+        classmethod(lambda cls, **kw: fake),
+    )
+    monkeypatch.setenv("JARED_CACHE_DIR", str(tmp_path))
+
+    board_md = _write_kf_board(tmp_path)
+    rc = mod.main(["--board", str(board_md), "set-milestone", "1", "v1.0"])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert fake.tasks[task.id].swimlane_id == "sw-v1"
+
+
+def test_set_milestone_none_refuses_on_kanbanflow_task_always_has_swimlane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--none` reaches `clear_milestone`, which refuses rather than no-opping
+    (#390 makes this reachable for the first time via the CLI): a KanbanFlow
+    task always occupies a swimlane, so there is no cleared state to move to.
+    """
+    mod = import_cli()
+
+    from tests.fake_kanbanflow import FakeKanbanFlowClient
+
+    fake = FakeKanbanFlowClient()
+    task = fake.create_task(
+        name="work", column_id="col-backlog", number_value=1, swimlane_id="sw-v1"
+    )
+    monkeypatch.setattr(
+        "lib.kanbanflow_client.KanbanFlowClient.from_env",
+        classmethod(lambda cls, **kw: fake),
+    )
+    monkeypatch.setenv("JARED_CACHE_DIR", str(tmp_path))
+
+    board_md = _write_kf_board(tmp_path)
+    rc = mod.main(["--board", str(board_md), "set-milestone", "1", "--none"])
+
+    captured = capsys.readouterr()
+    assert rc == 1, captured.err
+    assert "swimlane" in captured.err.lower()
+    assert fake.tasks[task.id].swimlane_id == "sw-v1", "must not mutate on refusal"

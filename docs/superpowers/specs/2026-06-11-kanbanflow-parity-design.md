@@ -130,6 +130,11 @@ build phases inherit, not to be re-derived:
   loss and must be corrected.
 - **MILESTONE_STATE → stays omitted; note refined.** State derived; due is a documented
   non-goal. **Not** splitting the enum (no consumer branches state-vs-due today).
+  **Addendum (#390, 2026-09-20):** a *third*, orthogonal question surfaced after this analysis
+  — plain milestone *assignment* (grouping an item under a milestone name), which none of
+  `stage.py`/audit-window/`migrate`'s state-vs-due consumers touch and which KanbanFlow's
+  swimlanes already support. That shipped as its own `Capability.MILESTONE_ASSIGNMENT`. The
+  state-vs-due non-split above stands unchanged — this is a different axis, not a reversal.
 - **MCP_TIER → flips** once the shim ships.
 - **SUB_ISSUES → non-goal** (formalized; already in the spec/inventory/migrate.py loss msg).
 

@@ -1,9 +1,9 @@
 """Live KanbanFlow capability + degradation verification (Phase 6, Task 11).
 
 Acceptance gate: a real KanbanFlowProvider constructs against the live
-"Jared Test" board (p9vK6cR), proves its board id, and advertises
-frozenset() capabilities. The degraded_or_none gate is also exercised
-end-to-end — that path is network-free by design (Board.capabilities()
+"Jared Test" board (p9vK6cR), proves its board id, and advertises exactly
+{MILESTONE_ASSIGNMENT} capabilities (#390). The degraded_or_none gate is also
+exercised end-to-end — that path is network-free by design (Board.capabilities()
 reads the static class attribute; it never constructs the provider or
 calls the API).
 
@@ -58,7 +58,7 @@ def _write_kf_board_fixture(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: live provider construction proves capabilities() == frozenset()
+# Test 1: live provider construction proves capabilities() == {MILESTONE_ASSIGNMENT}
 # ---------------------------------------------------------------------------
 
 
@@ -69,7 +69,7 @@ def test_live_kanbanflow_provider_capabilities(tmp_path: Path) -> None:
     1. The provider is a KanbanFlowProvider (not a stub).
     2. The live board id matches LIVE_BOARD_ID — proves the token reached p9vK6cR,
        not some other board or a short-circuit.
-    3. capabilities() == frozenset() — the static compile-time constant.
+    3. capabilities() == {MILESTONE_ASSIGNMENT} — the static compile-time constant (#390).
     """
     from skills.jared.scripts.lib.board import Board
     from skills.jared.scripts.lib.kanbanflow_provider import KanbanFlowProvider
@@ -90,10 +90,12 @@ def test_live_kanbanflow_provider_capabilities(tmp_path: Path) -> None:
         f"expected board id '{LIVE_BOARD_ID}', got '{provider._board.id}'"
     )
 
-    # Static capability set — empty on KanbanFlow.
-    assert provider.capabilities() == frozenset(), (
-        f"expected frozenset(), got {provider.capabilities()!r}"
-    )
+    # Static capability set — MILESTONE_ASSIGNMENT only on KanbanFlow (#390).
+    from skills.jared.scripts.lib.board_provider import Capability
+
+    expected = frozenset({Capability.MILESTONE_ASSIGNMENT})
+    got = provider.capabilities()
+    assert got == expected, f"expected {expected!r}, got {got!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +114,8 @@ def test_live_kanbanflow_degraded_surface_network_free(tmp_path: Path) -> None:
     token string), but it makes no HTTP request.
 
     Asserts:
-    (a) Board.capabilities() == frozenset() — parsed from the kanbanflow backend selector.
+    (a) Board.capabilities() == {MILESTONE_ASSIGNMENT} — parsed from the kanbanflow backend
+        selector (#390 — the one capability KanbanFlow supports beyond the core board loop).
     (b) degraded_or_none returns a non-None note for VELOCITY_TIMESTAMPS.
     (c) The note contains "unavailable on kanbanflow" — the canonical phrasing.
     """
@@ -124,9 +127,8 @@ def test_live_kanbanflow_degraded_surface_network_free(tmp_path: Path) -> None:
     board = Board.from_path(board_md)
 
     # (a) Static capability set — resolved from the backend selector, no API call.
-    assert board.capabilities() == frozenset(), (
-        f"expected frozenset(), got {board.capabilities()!r}"
-    )
+    expected = frozenset({Capability.MILESTONE_ASSIGNMENT})
+    assert board.capabilities() == expected, f"expected {expected!r}, got {board.capabilities()!r}"
 
     # (b)+(c) A gated surface degrades correctly.
     note = degraded_or_none(board, Capability.VELOCITY_TIMESTAMPS, "velocity", "skip velocity")

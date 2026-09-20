@@ -19,6 +19,7 @@ class Capability(Enum):
     """Backend feature-support flags. Commands branch on these (Phase 6)."""
 
     MILESTONE_STATE = "milestone_state"  # open/close + due dates
+    MILESTONE_ASSIGNMENT = "milestone_assignment"  # assign to a milestone; no state/due (#390)
     VELOCITY_TIMESTAMPS = "velocity_timestamps"  # created/closed/transition times
     NATIVE_DEPENDENCIES = "native_dependencies"  # real edge vs label-marker emulation
     MARKDOWN_BODY = "markdown_body"
