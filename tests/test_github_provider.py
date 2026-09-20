@@ -1566,3 +1566,43 @@ def test_recently_closed_maps_to_closeditem_sorted_desc(
 def test_recently_closed_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_gh(monkeypatch, stdout="[]")
     assert _provider().recently_closed(days=7) == []
+
+
+# ---------------------------------------------------------------------------
+# `gh issue edit` prints a URL, not JSON (#427)
+# ---------------------------------------------------------------------------
+#
+# Every one of these methods routed its call through run_gh, which parses
+# stdout as JSON and raises GhInvocationError on anything else. `gh issue edit`
+# prints the issue URL as plain text, so each one applied its mutation and
+# *then* reported failure — a successful write behind a non-zero exit.
+#
+# The bug survived because the fakes lied: patch_gh's default stdout is "{}",
+# which is valid JSON. These tests feed the string gh actually emits, captured
+# from a live run against brockamer/jared#426.
+
+GH_ISSUE_EDIT_STDOUT = "https://github.com/brockamer/jared/issues/426"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(lambda p: p.set_milestone(42, "Marketplace readiness"), id="set_milestone"),
+        pytest.param(lambda p: p.clear_milestone(42), id="clear_milestone"),
+        pytest.param(lambda p: p.add_label(42, "enhancement"), id="add_label"),
+        pytest.param(lambda p: p.remove_label(42, "enhancement"), id="remove_label"),
+    ],
+)
+def test_issue_edit_mutations_tolerate_plain_text_output(
+    monkeypatch: pytest.MonkeyPatch, operation: object
+) -> None:
+    """A `gh issue edit` wrapper must not parse the URL it prints as JSON.
+
+    set_milestone is the live one — `migrate`'s apply loop calls it, so a
+    GitHub-target migration raised after the write landed. add_label and
+    remove_label are latent: no CLI surface reaches them yet (the same
+    "No CLI surface" layer operations.md describes), so nothing had exercised
+    them against real gh output.
+    """
+    patch_gh(monkeypatch, stdout=GH_ISSUE_EDIT_STDOUT)
+    operation(_provider())  # type: ignore[operator]

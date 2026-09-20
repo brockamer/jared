@@ -334,6 +334,26 @@ def test_set_milestone_bad_name_raises(tmp_path: Path) -> None:
         provider.set_milestone(n, "nonexistent")
 
 
+def test_clear_milestone_refuses_rather_than_silently_no_opping(tmp_path: Path) -> None:
+    """A KanbanFlow task always occupies a swimlane, so there is no clear (#427).
+
+    The failure this guards against is specific: `update_task` builds its body
+    with `if <kwarg> is not None`, so a pass-through implementation would POST
+    an empty body and report success. Asserting the task's swimlane is
+    unchanged afterwards is what separates "refused" from "silently no-opped" —
+    a bare `pytest.raises` would pass for either.
+    """
+    provider, _ = _provider(tmp_path)
+    n = _filed(provider)
+    provider.set_milestone(n, "v1.0")
+
+    with pytest.raises(FieldNotFound) as exc:
+        provider.clear_milestone(n)
+
+    assert "swimlane" in str(exc.value)
+    assert provider.get_item(n).milestone == "v1.0"  # type: ignore[union-attr]
+
+
 def test_list_milestones_from_swimlanes_dateless(tmp_path: Path) -> None:
     provider, _ = _provider(tmp_path)
     names = {m.name: m for m in provider.list_milestones()}

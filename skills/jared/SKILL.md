@@ -122,6 +122,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared file --title "..." (--body "...
 # --priority accepts High/Medium/Low (canonical) or high/medium/low/med (normalized by CLI)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared move <N> "In Progress"
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set <N> <FieldName> <OptionName>
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared set-milestone <N> ("<title>" | --none)   # already-filed issues (#427)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared close <N> [(--body "..." | --body-file <path or ->)]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --body-file <path or ->)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
