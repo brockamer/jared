@@ -126,6 +126,8 @@ Project-level knobs that change Jared's behavior on this board. Each bullet is `
 
 - `model-advice: on` — controls whether `/jared-start`'s announce carries the model and reasoning-effort recommendation (the `Suggested settings for this session:` block). Values: `on` (default) — render the block; `off` — omit it. An operator who always runs one model reads the line as noise every session. Only the literal value `off` changes the rendering; any other value falls back to `on`. **The bullet is doctrine-only:** `commands/jared-start.md` reads it from this doc exactly as it reads `voice:`, and no CLI subcommand parses it — the #114 rule, where a knob no CLI surface gates on belongs in prose. Note that Jared recommends settings but cannot apply them: a command stub's `model:` frontmatter reverts at handback, so the announce names `/model` and `/effort` for the operator to run. See `references/model-and-effort.md`.
 
+- `admin-merge:` — **not set by default, and absence is the safe state.** When present (for example `admin-merge: --merge`) it sanctions the `blocked_on_review` escape path in `/jared-wrap`: where a PR is reported `mergeable` but held by required review or branch protection, wrap may offer an operator-confirmed `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection, so the sanction is opt-in per project, and the value pins the strategy (`--merge` preserves a phase-by-phase commit trail; `--squash` discards it). Leave the line out and wrap only reports the block. Doctrine-only like the bullets above: `commands/jared-wrap.md` reads it from this doc and no CLI subcommand parses it.
+
 ### Current-state operator docs
 
 *Optional. If present, `jared groom` / `sweep.py` will emit an advisory
