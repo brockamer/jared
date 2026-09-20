@@ -12,6 +12,8 @@ def test_github_advertises_full_capability_set() -> None:
     assert _board("github").capabilities() == frozenset(Capability)
 
 
-def test_kanbanflow_advertises_empty_capability_set() -> None:
+def test_kanbanflow_advertises_milestone_assignment_only() -> None:
     # Resolved offline — no KANBANFLOW_API_TOKEN, no network.
-    assert _board("kanbanflow").capabilities() == frozenset()
+    # MILESTONE_ASSIGNMENT (#390) is the one capability KanbanFlow supports
+    # beyond the core board loop (swimlanes).
+    assert _board("kanbanflow").capabilities() == frozenset({Capability.MILESTONE_ASSIGNMENT})

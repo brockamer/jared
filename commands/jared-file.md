@@ -8,7 +8,7 @@ description: File a new issue with full metadata — create + add to board + Pri
 - Step 4 (body template): `<details>` folds and `##` section headers are stored as plain text. Fall back to plain-text structure (numbered sections with dashes): `degraded: markdown body rendering unavailable on kanbanflow — using plain-text body structure` (MARKDOWN_BODY absent).
 - Step 5 pullable check: `## Acceptance criteria` section cannot rely on `##` headers for parsing — read the full plain-text body for an acceptance criteria block: `degraded: markdown body rendering unavailable on kanbanflow — pullable check parses plain text`.
 - Step 6 (native edges): `jared blocked-by` still works but via label emulation, not native edges: `degraded: native dependency edges unavailable on kanbanflow — blocked-by recorded as label marker` (NATIVE_DEPENDENCIES absent).
-- `--milestone` is unavailable (exits 2 — MILESTONE_STATE absent). Always use `--no-milestone`.
+- `--milestone` works — milestones map to swimlanes (MILESTONE_ASSIGNMENT present, #390). A board with no swimlanes yet has no milestone to name; `jared file` reports that the same way GitHub reports "no open milestones."
 
 **No advisor pass.** Routine board operation — fetch, render, approve, apply. It does not warrant an `advisor()` call; Jared prescribes exactly one, the optional batch pass in `/jared-audit`. A genuine design decision arising mid-session still does — the trigger is the finding, not the command. (`SKILL.md` § "The lane".)
 

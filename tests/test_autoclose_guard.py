@@ -5,11 +5,12 @@ literal issue number in a commit message, a PR title, or a PR body. In this repo
 that has fired three times (2026-06-11 and 2026-09-12 on #350; 2026-09-16 during
 #369), every time from text that was *explaining or negating* the danger.
 
-The guard is doctrine, not code: CLAUDE.md tells a human or Claude to grep before
-`git commit`. Per CLAUDE.md's own "Evolving Jared's discipline" rule, no CLI
+The guard is doctrine, not code: AGENTS.md tells a human or Claude to grep before
+`git commit` (CLAUDE.md is a one-line `@AGENTS.md` import; AGENTS.md is the real
+authored file). Per AGENTS.md's own "Evolving Jared's discipline" rule, no CLI
 surface gates on this, so there is nothing to parse into `Board`. What this module
 does instead is stop the *documented pattern* from silently regressing — it reads
-the regex out of CLAUDE.md and asserts it against known-armed and known-safe
+the regex out of AGENTS.md and asserts it against known-armed and known-safe
 fixtures. Narrowing the pattern in the doc fails here rather than failing at merge
 time, on an issue that closes itself.
 
@@ -38,7 +39,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
+# CLAUDE.md is a one-line `@AGENTS.md` import (adopted 2026-09-20); AGENTS.md
+# holds the real, authored content this guard reads.
+AGENTS_MD = REPO_ROOT / "AGENTS.md"
 
 # Text GitHub would act on, or that is close enough that a human must look.
 ARMED = [
@@ -71,19 +74,19 @@ requires_grep = pytest.mark.skipif(shutil.which("grep") is None, reason="grep no
 
 
 def _documented_pattern() -> str:
-    """Extract the guard regex from CLAUDE.md's fenced bash blocks.
+    """Extract the guard regex from AGENTS.md's fenced bash blocks.
 
     Anchored on `grep -nEi '<pattern>'` so the doc stays the single source of
     truth — there is no second copy of the regex here to drift from it.
     """
-    text = CLAUDE_MD.read_text(encoding="utf-8")
+    text = AGENTS_MD.read_text(encoding="utf-8")
     # re.findall is typed list[Any]; the single capture group makes it list[str].
     found: list[str] = re.findall(r"grep -nEi '([^']+)'", text)
-    assert found, "CLAUDE.md no longer contains a `grep -nEi '...'` guard pattern"
+    assert found, "AGENTS.md no longer contains a `grep -nEi '...'` guard pattern"
     # Every occurrence must be identical; a divergent copy inside the same
     # document is the drift this module exists to catch.
     assert len(set(found)) == 1, (
-        f"CLAUDE.md documents {len(set(found))} different patterns: {sorted(set(found))}"
+        f"AGENTS.md documents {len(set(found))} different patterns: {sorted(set(found))}"
     )
     return found[0]
 

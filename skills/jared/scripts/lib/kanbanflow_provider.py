@@ -5,8 +5,8 @@ All KanbanFlow ids (_id, columnId, swimlaneId, customFieldId) stay private here;
 the interface speaks only IssueRef (#N) and the neutral dataclasses. #N is
 resolved to the internal task _id via KfNumberIndex (no get-by-number endpoint).
 
-Capability set is reduced: KanbanFlow supports only the core board loop. See the
-design spec for the per-capability rationale.
+Capability set is reduced: KanbanFlow supports the core board loop plus milestone
+assignment (swimlanes). See the design spec for the per-capability rationale.
 """
 
 from __future__ import annotations
@@ -40,7 +40,8 @@ _BLOCKED_BY_PREFIX = "blocked-by:"
 _CANONICAL_STATUSES = ("Backlog", "Up Next", "In Progress", "Blocked", "Done")
 
 # KanbanFlow advertises the full Capability set MINUS these. The remainder is
-# empty: KF supports only the core board loop. See the design spec.
+# {MILESTONE_ASSIGNMENT}: swimlanes give KF milestone assignment, but nothing
+# richer (state, dates, dependencies, etc). See the design spec and #390.
 _OMITTED_CAPABILITIES = frozenset(
     {
         Capability.NATIVE_DEPENDENCIES,
@@ -112,7 +113,7 @@ class KanbanFlowClientLike(Protocol):
 
 
 class KanbanFlowProvider:
-    _CAPABILITIES = frozenset(Capability) - _OMITTED_CAPABILITIES  # == frozenset()
+    _CAPABILITIES = frozenset(Capability) - _OMITTED_CAPABILITIES  # == {MILESTONE_ASSIGNMENT}
 
     def __init__(
         self,
@@ -589,15 +590,14 @@ class KanbanFlowProvider:
     def clear_milestone(self, ref: IssueRef) -> None:
         """Refuse: a KanbanFlow task always occupies a swimlane.
 
-        Unreachable today — MILESTONE_STATE sits in _OMITTED_CAPABILITIES, so
-        every milestone surface refuses upstream at the Phase-6 gate. Explicit
-        rather than a pass-through, because `update_task` treats
-        `swimlane_id=None` as *leave unchanged*: delegating would POST an empty
-        body and report success having changed nothing (verified against the
-        fake client — it did not raise and the swimlane survived). When #390
-        flips the capability, "cleared" has to be given a meaning here (a
-        designated default swimlane is the obvious candidate); this raise is
-        the marker for that decision, not a placeholder to delete.
+        Reachable via `jared set-milestone <N> --none` now that
+        MILESTONE_ASSIGNMENT is advertised (#390). Explicit rather than a
+        pass-through, because `update_task` treats `swimlane_id=None` as
+        *leave unchanged*: delegating would POST an empty body and report
+        success having changed nothing (verified against the fake client — it
+        did not raise and the swimlane survived). A designated default
+        swimlane would give "cleared" a meaning, but the acceptance criteria
+        for #390 don't ask for one — that's discovered scope, not this fix.
         """
         raise FieldNotFound(
             f"cannot clear the milestone of #{ref}: a KanbanFlow task always "

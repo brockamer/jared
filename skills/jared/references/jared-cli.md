@@ -123,11 +123,12 @@ conventional columns are Backlog / Up Next / In Progress / Blocked / Done.
 
 ## `jared set-milestone <issue_number> (<title> | --none)`
 
-**Backend gate (MILESTONE_STATE absent — KanbanFlow).** The whole subcommand is
-scope-absent: it refuses with the standard `degraded:` note and exits 2, the
-same posture as `jared file --milestone`. The refusal fires before the
-milestones listing, so a capability-absent backend never reports "no open
-milestones" when the truth is that the backend has no milestone concept.
+**Backend gate.** Assignment works on both backends — milestones map to
+swimlanes on KanbanFlow (MILESTONE_ASSIGNMENT present, #390). `--none` (clear)
+is different: a KanbanFlow task always occupies a swimlane, so there is no
+"no milestone" state to clear into. `jared set-milestone <N> --none` on
+KanbanFlow exits nonzero with a message explaining that, rather than silently
+no-oping.
 
 **Purpose.** Assign a milestone to an issue **already on the board**, or clear
 one. `jared file --milestone` covers the creation case; this covers everything

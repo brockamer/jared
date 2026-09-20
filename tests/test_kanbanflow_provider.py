@@ -47,9 +47,16 @@ def test_provider_satisfies_protocol(tmp_path: Path) -> None:
     assert isinstance(provider, BoardProvider)
 
 
-def test_capabilities_is_empty_frozenset(tmp_path: Path) -> None:
+def test_capabilities_is_milestone_assignment_only(tmp_path: Path) -> None:
+    """KanbanFlow advertises exactly one capability beyond the core board loop.
+
+    MILESTONE_ASSIGNMENT (#390) — swimlanes give it milestone assignment, but
+    nothing richer (state, dates, dependencies, etc).
+    """
+    from skills.jared.scripts.lib.board_provider import Capability
+
     provider, _ = _provider(tmp_path)
-    assert provider.capabilities() == frozenset()
+    assert provider.capabilities() == frozenset({Capability.MILESTONE_ASSIGNMENT})
 
 
 def test_get_item_maps_task_to_boarditem(tmp_path: Path) -> None:
