@@ -586,6 +586,25 @@ class KanbanFlowProvider:
     def set_milestone(self, ref: IssueRef, name: str) -> None:
         self._client.update_task(self._resolve_id(ref), swimlane_id=self._swimlane_id(name))
 
+    def clear_milestone(self, ref: IssueRef) -> None:
+        """Refuse: a KanbanFlow task always occupies a swimlane.
+
+        Unreachable today — MILESTONE_STATE sits in _OMITTED_CAPABILITIES, so
+        every milestone surface refuses upstream at the Phase-6 gate. Explicit
+        rather than a pass-through, because `update_task` treats
+        `swimlane_id=None` as *leave unchanged*: delegating would POST an empty
+        body and report success having changed nothing (verified against the
+        fake client — it did not raise and the swimlane survived). When #390
+        flips the capability, "cleared" has to be given a meaning here (a
+        designated default swimlane is the obvious candidate); this raise is
+        the marker for that decision, not a placeholder to delete.
+        """
+        raise FieldNotFound(
+            f"cannot clear the milestone of #{ref}: a KanbanFlow task always "
+            "occupies a swimlane, so there is no cleared state. Assign a "
+            "different swimlane instead."
+        )
+
     def list_milestones(self) -> list[Milestone]:
         return [
             Milestone(name=s.name, description=s.description, state=None, due=None)
