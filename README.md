@@ -309,13 +309,15 @@ When two Claude sessions work the same repo at once, they share one
 `.git/HEAD` — a `git checkout -b` from either silently steals the
 other's branch state. Jared layers four defenses:
 
-- **Presence locks.** Every `/jared-start` writes
+- **Presence locks.** In a git checkout, `/jared-start` writes
   `<repo>/.git/jared/session-<issue>.lock`. A second session sees the lock
   and refuses to start in the shared checkout unless you opt in. The lock
   sits under the git common dir so it can never be committed — a tracked
   lock would refuse every later session in every clone (#376). Upgrading
   from an older jared? A leftover `.jared/` directory in your project is
-  ignored and safe to delete.
+  ignored and safe to delete. On a project with no `.git` directory there is
+  no shared `.git/HEAD` to guard, so locking is skipped with a notice on
+  stderr rather than attempted — don't run `git init` to satisfy it (#425).
 - **Worktree isolation.** `/jared-start <N> --session N` creates
   `~/Code/<repo>-<N>/` via `git worktree add`, checks out a fresh
   feature branch from `origin/main`, and shifts CWD into the worktree.
