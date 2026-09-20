@@ -445,6 +445,52 @@ This file is the minimum. See the skill's references for:
 - `references/board-sweep.md` — grooming checklist
 - `references/plan-spec-integration.md` — if this project uses plan/spec artifacts
 - `references/session-continuity.md` — Session note format
+
+## Jared config
+
+Project-level knobs that change Jared's behavior on this board. Each bullet is
+`name: value`. Omit any line to use its default.
+
+- `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared`,
+  `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default) — the Jared Dunn character
+  voice; `disabled` — plain technical prose, same structural content, Jared-isms stripped; `ste`
+  — ASD-STE100 Simplified Technical English per `references/voice-ste.md` (controlled
+  vocabulary, active voice, sentence-length caps, no asides; machine strings, technical names,
+  script output and board-write drafts pass through verbatim). Used by every slash-command stub.
+  Only the literal values `disabled` and `ste` change the rendering; any other value falls back
+  to `enabled`. The voice activation lives entirely in the plugin (no user-local Claude Code
+  settings, no SessionStart hooks, no memory entries required); this bullet is the only way to
+  change it. See SKILL.md § "Project-level kill switch" (under the voice doctrine),
+  `references/voice.md` and `references/voice-ste.md`.
+
+- `model-advice: on` — controls whether `/jared-start`'s announce carries the model and
+  reasoning-effort recommendation (the `Suggested settings for this session:` block). Values:
+  `on` (default) — render the block; `off` — omit it. An operator who always runs one model
+  reads the line as noise every session. Only the literal value `off` changes the rendering;
+  any other value falls back to `on`. **The bullet is doctrine-only:**
+  `commands/jared-start.md` reads it from this doc exactly as it reads `voice:`, and no CLI
+  subcommand parses it — the #114 rule, where a knob no CLI surface gates on belongs in prose.
+  Note that Jared recommends settings but cannot apply them: a command stub's `model:`
+  frontmatter reverts at handback, so the announce names `/model` and `/effort` for the
+  operator to run. See `references/model-and-effort.md`.
+
+- **Backend and capabilities.** This board has no `- backend:` bullet, so it defaults to
+  `github` — the GitHub Projects v2 backend. Unlike the doctrine-only bullets around it,
+  `backend:` *is* parsed: `lib/board.py` reads it to select the provider, and
+  `Board.capabilities()` resolves from it what the backend can express. The GitHub backend
+  advertises every capability Jared gates on, so no `degraded: …` note fires on this board;
+  those notes appear only on a capability-absent backend such as `kanbanflow`. See
+  `references/operations.md` § "Capabilities & degradation" for the model.
+
+- `admin-merge:` — **not set here, and absence is the safe state.** When present (for
+  example `admin-merge: --merge`) it sanctions the `blocked_on_review` escape path in
+  `/jared-wrap`: where a PR is reported `mergeable` but held by required review or
+  branch protection, wrap may offer an operator-confirmed
+  `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection, so the
+  sanction is opt-in per project, and the value pins the strategy (`--merge` preserves
+  a phase-by-phase commit trail; `--squash` discards it). Leave the line out and wrap
+  only reports the block. Doctrine-only like the bullets above: `commands/jared-wrap.md`
+  reads it from this doc and no CLI subcommand parses it.
 """
 
 
@@ -890,6 +936,16 @@ KanbanFlow Settings -> API). The token is never stored in this file.
   Note that Jared recommends settings but cannot apply them: a command stub's `model:`
   frontmatter reverts at handback, so the announce names `/model` and `/effort` for the
   operator to run. See `references/model-and-effort.md`.
+
+- `admin-merge:` — **not set here, and absence is the safe state.** When present (for
+  example `admin-merge: --merge`) it sanctions the `blocked_on_review` escape path in
+  `/jared-wrap`: where a PR is reported `mergeable` but held by required review or
+  branch protection, wrap may offer an operator-confirmed
+  `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection, so the
+  sanction is opt-in per project, and the value pins the strategy (`--merge` preserves
+  a phase-by-phase commit trail; `--squash` discards it). Leave the line out and wrap
+  only reports the block. Doctrine-only like the bullets above: `commands/jared-wrap.md`
+  reads it from this doc and no CLI subcommand parses it.
 """
 
 
