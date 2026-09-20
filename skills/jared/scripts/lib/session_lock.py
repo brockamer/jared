@@ -41,6 +41,62 @@ class NotAGitCheckout(Exception):
     """Raised when a `repo_root` has no `.git` directory to anchor locks under."""
 
 
+NON_GIT_NOTICE = (
+    "jared: session lock skipped — {root} has no .git directory. "
+    "Sibling detection guards a shared .git/HEAD, which does not exist here. "
+    "Do not run `git init` to satisfy it."
+)
+
+
+def is_git_checkout(repo_root: Path) -> bool:
+    """True when `repo_root` has a `.git` directory to anchor locks under.
+
+    The single predicate the whole protocol asks (#425). `write_lock` raises on
+    its negation and the CLI skips on it, so the read, write and clear halves
+    cannot drift apart the way they did before — `session-resolve` returning
+    `PROCEED_SOLO` while `session-lock-write` refused the write it had promised.
+
+    Resolves for the same reason `_lock_dir` does: REPO_ROOT collapses to a
+    relative '.' in the main checkout (#284), and an unresolved check would
+    report False where `write_lock` succeeds.
+    """
+    return (repo_root.resolve() / ".git").is_dir()
+
+
+def non_git_notice(repo_root: Path) -> str:
+    """The one skip notice all three lock subcommands print on a non-git root.
+
+    Deliberately **not** a `degraded:` line. That shape answers "can this backend
+    express this concept?", and this condition does not depend on the backend at
+    all — a GitHub-backend project run from a bare directory hits it, and a
+    KanbanFlow board inside a checkout does not. Tagging it as a capability would
+    file a git-axis condition under a backend-keyed heading, which is the
+    mis-tagging cost ledger findings F11/F27/F53/F57 record. See #425.
+    """
+    return NON_GIT_NOTICE.format(root=repo_root.resolve())
+
+
+NON_GIT_SESSION_DOWNGRADE = (
+    "jared: --session {n} downgraded to a solo session — worktree isolation needs a "
+    "git checkout. No worktree is created, and two sessions in this directory cannot "
+    "detect each other."
+)
+
+
+def non_git_session_downgrade_notice(session: int) -> str:
+    """Printed when `--session N` is passed against a non-git root (#425).
+
+    `--session N` buys exactly one thing: a worktree, so two sessions stop sharing
+    `.git/HEAD`. Without a checkout there is no worktree to create — `worktree-add`
+    dies on `fatal: not a git repository` — so `/jared-start` is told to proceed solo
+    instead of being handed an action it cannot carry out.
+
+    The notice names what the operator does not get, because the request was for
+    isolation and the answer is that none is available here.
+    """
+    return NON_GIT_SESSION_DOWNGRADE.format(n=session)
+
+
 @dataclass(frozen=True)
 class Lock:
     """A session-presence record on disk."""
@@ -77,10 +133,12 @@ def write_lock(repo_root: Path, lock: Lock) -> Path:
     where reads are tolerant: `mkdir(parents=True)` would otherwise *create* a
     `.git/` in a plain directory, turning it into something git half-recognises.
     Reachable — the `/jared-start` stub's REPO_ROOT derivation collapses to cwd
-    when `git rev-parse` fails.
+    when `git rev-parse` fails. Since #425 the CLI checks `is_git_checkout` and
+    skips before calling this, so the guard is the backstop rather than the
+    operator-facing path; it stays because it is what stops `mkdir(parents=True)`
+    from conjuring a `.git/`.
     """
-    git_dir = repo_root.resolve() / ".git"
-    if not git_dir.is_dir():
+    if not is_git_checkout(repo_root):
         raise NotAGitCheckout(f"not a git checkout root (no .git directory): {repo_root.resolve()}")
     lockdir = _lock_dir(repo_root)
     lockdir.mkdir(parents=True, exist_ok=True)

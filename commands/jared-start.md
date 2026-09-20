@@ -83,6 +83,14 @@ Flow:
 
    Solo sessions (`--session` absent) still write a lock with `session=null, worktree_path=null`. This is load-bearing: it lets a later sibling session detect the solo one and refuse with guidance, rather than silently sharing `.git/HEAD`.
 
+   **Non-git checkout.** On a project whose root has no `.git` directory, `git rev-parse` above fails and `REPO_ROOT` collapses to the current directory. All three lock subcommands — `session-resolve`, `session-lock-write`, `session-lock-clear` — then **skip, exit 0, and print one notice to stderr** naming the absent `.git`. `session-resolve` still prints its `PROCEED_*` line on stdout, so the parsing above is unchanged. Expect the notice; it is not an error, and no lock is written at either end of the session.
+
+   Locking is skipped rather than relocated because the hazard it guards is a shared `.git/HEAD`, which does not exist here — and every remedy the sibling refusal offers (`--session N`, a worktree, `--no-worktree`) needs a git checkout. **Do not run `git init` to satisfy the step.** That is an unrequested change to the operator's directory, and some projects forbid it outright. The decision and its reasoning are recorded on #425.
+
+   `--session N` on a non-git project is **downgraded to `PROCEED_SOLO`**, with a second stderr line saying so. `--session N` buys worktree isolation and nothing else, and `worktree-add` needs git, so the flag has nothing to deliver here — the downgrade keeps `fatal: not a git repository` out of the flow rather than letting this step call a command that cannot work. Do **not** create a worktree on this path. Tell the operator plainly that two sessions in this directory cannot detect each other, because that is the guarantee they asked for and are not getting. A flag contradiction (`--session N` with `--no-worktree`) still refuses as normal — that is an operator error, not a fact about the checkout.
+
+   This is keyed on the absent `.git` directory, **not** on the backend — a GitHub-backend project in a bare directory hits it and a KanbanFlow board inside a checkout does not. That is why it is here and not in the Backend gate section, and why the notice is not a `degraded:` line: `degraded:` answers whether a *backend* can express a concept.
+
 2. **Check WIP.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary`. The In Progress header has two shapes (per #235):
 
    - `In Progress (N):` — no `session-N` labels in play. `N` is the workstream count, equal to the item count.

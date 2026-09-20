@@ -173,6 +173,11 @@ def test_cli_gh_invocation_error_is_clean(
 def test_session_resolve_proceeds_solo_when_no_siblings(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # A checkout root, so this tests "no siblings" rather than the non-git skip
+    # path — which yields PROCEED_SOLO too, and would make the assertion pass for
+    # the wrong reason (#425). The non-git behaviour is covered explicitly in
+    # tests/test_session_lock.py.
+    (tmp_path / ".git").mkdir()
     mod = import_cli()
     result = mod.main(["session-resolve", "--repo-root", str(tmp_path)])
     assert result == 0
@@ -183,6 +188,9 @@ def test_session_resolve_proceeds_solo_when_no_siblings(
 def test_session_resolve_proceeds_multi_with_flag(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # `--session N` promises a worktree, so PROCEED_MULTI is only reachable from a
+    # checkout root; on a non-git root it is downgraded to PROCEED_SOLO (#425).
+    (tmp_path / ".git").mkdir()
     mod = import_cli()
     result = mod.main(["session-resolve", "--repo-root", str(tmp_path), "--session", "1"])
     assert result == 0

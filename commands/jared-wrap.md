@@ -204,6 +204,8 @@ Flow:
      ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root "$REPO_ROOT" --issue <N>
      ```
      Removes `<repo>/.git/jared/session-<N>.lock` so the next `/jared-start` doesn't see this session as a live sibling. The lock lives under the git common dir (#376) so it is untrackable — `REPO_ROOT` above is already the main checkout, so no call site changes. Sibling sessions' locks (other issues) are left untouched.
+
+     **Non-git checkout.** When the project root has no `.git` directory, this exits 0 having cleared nothing and prints one notice to stderr saying so (#425). Report the skip rather than a cleared lock — `/jared-start` wrote none either, so the locking protocol was inert for this session at both ends. Before #425 the clear was silently exit 0, which read identically to a successful removal and let wrap report a clean close-out for a protocol that never engaged. The skip is keyed on the absent `.git`, not on the backend, which is why it is not a `degraded:` line.
    - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the session's `feature/<N>-<slug>` branch has merged into main, remove the worktree and delete the branch from the main checkout. Read the branch name from the worktree first — it's slugified from the issue title (#278), not a fixed string, so don't reconstruct it by hand:
      ```bash
      BRANCH=$(git -C "<worktree-path>" rev-parse --abbrev-ref HEAD)
