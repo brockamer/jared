@@ -153,6 +153,22 @@ def build_parser() -> argparse.ArgumentParser:
     set_p.add_argument("value", help='e.g. "High" or "In Progress"')
     set_p.set_defaults(func=_cmd_set)
 
+    set_ms = sub.add_parser(
+        "set-milestone",
+        help="Assign a milestone to an issue already on the board.",
+    )
+    set_ms.add_argument("issue_number", type=int)
+    set_ms.add_argument("title", nargs="?", help='e.g. "Marketplace readiness"')
+    # --none is the spelled-out clear. Deliberately not `--milestone ""`:
+    # an empty string must never reach the clear path (#427 criterion 3).
+    set_ms.add_argument(
+        "--none",
+        action="store_true",
+        dest="clear",
+        help="Clear the issue's milestone.",
+    )
+    set_ms.set_defaults(func=_cmd_set_milestone)
+
     move = sub.add_parser(
         "move",
         help="Move an issue to a new Status (Backlog/Up Next/In Progress/Blocked/Done).",
@@ -928,6 +944,73 @@ def _cmd_set(args: argparse.Namespace) -> int:
     if args.field_name == "Status":
         board.invalidate_closed_items()
     print(f"OK: set {args.field_name}={args.value} on issue #{args.issue_number}")
+    return 0
+
+
+def _cmd_set_milestone(args: argparse.Namespace) -> int:
+    board = _load_board(args.board)
+
+    # Phase 6: MILESTONE_STATE whole-scope-absent refusal (#319). Checked
+    # ahead of the intent gate because the capability governs the entire
+    # subcommand: prompting for "a title or --none" on a backend that has no
+    # milestone concept at all would send the operator to a second dead end.
+    milestone_absent_note = degraded_or_none(
+        board,
+        Capability.MILESTONE_STATE,
+        "milestone assignment",
+        "this backend has no milestone state or due dates",
+    )
+    if milestone_absent_note:
+        print(f"error: {milestone_absent_note}", file=sys.stderr)
+        return 2
+
+    # Declare intent explicitly, exactly as `jared file` demands --milestone
+    # or --no-milestone (#238). Neither flag is a refusal, not a silent clear:
+    # an omitted positional must not be one argparse default away from wiping
+    # an assignment the operator never named.
+    if args.clear and args.title is not None:
+        print(
+            f"error: pass a title or --none, not both (got {args.title!r} and --none).",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.clear and args.title is None:
+        print(
+            "error: a milestone title or --none is required.",
+            file=sys.stderr,
+        )
+        print(
+            '  pass "<title>" to assign, or --none to clear the assignment.',
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.clear:
+        board.provider.clear_milestone(args.issue_number)
+        print(f"OK: cleared milestone on issue #{args.issue_number}")
+        return 0
+
+    # Validate against open milestones before any write, mirroring
+    # `jared file --milestone` (exit 2 + a listing). The validation lives
+    # here rather than in the provider so both backends refuse identically:
+    # gh would fail server-side with its own message, KanbanFlow's
+    # _swimlane_id raises FieldNotFound. One surface, one error shape.
+    open_titles = [m.name for m in board.provider.list_milestones()]
+    if args.title not in open_titles:
+        print(
+            f"error: milestone {args.title!r} does not match any open milestone.",
+            file=sys.stderr,
+        )
+        if open_titles:
+            print("  open milestones on this board:", file=sys.stderr)
+            for t in open_titles:
+                print(f"    - {t}", file=sys.stderr)
+        else:
+            print("  no open milestones on this board.", file=sys.stderr)
+        return 2
+
+    board.provider.set_milestone(args.issue_number, args.title)
+    print(f"OK: set milestone={args.title!r} on issue #{args.issue_number}")
     return 0
 
 

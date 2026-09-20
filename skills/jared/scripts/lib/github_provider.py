@@ -993,12 +993,17 @@ class GitHubProjectsProvider:
         return url
 
     def add_label(self, ref: IssueRef, name: str) -> None:
-        """Add a label to an issue. Idempotent."""
-        run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--add-label", name])
+        """Add a label to an issue. Idempotent.
+
+        run_gh_raw, not run_gh: `gh issue edit` prints the issue URL as plain
+        text, and run_gh would raise GhInvocationError *after* the write
+        landed (#427).
+        """
+        run_gh_raw(["issue", "edit", str(ref), "--repo", self.repo, "--add-label", name])
 
     def remove_label(self, ref: IssueRef, name: str) -> None:
-        """Remove a label from an issue. Idempotent."""
-        run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--remove-label", name])
+        """Remove a label from an issue. Idempotent. See add_label on run_gh_raw."""
+        run_gh_raw(["issue", "edit", str(ref), "--repo", self.repo, "--remove-label", name])
 
     def _mutate_blocked_by(self, ref: IssueRef, blocker: IssueRef, *, mutation: str) -> None:
         """Resolve both issue node-ids and run an (add|remove)BlockedBy mutation.
@@ -1039,8 +1044,28 @@ class GitHubProjectsProvider:
 
         Mirrors `gh issue edit <n> --milestone <name>` — gh accepts the title
         string directly, no numeric id resolution required.
+
+        run_gh_raw, not run_gh: `gh issue edit` prints the issue URL as plain
+        text. Parsing that as JSON raised GhInvocationError *after* the
+        milestone was already set, so `migrate`'s apply loop reported failure
+        on a write that had succeeded (#427, caught live — every fake returned
+        "{}" and passed).
         """
-        run_gh(["issue", "edit", str(ref), "--repo", self.repo, "--milestone", name])
+        run_gh_raw(["issue", "edit", str(ref), "--repo", self.repo, "--milestone", name])
+
+    def clear_milestone(self, ref: IssueRef) -> None:
+        """Remove the milestone association from an issue.
+
+        Paired with set_milestone rather than folded into it as a nullable
+        `name`: gh models the clear as its own flag, the interface already
+        pairs add_label/remove_label and add_blocked_by/remove_blocked_by, and
+        on KanbanFlow `None` already means "leave unchanged" in update_task's
+        body builder — a union argument would POST an empty body there and
+        silently no-op (#427).
+
+        run_gh_raw for the same reason as set_milestone — gh prints a URL.
+        """
+        run_gh_raw(["issue", "edit", str(ref), "--repo", self.repo, "--remove-milestone"])
 
     def list_milestones(self) -> list[Milestone]:
         """Return open milestones for this repo.
