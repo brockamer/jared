@@ -811,15 +811,18 @@ def test_stage_milestone_proximity_note_when_milestone_state_absent(
     assert "note: degraded: milestone-proximity ranking unavailable on" in output
 
 
-# 5e: jared file --milestone NAME refuses with exit 2 when MILESTONE_STATE absent
+# 5e: jared file --milestone NAME refuses with exit 2 when MILESTONE_ASSIGNMENT
+# absent (gate refined from MILESTONE_STATE to MILESTONE_ASSIGNMENT by #390;
+# `restrict_capabilities()` with no `keep` still zeroes out every capability,
+# so this still exercises the whole-scope-absent path)
 
 
-def test_file_milestone_refuses_when_milestone_state_absent(
+def test_file_milestone_refuses_when_milestone_assignment_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """jared file --milestone NAME exits 2 with degraded note when MILESTONE_STATE absent."""
+    """jared file --milestone NAME exits 2 with a degraded note when the capability is absent."""
     mod = import_cli()
     restrict_capabilities(monkeypatch)
 

@@ -81,20 +81,30 @@ the provider seam declares — it adds no capabilities and changes no provider. 
 is the **static, network-free** resolver: it reads the provider class's `default_capabilities()`
 classmethod by backend name *without constructing the provider* (constructing the KanbanFlow
 provider makes live API calls). GitHub advertises `frozenset(Capability)` (the full set); KanbanFlow
-advertises `frozenset()`. `lib/capabilities.py` is the single consistency anchor — one note phrasing
-(`degraded: <feature> unavailable on <backend> — <instead>`) and one per-surface gate
-(`degraded_or_none(board, capability, feature, instead) -> str | None`). Two layers gate differently:
-**Python surfaces** (CLI subcommands + `sweep.py`/`dependency-graph.py`/`stage.py`) call the gate
-in-process, keyed **per rendered section** (a capability gating four sweep sections emits four notes);
-**prose surfaces** (slash-command stubs, `SKILL.md`, references) do *not* call the helper — they branch
-on the `- backend:` bullet directly (the voice-kill-switch pattern, no subcommand). Default posture is
-soft-skip-with-note; misleading-if-shown values are omitted; **whole-scope-absent invocations exit
-nonzero** (`jared audit fetch --type milestones` and `jared file --milestone NAME` on a
+advertises `{Capability.MILESTONE_ASSIGNMENT}` — the one capability KanbanFlow supports beyond the
+core board loop (swimlanes; #390) — and omits the rest. `lib/capabilities.py` is the single
+consistency anchor — one note phrasing (`degraded: <feature> unavailable on <backend> — <instead>`)
+and one per-surface gate (`degraded_or_none(board, capability, feature, instead) -> str | None`).
+Two layers gate differently: **Python surfaces** (CLI subcommands + `sweep.py`/`dependency-graph.py`/
+`stage.py`) call the gate in-process, keyed **per rendered section** (a capability gating four sweep
+sections emits four notes); **prose surfaces** (slash-command stubs, `SKILL.md`, references) do *not*
+call the helper — they branch on the `- backend:` bullet directly (the voice-kill-switch pattern, no
+subcommand). Default posture is soft-skip-with-note; misleading-if-shown values are omitted;
+**whole-scope-absent invocations exit nonzero** (`jared audit fetch --type milestones` on a
 `MILESTONE_STATE`-absent backend; `--type both` is only *partial*-scope-absent, so it warns and
 downgrades to issues-only with exit 0). GitHub degrades nothing — the full set means zero behavior change,
 which is the regression bar. `SUB_ISSUES` is a deliberate non-finding: no consumer on either backend
 (jared's epic model is the `epic` *label*), so Phase 6 builds no note, check, or test for it — a guard
 on a path nothing reads would be dead code.
+
+**A coarse capability flag can gate two unrelated questions (#390).** `MILESTONE_STATE` meant "open/close
++ due dates," but `_cmd_file`'s and `_cmd_set_milestone`'s `--milestone` gates only needed "can an item be
+grouped under a milestone name" — a different, orthogonal question that KanbanFlow answers yes to via
+swimlanes. Splitting off `Capability.MILESTONE_ASSIGNMENT` let those two gates flip independently of the
+three genuinely date/state-based consumers (`stage.py` milestone-proximity ranking, the audit-window
+milestones fetch, `migrate`'s loss description), which stay correctly gated on `MILESTONE_STATE`. The
+tell: check what each consumer actually *reads* off the capability before assuming a `degraded:` refusal
+and a working implementation disagree because of a bad gate rather than a bad split.
 
 ## Dual import path — important gotcha
 
