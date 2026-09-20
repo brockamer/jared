@@ -372,6 +372,57 @@ def test_session_resolve_keeps_stdout_to_the_action_on_a_non_git_root(
     assert session_lock.non_git_notice(tmp_path) in err
 
 
+def test_session_resolve_downgrades_proceed_multi_on_a_non_git_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#425: `--session N` asks for worktree isolation, which needs a git checkout.
+
+    Left alone, `resolve_action` returns PROCEED_MULTI (no siblings can ever exist
+    on a non-git root, since no lock is written), and `/jared-start` step 1b then
+    calls `worktree-add`, which dies on `fatal: not a git repository`. Downgrading
+    here keeps the failure out of the stub entirely.
+    """
+    rc, out, err = run_cli(
+        ["session-resolve", "--repo-root", str(tmp_path), "--session", "1"], capsys
+    )
+
+    assert rc == 0
+    assert out.strip() == "PROCEED_SOLO"
+    assert session_lock.non_git_notice(tmp_path) in err
+    assert session_lock.non_git_session_downgrade_notice(1) in err
+
+
+def test_session_resolve_still_refuses_conflicting_flags_on_a_non_git_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A flag contradiction is an operator error, independent of git.
+
+    The downgrade must not swallow it — `--session N` with `--no-worktree` is
+    incoherent whether or not a checkout exists.
+    """
+    rc, out, err = run_cli(
+        ["session-resolve", "--repo-root", str(tmp_path), "--session", "1", "--no-worktree"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert out.strip() == "REFUSE_CONFLICTING_FLAGS"
+    assert "mutually exclusive" in err
+
+
+def test_session_resolve_keeps_proceed_multi_on_a_real_checkout(
+    repo_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The downgrade is scoped to non-git roots — real checkouts are untouched."""
+    rc, out, err = run_cli(
+        ["session-resolve", "--repo-root", str(repo_root), "--session", "1"], capsys
+    )
+
+    assert rc == 0
+    assert out.strip() == "PROCEED_MULTI"
+    assert err == ""
+
+
 def test_session_lock_write_skips_with_a_notice_on_a_non_git_root(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
