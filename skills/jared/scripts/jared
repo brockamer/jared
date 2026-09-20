@@ -1516,10 +1516,22 @@ def _cmd_session_resolve(args: argparse.Namespace) -> int:
     # Report the skip, then resolve normally: with no lock directory there are no
     # siblings, so the action follows from the flags alone and stdout stays the
     # single line the stub parses.
-    _announce_non_git_skip(repo_root)
+    non_git = _announce_non_git_skip(repo_root)
     siblings = session_lock.list_active_locks(repo_root)
     flags = session_lock.Flags(session=args.session, no_worktree=args.no_worktree)
     action = session_lock.resolve_action(siblings=siblings, flags=flags)
+    if non_git and action == session_lock.Action.PROCEED_MULTI:
+        # PROCEED_MULTI tells the stub to run `worktree-add`, which needs git and
+        # would die on `fatal: not a git repository`. Downgrade here so the failure
+        # never reaches the stub. The refusals are deliberately left alone: a flag
+        # contradiction is an operator error, not a fact about the checkout.
+        #
+        # Kept out of `resolve_action` on purpose — that function is pure and maps
+        # to the spec's six-row action table, which reasons about siblings and flags.
+        # "Is there a .git directory" is filesystem state, so it belongs at this
+        # layer, where `repo_root` already is.
+        print(session_lock.non_git_session_downgrade_notice(args.session), file=sys.stderr)
+        action = session_lock.Action.PROCEED_SOLO
     print(action.name)
     if action.name.startswith("REFUSE_"):
         _render_refusal_message(action, siblings, flags)

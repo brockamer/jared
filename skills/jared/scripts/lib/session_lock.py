@@ -76,6 +76,27 @@ def non_git_notice(repo_root: Path) -> str:
     return NON_GIT_NOTICE.format(root=repo_root.resolve())
 
 
+NON_GIT_SESSION_DOWNGRADE = (
+    "jared: --session {n} downgraded to a solo session — worktree isolation needs a "
+    "git checkout. No worktree is created, and two sessions in this directory cannot "
+    "detect each other."
+)
+
+
+def non_git_session_downgrade_notice(session: int) -> str:
+    """Printed when `--session N` is passed against a non-git root (#425).
+
+    `--session N` buys exactly one thing: a worktree, so two sessions stop sharing
+    `.git/HEAD`. Without a checkout there is no worktree to create — `worktree-add`
+    dies on `fatal: not a git repository` — so `/jared-start` is told to proceed solo
+    instead of being handed an action it cannot carry out.
+
+    The notice names what the operator does not get, because the request was for
+    isolation and the answer is that none is available here.
+    """
+    return NON_GIT_SESSION_DOWNGRADE.format(n=session)
+
+
 @dataclass(frozen=True)
 class Lock:
     """A session-presence record on disk."""
