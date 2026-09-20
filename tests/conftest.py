@@ -141,28 +141,46 @@ def restrict_capabilities(
     dual-import-path note at the top of this file), we patch capabilities()
     on both: the test-import path (skills.jared.scripts.lib.board) and the
     CLI/script path (lib.board, loaded after sys.path.insert in each script).
+
+    Two consequences of that dual path, both of which used to produce false
+    passes and are handled below (#427):
+
+    1. **`keep` members are resolved per module object, by name.** There are
+       likewise two `Capability` enum classes, and `degraded_or_none` tests
+       membership with `in`, which is identity-based. A frozenset built from
+       the skills-path enum is invisible to the CLI-path comparison, so a
+       capability passed in `keep` would read as absent and the surface would
+       degrade anyway. The default `keep=None` hid this for the first 29 call
+       sites: an empty frozenset excludes every member regardless of identity.
+
+    2. **`lib.board` is force-loaded rather than skipped when missing.** The
+       previous version swallowed ModuleNotFoundError, so calling this helper
+       *before* `import_cli()`/`import_stage()` patched only the skills-path
+       class; the script's later fresh import got the real `capabilities()`
+       and the test silently ran unrestricted. Order-dependence in a helper
+       whose whole job is to force a code path is a false-pass generator.
     """
-    from skills.jared.scripts.lib.board import Board as _SkillBoard
-
-    frozen = frozenset(keep or set())
-    monkeypatch.setattr(_SkillBoard, "capabilities", lambda self: frozen)
-
-    # Also patch the lib.board path that CLI/scripts use. It may not be in
-    # sys.modules yet if no script has been imported in this test; that's fine
-    # — when the script later inserts scripts/ on sys.path and does
-    # `from lib.board import Board`, we need to cover that Board class too.
-    # We do this by patching both the already-loaded module (if present) and
-    # the class object reachable via the skills path (same file, different
-    # module object).
     import importlib
 
-    try:
-        lib_board = importlib.import_module("lib.board")
-        lib_board_cls = getattr(lib_board, "Board", None)
-        if lib_board_cls is not None and lib_board_cls is not _SkillBoard:
-            monkeypatch.setattr(lib_board_cls, "capabilities", lambda self: frozen)
-    except ModuleNotFoundError:
-        pass  # lib.board not yet loaded — scripts/ not on sys.path yet
+    from skills.jared.scripts.lib.board import Board as _SkillBoard
+    from skills.jared.scripts.lib.board_provider import Capability as _SkillCapability
+
+    keep_names = {getattr(c, "name", str(c)) for c in (keep or set())}
+
+    def _patch(board_cls: type, capability_enum: object) -> None:
+        frozen = frozenset(m for m in capability_enum if m.name in keep_names)  # type: ignore[attr-defined]
+        monkeypatch.setattr(board_cls, "capabilities", lambda self: frozen)
+
+    _patch(_SkillBoard, _SkillCapability)
+
+    # Force the CLI/script import path into sys.modules so both Board classes
+    # exist to be patched, whatever order the caller used. syspath_prepend is
+    # monkeypatch-scoped, so the path entry is undone after the test.
+    monkeypatch.syspath_prepend(str(SKILL_SCRIPTS))
+    lib_board_cls = importlib.import_module("lib.board").Board
+    lib_capability = importlib.import_module("lib.board_provider").Capability
+    if lib_board_cls is not _SkillBoard:
+        _patch(lib_board_cls, lib_capability)
 
 
 def write_minimal_board(tmp_path: Path) -> Path:

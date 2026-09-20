@@ -121,6 +121,53 @@ conventional columns are Backlog / Up Next / In Progress / Blocked / Done.
 
 ---
 
+## `jared set-milestone <issue_number> (<title> | --none)`
+
+**Backend gate (MILESTONE_STATE absent — KanbanFlow).** The whole subcommand is
+scope-absent: it refuses with the standard `degraded:` note and exits 2, the
+same posture as `jared file --milestone`. The refusal fires before the
+milestones listing, so a capability-absent backend never reports "no open
+milestones" when the truth is that the backend has no milestone concept.
+
+**Purpose.** Assign a milestone to an issue **already on the board**, or clear
+one. `jared file --milestone` covers the creation case; this covers everything
+after. Without it the only route was `gh issue edit`, which does not exist on a
+non-GitHub backend.
+
+```
+jared set-milestone <issue_number> "Marketplace readiness"
+jared set-milestone <issue_number> --none
+```
+
+**Why it matters more than it looks.** `stage.py` ranks Priority ties by
+milestone proximity. An item with no dated milestone is *deferred* with
+`no milestone with due date` rather than ranked, so it never promotes on its
+own. Assigning a milestone is what makes a Backlog item competitive — it is a
+staging operation, not cosmetic metadata.
+
+**Validation.** The title must match an open milestone, checked before any
+write. An unknown or closed title exits 2 and lists the open milestones rather
+than creating one silently — `jared file --milestone`'s posture, deliberately.
+The validation lives in the CLI rather than the provider so both backends
+refuse with one error shape.
+
+**`--none` is the only clear.** There is no `--milestone ""`; an empty value
+must never reach the clear path. Passing neither a title nor `--none` is a
+refusal, not a silent clear, and passing both is a refusal rather than a
+precedence rule.
+
+**Design note — why the seam has two methods.** `clear_milestone(ref)` is paired
+with `set_milestone(ref, name)` instead of widening `name` to `str | None`.
+`gh issue edit` models the clear as its own `--remove-milestone` flag, the
+provider interface already pairs `add_label`/`remove_label` and
+`add_blocked_by`/`remove_blocked_by`, and — decisively — KanbanFlow's
+`update_task` uses `None` to mean *leave unchanged*, so a nullable argument
+there would POST an empty body and report success having changed nothing.
+Verified against the fake client: the pass-through implementation did not raise
+and the swimlane survived. See #427.
+
+---
+
 ## `jared close <issue_number> [--body TEXT | --body-file PATH]`
 
 **Backend gate (CLOSED_STATE absent — KanbanFlow).** The Done column is the sole closed signal, so no native closed state is set. The OK line gains `(column-move only — no native closed state on this backend)`. `_cmd_close` computes its own note through `degraded_or_none`; read `lib/capabilities.py` for the one note phrasing rather than trusting a literal quoted here.
