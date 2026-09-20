@@ -80,8 +80,8 @@ def test_set_milestone_unknown_title_refuses_before_mutating(
 
     Asserting no `issue edit` reached gh is the point: a refusal that exits
     non-zero *after* writing is still a defect, and only the call log
-    distinguishes the two. Matches `jared file --milestone`'s posture at
-    `jared:683` — refuse with a listing rather than create one silently.
+    distinguishes the two. Matches the unmatched-milestone refusal in `_cmd_file` — refuse with a
+    listing rather than create one silently.
     """
     board_md = write_minimal_board(tmp_path)
     calls = patch_gh_by_arg(
@@ -183,8 +183,8 @@ def test_set_milestone_refuses_when_milestone_state_absent(
 ) -> None:
     """The whole subcommand is scope-absent without MILESTONE_STATE.
 
-    Matches `jared file --milestone`'s posture at `jared:609` — exit 2 with the
-    standard `degraded:` note. The assertion that no milestones listing was
+    Matches `_cmd_file`'s MILESTONE_STATE gate — exit 2 with the standard
+    `degraded:` note. The assertion that no milestones listing was
     fetched is what proves the gate runs *first*: reaching validation would
     mean a capability-absent backend reports "no open milestones" instead of
     saying the backend has none at all.
