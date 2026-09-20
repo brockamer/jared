@@ -14,10 +14,12 @@ empty body and return success having changed nothing.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from skills.jared.scripts.lib import cache
 from tests.conftest import (
     import_cli,
     patch_gh_by_arg,
@@ -238,6 +240,92 @@ def test_set_milestone_works_the_moment_the_capability_is_present(
     assert [c for c in calls if "edit" in c], (
         "must reach the provider once the capability is present"
     )
+
+
+def test_set_milestone_invalidates_the_items_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The headline use case is assign-then-stage, so the snapshot must drop.
+
+    `board_items()` is a 60s-TTL on-disk cache shared across processes, and on
+    the github backend `fetch_items_for_stage` reads it directly. `milestone`
+    sits at the top level of those rows and `stage.py` ranks on
+    `milestone.due_on`. Without this invalidation, assigning a milestone to
+    make a Backlog item competitive and then running `/jared-stage` still
+    reports `no milestone with due date` until the TTL lapses — the exact
+    deferral this subcommand exists to clear.
+
+    Mirrors `test_set_status_invalidates_closed_cache`, one cache over.
+    """
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_by_arg(
+        monkeypatch,
+        {"milestones": OPEN_MILESTONES, "issue edit": GH_ISSUE_EDIT_STDOUT},
+    )
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    cache.set_item_list(
+        7,
+        items=[{"content": {"number": 42}, "status": "Backlog", "milestone": None}],
+        cache_dir=cache_dir,
+    )
+    assert cache.get_item_list(7, cache_dir=cache_dir) is not None
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "set-milestone", "42", "Marketplace readiness"])
+    assert rc == 0
+
+    assert cache.get_item_list(7, cache_dir=cache_dir) is None, (
+        "milestone assignment must drop the items snapshot so the next stage "
+        "run sees the new milestone instead of the stale null"
+    )
+
+
+def test_clear_milestone_invalidates_the_items_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The clear path moves the same field, so it invalidates the same cache."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_by_arg(monkeypatch, {"issue edit": GH_ISSUE_EDIT_STDOUT})
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    cache.set_item_list(
+        7,
+        items=[{"content": {"number": 42}, "status": "Backlog", "milestone": {"title": "x"}}],
+        cache_dir=cache_dir,
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "set-milestone", "42", "--none"])
+    assert rc == 0
+
+    assert cache.get_item_list(7, cache_dir=cache_dir) is None
+
+
+def test_set_milestone_does_not_invalidate_the_closed_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A milestone moves nothing into or out of Done.
+
+    Same reasoning as `_cmd_set`'s Priority branch: invalidating the closed
+    snapshot here would force a wasted full refetch of every closed item on
+    the next sweep.
+    """
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_by_arg(
+        monkeypatch,
+        {"milestones": OPEN_MILESTONES, "issue edit": GH_ISSUE_EDIT_STDOUT},
+    )
+
+    cache_dir = Path(os.environ["JARED_CACHE_DIR"])
+    seeded = [{"content": {"number": 9, "state": "CLOSED"}, "status": "Done"}]
+    cache.set_closed_items(project_number=7, items=seeded, cache_dir=cache_dir)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "set-milestone", "42", "Marketplace readiness"])
+    assert rc == 0
+
+    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) == seeded
 
 
 def test_set_milestone_none_refuses_when_milestone_state_absent(

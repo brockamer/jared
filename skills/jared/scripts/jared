@@ -947,6 +947,23 @@ def _cmd_set(args: argparse.Namespace) -> int:
     return 0
 
 
+def _invalidate_after_milestone_write(board: Board) -> None:
+    """Drop the item-list snapshot after a milestone write, as `_cmd_set` does.
+
+    `milestone` sits at the top level of the board-row shape, and on the github
+    backend `stage.py`'s fetch reads `board.board_items()` — a 60s-TTL on-disk
+    cache shared across processes. The headline flow for this subcommand is
+    "assign a milestone so the item becomes competitive, then run /jared-stage";
+    without this, stage would keep reporting `no milestone with due date` until
+    the TTL lapsed, which is the exact deferral the assignment exists to clear.
+
+    Items only. A milestone moves nothing into or out of Done, so invalidating
+    the closed-items snapshot would force a wasted full refetch on the next
+    sweep — the same reasoning that keeps `_cmd_set`'s Priority path out of it.
+    """
+    board.invalidate_items()
+
+
 def _cmd_set_milestone(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
 
@@ -987,6 +1004,7 @@ def _cmd_set_milestone(args: argparse.Namespace) -> int:
 
     if args.clear:
         board.provider.clear_milestone(args.issue_number)
+        _invalidate_after_milestone_write(board)
         print(f"OK: cleared milestone on issue #{args.issue_number}")
         return 0
 
@@ -1010,6 +1028,7 @@ def _cmd_set_milestone(args: argparse.Namespace) -> int:
         return 2
 
     board.provider.set_milestone(args.issue_number, args.title)
+    _invalidate_after_milestone_write(board)
     print(f"OK: set milestone={args.title!r} on issue #{args.issue_number}")
     return 0
 
