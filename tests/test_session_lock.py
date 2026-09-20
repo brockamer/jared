@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from skills.jared.scripts.lib import session_lock
+from tests.conftest import import_cli
 
 
 @pytest.fixture
@@ -326,23 +327,157 @@ def test_lock_lifecycle_survives_subprocess_boundary(repo_root: Path) -> None:
     assert session_lock.list_active_locks(repo_root=repo_root) == []
 
 
-def test_cli_session_lock_write_exits_1_on_non_checkout_root(tmp_path: Path) -> None:
-    """The guard must surface as a clean CLI error, not an escaping traceback."""
-    cli_path = Path(__file__).parents[1] / "skills" / "jared" / "scripts" / "jared"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(cli_path),
-            "session-lock-write",
-            "--repo-root",
-            str(tmp_path),
-            "--issue",
-            "376",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+# ---------------------------------------------------------------------------
+# Non-git projects (#425) — the three halves of the protocol agree
+# ---------------------------------------------------------------------------
+
+
+def run_cli(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
+    """Drive the CLI in-process and return (exit code, stdout, stderr)."""
+    mod = import_cli()
+    rc: int = mod.main(argv)
+    captured = capsys.readouterr()
+    return rc, captured.out, captured.err
+
+
+def test_is_git_checkout_true_at_a_checkout_root(repo_root: Path) -> None:
+    assert session_lock.is_git_checkout(repo_root) is True
+
+
+def test_is_git_checkout_false_without_a_git_dir(tmp_path: Path) -> None:
+    assert session_lock.is_git_checkout(tmp_path) is False
+
+
+def test_is_git_checkout_resolves_a_relative_root(
+    repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The predicate must resolve like `write_lock` does, or the two disagree.
+
+    REPO_ROOT collapses to a relative '.' in the main checkout (#284), so a
+    predicate that skipped `.resolve()` would report False where `write_lock`
+    succeeds — reintroducing the split this issue closes.
+    """
+    monkeypatch.chdir(repo_root)
+    assert session_lock.is_git_checkout(Path(".")) is True
+
+
+def test_session_resolve_keeps_stdout_to_the_action_on_a_non_git_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The `/jared-start` stub parses this stdout, so the notice belongs on stderr."""
+    rc, out, err = run_cli(["session-resolve", "--repo-root", str(tmp_path)], capsys)
+
+    assert rc == 0
+    assert out.strip() == "PROCEED_SOLO"
+    assert session_lock.non_git_notice(tmp_path) in err
+
+
+def test_session_lock_write_skips_with_a_notice_on_a_non_git_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#425: the write half used to exit 1 where resolve returned PROCEED_SOLO.
+
+    `/jared-start` step 1b calls this unconditionally, so a hard failure left every
+    session on a non-git project ending its board-mutation phase with a red error
+    the operator had to learn to ignore.
+    """
+    rc, _out, err = run_cli(
+        ["session-lock-write", "--repo-root", str(tmp_path), "--issue", "425"], capsys
     )
-    assert result.returncode == 1, result.stdout
-    assert "Traceback" not in result.stderr
-    assert result.stderr.startswith("jared: ")
+
+    assert rc == 0
+    assert session_lock.non_git_notice(tmp_path) in err
+    assert "Traceback" not in err
+    # The guard's whole purpose: never fabricate a `.git/` in a plain directory.
+    assert not (tmp_path / ".git").exists()
+
+
+def test_session_lock_clear_announces_the_skip_rather_than_exiting_0_silently(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#425 (2026-09-19 field report): a silent exit 0 is not an explicit skip.
+
+    `/jared-wrap` runs lock-clear unconditionally. A bare exit 0 is indistinguishable
+    from "a lock existed and was removed", so wrap reported a clean close-out for a
+    protocol that never engaged at either end.
+    """
+    rc, _out, err = run_cli(
+        ["session-lock-clear", "--repo-root", str(tmp_path), "--issue", "425"], capsys
+    )
+
+    assert rc == 0
+    assert session_lock.non_git_notice(tmp_path) in err
+
+
+def test_non_git_lock_protocol_end_to_end(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The #425 acceptance criterion: resolve, write, list, clear on a non-git root.
+
+    No step exits non-zero, every step names the skip, no lock is written, and no
+    `.git` directory is conjured along the way.
+    """
+    issue = "425"
+    notice = session_lock.non_git_notice(tmp_path)
+
+    for argv in (
+        ["session-resolve", "--repo-root", str(tmp_path)],
+        ["session-lock-write", "--repo-root", str(tmp_path), "--issue", issue],
+        ["session-lock-clear", "--repo-root", str(tmp_path), "--issue", issue],
+    ):
+        rc, _out, err = run_cli(argv, capsys)
+        assert rc == 0, f"{argv[0]} exited {rc}"
+        assert notice in err, f"{argv[0]} did not report the skip"
+
+    assert session_lock.list_active_locks(repo_root=tmp_path) == []
+    assert not (tmp_path / ".git").exists()
+    assert not (tmp_path / ".jared").exists()
+
+
+def test_cli_session_lock_write_still_succeeds_on_a_real_checkout(
+    repo_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The skip is scoped to non-git roots — the ordinary path is untouched."""
+    rc, _out, err = run_cli(
+        ["session-lock-write", "--repo-root", str(repo_root), "--issue", "425"], capsys
+    )
+
+    assert rc == 0
+    assert err == ""
+    assert (lockdir_of(repo_root) / "session-425.lock").exists()
+
+
+def test_cli_renders_not_a_git_checkout_as_a_clean_error_not_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`NotAGitCheckout` must render as `jared: …`, never as an escaping traceback.
+
+    No CLI *input* can reach the guard any more: the handler skips on
+    `is_git_checkout`, and `write_lock` raises on the negation of that same
+    predicate, so the two cannot disagree (#425). That is the point of unifying
+    them — and it means the property worth pinning here is the top-level handler's
+    rendering, exercised by raising the exception directly. The guard itself stays
+    covered at library level by
+    `test_write_lock_refuses_when_repo_root_has_no_git_dir`.
+
+    Patches `lib.session_lock` — the module object the CLI imported. Per the
+    dual-import-path note atop conftest.py, `skills.jared.scripts.lib.session_lock`
+    is a different object and patching it would not affect the CLI.
+    """
+    mod = import_cli()
+    cli_session_lock = sys.modules["lib.session_lock"]
+    (tmp_path / ".git").mkdir()
+
+    def raise_guard(**_kwargs: object) -> None:
+        raise cli_session_lock.NotAGitCheckout(
+            f"not a git checkout root (no .git directory): {tmp_path}"
+        )
+
+    monkeypatch.setattr(cli_session_lock, "write_lock", raise_guard)
+
+    rc: int = mod.main(["session-lock-write", "--repo-root", str(tmp_path), "--issue", "425"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "Traceback" not in captured.err
+    assert captured.err.startswith("jared: ")

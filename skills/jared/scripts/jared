@@ -1491,9 +1491,32 @@ def _render_refusal_message(
         )
 
 
+def _announce_non_git_skip(repo_root: Path) -> bool:
+    """Print the shared non-git skip notice to stderr. True when the caller should skip.
+
+    All three lock subcommands call this first so the protocol has one behaviour
+    on a non-git project instead of three (#425). Before this, `session-resolve`
+    was tolerant-and-reporting, `session-lock-write` hard-failed with exit 1, and
+    `session-lock-clear` was tolerant-and-silent — and that silent exit 0 was
+    indistinguishable from a lock having been cleared, so `/jared-wrap` reported a
+    clean close-out for a protocol that never engaged.
+
+    The notice goes to **stderr**: `/jared-start` step 1b parses `session-resolve`'s
+    stdout for the `PROCEED_*` line.
+    """
+    if session_lock.is_git_checkout(repo_root):
+        return False
+    print(session_lock.non_git_notice(repo_root), file=sys.stderr)
+    return True
+
+
 def _cmd_session_resolve(args: argparse.Namespace) -> int:
     """Walk active locks, resolve the action for the supplied flags, print result."""
     repo_root = Path(args.repo_root).resolve()
+    # Report the skip, then resolve normally: with no lock directory there are no
+    # siblings, so the action follows from the flags alone and stdout stays the
+    # single line the stub parses.
+    _announce_non_git_skip(repo_root)
     siblings = session_lock.list_active_locks(repo_root)
     flags = session_lock.Flags(session=args.session, no_worktree=args.no_worktree)
     action = session_lock.resolve_action(siblings=siblings, flags=flags)
@@ -1509,6 +1532,8 @@ def _cmd_session_lock_write(args: argparse.Namespace) -> int:
     import datetime
 
     repo_root = Path(args.repo_root).resolve()
+    if _announce_non_git_skip(repo_root):
+        return 0
     started = (
         datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
@@ -1525,7 +1550,10 @@ def _cmd_session_lock_write(args: argparse.Namespace) -> int:
 
 def _cmd_session_lock_clear(args: argparse.Namespace) -> int:
     """Clear this issue's lock file."""
-    session_lock.clear_lock(repo_root=Path(args.repo_root).resolve(), issue=args.issue)
+    repo_root = Path(args.repo_root).resolve()
+    if _announce_non_git_skip(repo_root):
+        return 0
+    session_lock.clear_lock(repo_root=repo_root, issue=args.issue)
     return 0
 
 
