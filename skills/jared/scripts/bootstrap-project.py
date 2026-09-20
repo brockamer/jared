@@ -977,8 +977,10 @@ def bootstrap_kanbanflow(args: argparse.Namespace) -> int:
         )
     if not board.swimlanes:
         print(
-            "NOTE: no swimlanes on this board — milestones map to swimlanes and are "
-            "unavailable; jared's dateless milestone convention degrades gracefully.",
+            "NOTE: no swimlanes on this board yet — milestones map to swimlanes, so "
+            "there is nothing to assign to until one exists (same shape as GitHub's "
+            "'no open milestones on this board'). Create a swimlane to start using "
+            "milestones; jared's dateless convention needs no due-date setup.",
             file=sys.stderr,
         )
 

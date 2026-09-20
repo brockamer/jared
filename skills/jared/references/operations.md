@@ -47,7 +47,7 @@ A `BoardProvider` method can be fully implemented and still unreachable, and it 
 | Layer | Symptom | Fix |
 |---|---|---|
 | **No CLI surface** — implemented on both backends, but only `migrate` or another internal caller reaches it | Unavailable on *both* backends. Workaround is raw `gh` on GitHub, and reaching into the provider's private client on KanbanFlow | Add the subcommand or flag. Open instance: `set_body()` (#403). Closed precedents: `get_body()` → `get-item --body` (#410), `set_milestone()` → `set-milestone` (#427) |
-| **Capability denies** — implemented, but the backend omits the capability, so the gate refuses before reaching the method | Works on GitHub, refuses on KanbanFlow with a `degraded:` note, although the provider code is present and correct | Correct what the backend advertises, or correct the note. Instances: `MILESTONE_STATE` (#390), `NATIVE_DEPENDENCIES` (#407) |
+| **Capability denies** — implemented, but the backend omits the capability, so the gate refuses before reaching the method | Works on GitHub, refuses on KanbanFlow with a `degraded:` note, although the provider code is present and correct | Correct what the backend advertises, or correct the note. Sometimes the gated flag is too coarse: `MILESTONE_STATE` (open/close + due dates) was also gating plain milestone assignment — split into `MILESTONE_ASSIGNMENT` (#390, closed). Open instance: `NATIVE_DEPENDENCIES` (#407) |
 
 **The rule when adding a `BoardProvider` method: give it an operator-facing surface in the same change, or record why it has none.** `migrate` is not a surface — it is an internal consumer. A method reachable only from `migrate` is invisible to every operator, and to every slash-command stub that instructs an agent to perform the operation.
 
