@@ -212,7 +212,7 @@ Flow:
      git -C "$REPO_ROOT" worktree remove "<worktree-path>"
      git -C "$REPO_ROOT" branch -d "$BRANCH"
      ```
-     The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around). The rule comes from operator feedback after the 2026-05-24 wrap of #227's session-1 left an orphan `~/Code/jared-227/` on disk — see the `the wrap-cleanup rule` user-memory note for the original framing.
+     The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around). The rule comes from operator feedback after the 2026-05-24 wrap of #227's session-1 left an orphan `~/Code/jared-227/` on disk.
 
 6. **Confirm and close out.** Render the closing line in voice:
 

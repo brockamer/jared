@@ -163,11 +163,6 @@ If a rendered response may not be `ste`, examine it against this list:
 - **Did a CLI line, a `degraded:` note, or a script block get rewritten?** Restore the verbatim text.
 - **Did a board-write draft change register?** Board writes are plain technical prose under every value. Rewrite the draft in plain prose.
 
-## Fixtures
-
-- Long-form: the Joplin note **"Recommendations (ASD-STE100) — 2026-09-11"** in `NOTEBOOK`. It uses defined terms, NOTE and CAUTION notices before the step they apply to, one instruction per step, and a "Result:" line after each procedure.
-- This feature's own: the Joplin note **"Fixture — `voice: ste` — 2026-09-13"** in the same notebook. It holds two slash-command outputs rendered under `ste` on the jared board.
-
 ## Provenance
 
 ASD-STE100 is the Simplified Technical English specification maintained by the AeroSpace and Defence Industries Association of Europe. Issue 8 is the current issue at the time of writing. The mode was requested on #374; the design is `docs/superpowers/specs/2026-09-13-voice-ste-design.md`.

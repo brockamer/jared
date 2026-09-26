@@ -109,6 +109,9 @@ testbed from scratch.
    - `TESTBED_REPO`: brockamer/jared-testbed
    - `TESTBED_OWNER`: brockamer
    - `TESTBED_PROJECT_NUMBER`: <number from step 2>
+   - `KANBANFLOW_TEST_BOARD_ID`: the ID of a KanbanFlow board you use for
+     testing (only needed for `tests/test_kanbanflow_live.py`; the token it
+     needs, `KANBANFLOW_API_TOKEN`, is read from the environment only)
 
 8. Verify:
 

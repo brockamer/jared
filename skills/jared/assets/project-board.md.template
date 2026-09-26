@@ -147,14 +147,14 @@ alike — there's no need for `**/*.md`. Use specific path prefixes
 
 Operational commands to embed in the "Quick health check on session start" section of the posture `jared next-session-prompt` emits. Each fenced ```bash block is one check command; the slash command runs `jared next-session-prompt --include-session-checks` to render them. Omit the section if you don't want any.
 
-Example for a project with a Docker-hosted operator and a sqlite pipeline:
+Example for a project with a deployed staging service:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary
 ```
 
 ```bash
-ssh docker-host.example 'sudo -u svc docker compose -f /srv/<project>/compose.yaml ps'
+curl -fsS https://staging.example.com/healthz
 ```
 
 These commands are user-authored and user-maintained. Jared does not infer them; if they rot, that's your signal to refresh them.

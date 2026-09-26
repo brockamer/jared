@@ -16,11 +16,11 @@ source .venv/bin/activate
 uv pip install -e ".[dev]"    # installs pytest, ruff, mypy
 ```
 
-To test plugin changes interactively in Claude Code, install from a local `file://` URL (the plugin cache at `~/.claude/plugins/cache/` is copied at install time, so edits require `/plugin update jared` + `/reload-plugins` to pick up):
+To test plugin changes interactively in Claude Code, install from the local clone — run from the repo root (the plugin cache at `~/.claude/plugins/cache/` is copied at install time, so edits require `/plugin update jared` + `/reload-plugins` to pick up):
 
 ```
 /plugin marketplace remove jared-marketplace
-/plugin marketplace add file:///home/user/Code/jared
+/plugin marketplace add ./
 /plugin install jared
 ```
 
