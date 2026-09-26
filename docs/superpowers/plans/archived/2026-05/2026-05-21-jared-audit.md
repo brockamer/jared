@@ -30,7 +30,7 @@
 
 **Versioning:** Release as v0.21.0 (minor bump — additive feature, no breaking changes). Bump in `.claude-plugin/plugin.json` + `pyproject.toml` as part of the PR.
 
-**Branch:** `feature/169-jared-audit` (already created; spec committed at `a8348b8` and `6298b01`).
+**Branch:** `feature/169-jared-audit` (already created; spec committed at `8e38b74` and `49e5a9c`).
 
 ---
 

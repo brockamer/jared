@@ -53,7 +53,7 @@ Note: CLAUDE.md currently lists `fetch_open_issues_for_ties` as an un-migrated P
 
 ## Verified findings that shape the design
 
-These were confirmed by reading the code on `main` at `85e7ca8`. Do not re-derive them; do re-verify any line number before editing, because they have already moved once (see below).
+These were confirmed by reading the code on `main` at `7c312f0`. Do not re-derive them; do re-verify any line number before editing, because they have already moved once (see below).
 
 1. **Line numbers in the issue bodies are stale.** PR #384 inserted a `require_python()` guard into every standalone script. `#386`'s cited `sweep.py:96` is now `105`, `:99` is `108`, `:792` is `801`. The three timestamp degradation notes cited as `858/879/1022` are at `863/884/1027`. The offset is **not uniform**. Resolve every citation by content, never by number.
 
@@ -277,7 +277,7 @@ cd /home/user/Code/jared && source .venv/bin/activate
 pytest tests/test_golden_github_surfaces.py::test_sweep_github_stdout_is_pinned -v 2>&1 | head -60
 ```
 
-The constant must be the *actual* current output on `main` at `85e7ca8`, not your reconstruction of it. A hand-written golden pins what you believe the code does, which is worth nothing as a regression guard.
+The constant must be the *actual* current output on `main` at `7c312f0`, not your reconstruction of it. A hand-written golden pins what you believe the code does, which is worth nothing as a regression guard.
 
 - [ ] **Step 5: Repeat Steps 3–4 for the other three surfaces**
 
@@ -290,7 +290,7 @@ The constant must be the *actual* current output on `main` at `85e7ca8`, not you
 - [ ] **Step 6: Run the new tests and the whole suite**
 
 Run: `pytest tests/test_golden_github_surfaces.py -v && pytest -q`
-Expected: 4 new tests PASS. Full suite: **1003 passed, 1 skipped** (the baseline captured on `main` at `85e7ca8`). Any other number means you changed behavior in a task whose job was to change nothing.
+Expected: 4 new tests PASS. Full suite: **1003 passed, 1 skipped** (the baseline captured on `main` at `7c312f0`). Any other number means you changed behavior in a task whose job was to change nothing.
 
 - [ ] **Step 7: Commit**
 

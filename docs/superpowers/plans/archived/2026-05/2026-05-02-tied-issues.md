@@ -16,7 +16,7 @@
 
 **Tech Stack:** Python 3.11, argparse, `gh` CLI, GitHub GraphQL v4, pytest, ruff, mypy --strict.
 
-**Branch:** `feature/77-tied-issues-design` (already exists with the spec commit `5e493d7` on it). All implementation tasks commit on this branch.
+**Branch:** `feature/77-tied-issues-design` (already exists with the spec commit `eaf46f2` on it). All implementation tasks commit on this branch.
 
 ---
 

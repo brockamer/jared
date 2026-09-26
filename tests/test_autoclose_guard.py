@@ -49,7 +49,7 @@ ARMED = [
     "fixes #350",
     "Resolved: #350",
     "Does not close #350",  # negation is no protection (2026-06-11)
-    "`closes #350`",  # backticks are no protection (60ccc9e, 2026-09-12)
+    "`closes #350`",  # backticks are no protection (4849fc7, 2026-09-12)
     "a **resolved** #369 suffix",  # markdown emphasis (2026-09-16)
     "*closes* #77",
     "_fixed_ #77",

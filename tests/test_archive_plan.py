@@ -212,7 +212,7 @@ def test_parse_referenced_issues_bold_form_does_not_match_mid_line_prose() -> No
 def test_parse_referenced_issues_inline_header_form() -> None:
     """#346 — the documented `## Issue: #N` convention carries the ref ON the
     heading line. The #318/#319 plans wrote exactly this form (`## Issue: #318`,
-    verified in git at a53249b) and silently skipped archival until #345
+    verified in git at 6937f89) and silently skipped archival until #345
     hand-converted them to `**Issue:**`. The scanner must recognize the
     documented header form directly.
     """

@@ -12,7 +12,7 @@
 
 **Tech Stack:** Markdown command-prompt template only. No Python, no shell, no test framework.
 
-**Spec:** `docs/superpowers/specs/2026-04-26-jared-start-handoff-pickup-design.md` (commit 880e945)
+**Spec:** `docs/superpowers/specs/2026-04-26-jared-start-handoff-pickup-design.md` (commit a317319)
 **Issue:** [#44](https://github.com/brockamer/jared/issues/44)
 
 ---
@@ -51,7 +51,7 @@ Run:
 git status
 ```
 
-Expected: branch `main`, working tree clean (the spec commit `880e945` is the most recent commit; no untracked or modified files except permitted scratch like `CLAUDE.local.md` if present).
+Expected: branch `main`, working tree clean (the spec commit `a317319` is the most recent commit; no untracked or modified files except permitted scratch like `CLAUDE.local.md` if present).
 
 - [ ] **Step 2: Create the feature branch**
 
