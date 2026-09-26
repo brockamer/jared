@@ -1,14 +1,18 @@
 """Live KanbanFlow capability + degradation verification (Phase 6, Task 11).
 
-Acceptance gate: a real KanbanFlowProvider constructs against the live
-"Jared Test" board (BOARDID1), proves its board id, and advertises exactly
+Acceptance gate: a real KanbanFlowProvider constructs against a live test
+board, proves its board id, and advertises exactly
 {MILESTONE_ASSIGNMENT} capabilities (#390). The degraded_or_none gate is also
 exercised end-to-end — that path is network-free by design (Board.capabilities()
 reads the static class attribute; it never constructs the provider or
 calls the API).
 
+Configuration is read at runtime and never committed. The token comes from
+the environment only; the board ID comes from the environment or from the
+gitignored tests/testbed.env (template: tests/testbed.env.example).
+
 Run:
-    set -a; source ~/.env.token; set +a
+    export KANBANFLOW_API_TOKEN=<token> KANBANFLOW_TEST_BOARD_ID=<board-id>
     python -m pytest -m integration tests/test_kanbanflow_live.py -v
 """
 
@@ -20,16 +24,30 @@ from textwrap import dedent
 
 import pytest
 
-LIVE_BOARD_ID = "BOARDID1"
+
+def _live_board_id() -> str:
+    """KANBANFLOW_TEST_BOARD_ID from the environment, else from tests/testbed.env."""
+    if board_id := os.environ.get("KANBANFLOW_TEST_BOARD_ID", "").strip():
+        return board_id
+    env_path = Path(__file__).parent / "testbed.env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and key == "KANBANFLOW_TEST_BOARD_ID":
+                return value.strip()
+    return ""
+
+
+LIVE_BOARD_ID = _live_board_id()
 
 # ---------------------------------------------------------------------------
-# Module-level skip guard — none of these tests run without the token.
+# Module-level skip guard — none of these tests run without the token and board ID.
 # ---------------------------------------------------------------------------
 pytestmark = pytest.mark.integration
 
 _SKIP_NO_TOKEN = pytest.mark.skipif(
-    not os.environ.get("KANBANFLOW_API_TOKEN"),
-    reason="KANBANFLOW_API_TOKEN not set",
+    not os.environ.get("KANBANFLOW_API_TOKEN") or not LIVE_BOARD_ID,
+    reason="KANBANFLOW_API_TOKEN or KANBANFLOW_TEST_BOARD_ID not set",
 )
 
 
@@ -67,7 +85,7 @@ def test_live_kanbanflow_provider_capabilities(tmp_path: Path) -> None:
     """Construct a real KanbanFlowProvider against the live board and assert:
 
     1. The provider is a KanbanFlowProvider (not a stub).
-    2. The live board id matches LIVE_BOARD_ID — proves the token reached BOARDID1,
+    2. The live board id matches LIVE_BOARD_ID — proves the token reached the configured board,
        not some other board or a short-circuit.
     3. capabilities() == {MILESTONE_ASSIGNMENT} — the static compile-time constant (#390).
     """

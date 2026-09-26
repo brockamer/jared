@@ -674,7 +674,7 @@ class KanbanFlowClient:
         single page (the `to`-walk is descending-only by construction). Events are
         de-duplicated by id across the page seam, so an inclusive `to` bound cannot
         double-count the boundary event. The `{eventsLimited, events}` envelope
-        shape is confirmed live on BOARDID1.
+        shape is confirmed against a live board.
         """
         out: list[KfEvent] = []
         seen: set[str] = set()

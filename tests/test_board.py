@@ -1144,7 +1144,7 @@ def test_board_parses_jared_config_section(tmp_path: Path) -> None:
         ```
 
         ```bash
-        ssh docker-host.example 'sudo -u svc docker compose ps'
+        curl -fsS https://staging.example.com/healthz
         ```
         """)
     )
@@ -1158,7 +1158,7 @@ def test_board_parses_jared_config_section(tmp_path: Path) -> None:
     assert board.backend == "github"
     assert board.session_start_checks == [
         "${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary",
-        "ssh docker-host.example 'sudo -u svc docker compose ps'",
+        "curl -fsS https://staging.example.com/healthz",
     ]
 
 
