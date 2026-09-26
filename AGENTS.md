@@ -171,7 +171,7 @@ Main is protected â€” every substantive change lands via a PR (`gh pr create` â†
   body.** GitHub's parser reads those surfaces on merge to `main`, and it honours neither negation, nor
   quotation, nor backticks, nor markdown. This has now fired **three** times, every time from text that
   was *explaining or negating* the danger: a PR body reading "Does not clo&#115;e" plus the number
-  (2026-06-11, #350); commit `60ccc9e` (2026-09-12, #350) whose message *quoted the keyword while
+  (2026-06-11, #350); commit `4849fc7` (2026-09-12, #350) whose message *quoted the keyword while
   explaining the first incident*; and a commit during #369 (2026-09-16) that described this very rule's
   suffix format and put markdown emphasis between the keyword and the number. Refer to issues as `#N`
   only; to describe a keyword, name it ("a closing keyword paired with the issue number") rather than

@@ -48,7 +48,7 @@ Outcome: `/plugin install jared` works on any machine, conversational Jared stop
 2. **`references/operations.md` is thick with bash examples** that Jared has to expand from. The skill is working against itself by describing low-level operations instead of naming high-level verbs.
 3. **Install path is a symlink hack** — not portable, not discoverable, not how Claude Code plugins are meant to be installed.
 4. **Repo name (`claude-skills`) suggests a multi-skill container** but the `plugin.json` declares a single plugin named `jared`. Aspiration and reality disagree.
-5. **Commit `30726d0`** hardcoded `~/.claude/skills/jared/scripts/...` paths in command stubs as a workaround for a working-directory resolution bug. This is a symptom of the install hack; proper plugins use `${CLAUDE_PLUGIN_ROOT}` instead.
+5. **Commit `c33eee5`** hardcoded `~/.claude/skills/jared/scripts/...` paths in command stubs as a workaround for a working-directory resolution bug. This is a symptom of the install hack; proper plugins use `${CLAUDE_PLUGIN_ROOT}` instead.
 6. **Batch scripts reimplement ID discovery, `gh` invocation, and field-option resolution** in slightly different ways each. No shared helper module.
 7. **No tests.** Mutations to real GitHub state have no regression safety net.
 
@@ -86,7 +86,7 @@ Outcome: `/plugin install jared` works on any machine, conversational Jared stop
 ## Invariants
 
 - **`docs/project-board.md` format is frozen.** findajob actively depends on its schema. No breaking changes in this refactor. Any future evolution requires a migration script and a version field added to the convention doc — a separate project.
-- **Every script-invocation path uses `${CLAUDE_PLUGIN_ROOT}/scripts/...`.** No hardcoded `~/.claude/skills/...` paths anywhere (the commit-30726d0 pattern gets reverted).
+- **Every script-invocation path uses `${CLAUDE_PLUGIN_ROOT}/scripts/...`.** No hardcoded `~/.claude/skills/...` paths anywhere (the commit-c33eee5 pattern gets reverted).
 - **`plugin.json` `name` stays `jared`.** Only the repo and local directory rename.
 - **Existing `scripts/*.py` CLI surfaces stay compatible** during the refactor (`sweep.py --help` still works; `bootstrap-project.py --url ... --repo ...` still works). Internal implementation migrates onto the shared helper; external interface unchanged.
 
@@ -275,7 +275,7 @@ Expect significant code deletion. sweep.py in particular likely drops by a third
 
 ### Phase 5 — Command stubs + cleanup
 
-1. Rewrite all 7 `commands/jared*.md` stubs to use `${CLAUDE_PLUGIN_ROOT}/scripts/jared <subcommand>` invocations. Reverts the commit-30726d0 hardcoded paths.
+1. Rewrite all 7 `commands/jared*.md` stubs to use `${CLAUDE_PLUGIN_ROOT}/scripts/jared <subcommand>` invocations. Reverts the commit-c33eee5 hardcoded paths.
 2. Delete `scripts/board-summary.sh` (superseded by `jared summary`).
 3. Remove any tracked `__pycache__` content; confirm `.gitignore` catches it going forward.
 4. Final grep sweep for `claude-skills`, `~/.claude/skills/`, stale references.

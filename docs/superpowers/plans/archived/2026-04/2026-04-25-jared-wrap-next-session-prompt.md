@@ -12,7 +12,7 @@
 
 **Tech Stack:** Python 3.11, argparse (CLI), pytest with `tests/conftest.py` helpers (`patch_gh`, `patch_gh_by_arg`, `import_cli`), `gh` CLI invoked via existing `Board.run_gh*`, ruff + mypy in strict mode.
 
-**Spec:** `docs/superpowers/specs/2026-04-25-jared-wrap-next-session-prompt-design.md` (commits `8e42ed6`, `54e1b01`).
+**Spec:** `docs/superpowers/specs/2026-04-25-jared-wrap-next-session-prompt-design.md` (commits `c90f974`, `4d5c699`).
 
 **Tracking issue:** brockamer/jared#35.
 

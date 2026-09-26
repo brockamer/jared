@@ -45,7 +45,7 @@ git status
 git log --oneline origin/main..HEAD
 ```
 
-Expected: clean working tree; two unpushed commits (`30726d0` and the spec commit `bb04881`).
+Expected: clean working tree; two unpushed commits (`c33eee5` and the spec commit `b52a021`).
 
 - [ ] **Step 2: Push**
 
@@ -2684,7 +2684,7 @@ For commands that used to describe multi-step gh flows (e.g., `/jared-file`), re
 
 ```bash
 git add commands/
-git commit -m "docs(jared): command stubs use \${CLAUDE_PLUGIN_ROOT}; revert 30726d0 hardcoded paths"
+git commit -m "docs(jared): command stubs use \${CLAUDE_PLUGIN_ROOT}; revert c33eee5 hardcoded paths"
 ```
 
 ### Task 5.2: Delete superseded files
