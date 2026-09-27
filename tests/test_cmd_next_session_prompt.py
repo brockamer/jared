@@ -531,3 +531,33 @@ def test_backend_failure_emits_no_partial_handoff(
     assert rc == 1
     assert captured.out == "", f"stdout must be empty on backend failure, got: {captured.out!r}"
     assert "Could not resolve" in captured.err
+
+
+@pytest.mark.parametrize("session", [None, 1])
+def test_up_next_follows_board_position_not_creation_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    session: int | None,
+) -> None:
+    """Top of Up Next is the board's top three, with or without --session (#506)."""
+    board_md = write_minimal_board(tmp_path)
+    numbers = (15, 14, 13, 12, 11)  # repository query order: newest first
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[{"number": n, "title": f"Up{n}", "state": "OPEN"} for n in numbers],
+        statuses={n: ("Up Next", "Medium") for n in numbers},
+        labels_by_number={n: ["session-1"] for n in numbers},
+        positions=[11, 12, 13, 14, 15],
+    )
+
+    argv = ["--board", str(board_md), "next-session-prompt"]
+    if session is not None:
+        argv += ["--session", str(session)]
+    rc = import_cli().main(argv)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    section = out.split("## Top of Up Next", 1)[1].split("\n## ", 1)[0]
+    shown = [line.split()[1] for line in section.splitlines() if line.startswith("- #")]
+    assert shown == ["#11", "#12", "#13"]

@@ -99,6 +99,14 @@ def test_list_open_items_excludes_done(tmp_path: Path) -> None:
     assert sorted(i.title for i in items) == ["open"]
 
 
+def test_list_open_items_keeps_column_order(tmp_path: Path) -> None:
+    """Items come back in the client's column order, never re-sorted by number (#506)."""
+    provider, client = _provider(tmp_path)
+    for n in (3, 1, 2):
+        client.create_task(name=f"t{n}", column_id="col-upnext", number_value=n)
+    assert [i.number for i in provider.list_open_items()] == [3, 1, 2]
+
+
 def test_get_body_returns_description(tmp_path: Path) -> None:
     provider, client = _provider(tmp_path)
     t = client.create_task(name="x", column_id="col-backlog", number_value=5, description="hello")

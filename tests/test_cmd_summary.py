@@ -266,6 +266,27 @@ def test_summary_up_next_truncates_to_three(
     assert "of 5" in out
 
 
+def test_summary_up_next_follows_board_position_not_creation_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The top three are the board's top three, not the three newest issues (#506)."""
+    board_md = write_minimal_board(tmp_path)
+    # Repository query order is newest first; the operator put #11 on top.
+    open_issues = [{"number": n, "title": f"Up{n}", "state": "OPEN"} for n in (15, 14, 13, 12, 11)]
+    statuses = {n: ("Up Next", "Medium") for n in (11, 12, 13, 14, 15)}
+    patch_gh_multi(
+        monkeypatch, open_issues=open_issues, statuses=statuses, positions=[11, 12, 13, 14, 15]
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "summary"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    shown = [line.split()[0] for line in out.splitlines() if line.startswith("  #")]
+    assert shown == ["#11", "#12", "#13"]
+
+
 def test_summary_routes_through_open_items_not_full_project_pull(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
