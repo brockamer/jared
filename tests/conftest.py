@@ -295,6 +295,7 @@ def patch_gh_multi(
     closed_statuses: dict[int, tuple[str, str]] | None = None,
     comments_batch_json: str | None = None,
     labels_by_number: dict[int, list[str]] | None = None,
+    positions: list[int] | None = None,
 ) -> None:
     """Patch the multi-gh-call shape produced by the batched open-only path (#185).
 
@@ -309,6 +310,10 @@ def patch_gh_multi(
       `closed_statuses` (issues missing from the map come back as null).
     - `gh api graphql` with aliased `i<N>: ... { comments(last:` →
       `comments_batch_json`, or empty-repository if not provided.
+
+    - `gh api graphql` with `field: POSITION` → the board's manual order
+      (#506), built from `positions` (issue numbers, top first). Omitted, the
+      response ranks nothing and the provider keeps `open_issues` order.
 
     Most tests only need `open_issues` + `statuses`. Stuck-closed tests
     additionally provide `closed_issues` + `closed_statuses`. The handoff
@@ -329,7 +334,9 @@ def patch_gh_multi(
             project_items: dict[str, object] = {"nodes": []}
             if number in statuses:
                 status, priority = statuses[number]
-                project_items = {"nodes": [_projectitems_node(status, priority)]}
+                item_node = _projectitems_node(status, priority)
+                item_node["id"] = f"PVTI_{number}"
+                project_items = {"nodes": [item_node]}
             label_nodes = [{"name": name} for name in labels_by_number.get(number, [])]
             nodes.append(
                 {
@@ -386,6 +393,22 @@ def patch_gh_multi(
                 ),
                 "",
             )
+            if "field: POSITION" in query_arg:
+                ranked = [{"id": f"PVTI_{n}"} for n in positions or []]
+                return FakeGhResult(
+                    stdout=_json.dumps(
+                        {
+                            "data": {
+                                "node": {
+                                    "items": {
+                                        "pageInfo": {"hasNextPage": False},
+                                        "nodes": ranked,
+                                    }
+                                }
+                            }
+                        }
+                    )
+                )
             if "issues(states: OPEN" in query_arg:
                 return FakeGhResult(stdout=_open_items_batched_response())
             if "comments(last:" in query_arg:

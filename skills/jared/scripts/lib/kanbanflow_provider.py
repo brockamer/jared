@@ -341,6 +341,10 @@ class KanbanFlowProvider:
             return None
 
     def list_open_items(self) -> list[BoardItem]:
+        # Order is the API's (#506): columns left to right, and within a column
+        # the order GET /tasks returns. That response has one group per
+        # swimlane, so on a board with swimlanes a column reads swimlane by
+        # swimlane — there is no single column order to return. Do not sort.
         done_id = self._column_id_by_status.get("Done")
         # Skip un-numbered tasks (e.g. created in the KF UI without a jared
         # number): they have no stable #N handle, so they're already invisible

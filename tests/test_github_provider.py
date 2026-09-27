@@ -293,6 +293,107 @@ def test_list_open_items_raises_on_pagination(monkeypatch: pytest.MonkeyPatch) -
         _provider().list_open_items()
 
 
+def _open_issue_node(number: int, item_id: str, status: str = "Up Next") -> dict[str, object]:
+    return {
+        "number": number,
+        "title": f"Issue {number}",
+        "state": "OPEN",
+        "labels": {"nodes": []},
+        "projectItems": {
+            "nodes": [
+                {
+                    "id": item_id,
+                    "project": {"number": 7},
+                    "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
+                }
+            ]
+        },
+    }
+
+
+def _open_issues_response(*nodes: dict[str, object]) -> str:
+    return json.dumps(
+        {
+            "data": {
+                "repository": {"issues": {"pageInfo": {"hasNextPage": False}, "nodes": list(nodes)}}
+            }
+        }
+    )
+
+
+def _position_response(
+    item_ids: list[str], *, has_next: bool = False, end_cursor: str | None = None
+) -> str:
+    return json.dumps(
+        {
+            "data": {
+                "node": {
+                    "items": {
+                        "pageInfo": {"hasNextPage": has_next, "endCursor": end_cursor},
+                        "nodes": [{"id": i} for i in item_ids],
+                    }
+                }
+            }
+        }
+    )
+
+
+def test_list_open_items_returns_board_position_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Items come back in the project's manual order, not issue-creation order (#506).
+
+    The repository query returns newest first (3, 2, 1); the board has them 2, 3, 1.
+    """
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "field: POSITION": _position_response(["PVTI_2", "PVTI_3", "PVTI_1"]),
+            "repository(owner": _open_issues_response(
+                _open_issue_node(3, "PVTI_3"),
+                _open_issue_node(2, "PVTI_2"),
+                _open_issue_node(1, "PVTI_1"),
+            ),
+        },
+    )
+    assert [i.number for i in _provider().list_open_items()] == [2, 3, 1]
+
+
+def test_list_open_items_unranked_items_sort_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An item missing from the position read keeps its place after the ranked ones."""
+    patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "field: POSITION": _position_response(["PVTI_1", "PVTI_3"]),
+            "repository(owner": _open_issues_response(
+                _open_issue_node(4, "PVTI_4"),
+                _open_issue_node(3, "PVTI_3"),
+                _open_issue_node(2, "PVTI_2"),
+                _open_issue_node(1, "PVTI_1"),
+            ),
+        },
+    )
+    assert [i.number for i in _provider().list_open_items()] == [1, 3, 4, 2]
+
+
+def test_list_open_items_pages_through_positions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The position read follows endCursor until hasNextPage is false."""
+    calls = patch_gh_by_arg(
+        monkeypatch,
+        responses={
+            "cursor=CUR1": _position_response(["PVTI_1"]),
+            "field: POSITION": _position_response(["PVTI_2"], has_next=True, end_cursor="CUR1"),
+            "repository(owner": _open_issues_response(
+                _open_issue_node(1, "PVTI_1"),
+                _open_issue_node(2, "PVTI_2"),
+            ),
+        },
+    )
+    assert [i.number for i in _provider().list_open_items()] == [2, 1]
+    position_calls = [" ".join(c) for c in calls if "field: POSITION" in " ".join(c)]
+    assert len(position_calls) == 2
+    assert "cursor=" not in position_calls[0]
+    assert "cursor=CUR1" in position_calls[1]
+
+
 def test_list_open_items_does_not_call_project_item_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

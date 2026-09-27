@@ -7,6 +7,7 @@ patching is preserved.
 
 from __future__ import annotations
 
+import functools
 import re
 import sys
 import tempfile
@@ -218,6 +219,23 @@ _OPEN_ITEMS_QUERY = """
     }
     """
 
+# The board's manual order (#506). `repository.issues` cannot sort by project
+# position, so list_open_items reads the ranks here and re-sorts. `is:open`
+# keeps this to the open set (one page on a board with ~300 items, most Done).
+_OPEN_ITEM_POSITIONS_QUERY = """
+    query($project: ID!, $cursor: String) {
+      node(id: $project) {
+        ... on ProjectV2 {
+          items(first: 100, after: $cursor, query: "is:open",
+                orderBy: {field: POSITION, direction: ASC}) {
+            pageInfo { hasNextPage endCursor }
+            nodes { id }
+          }
+        }
+      }
+    }
+    """
+
 _ISSUE_PROJECT_ITEM_QUERY = """
     query($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
@@ -343,6 +361,12 @@ class GitHubProjectsProvider:
         Raises GhInvocationError when >100 open issues are present (pagination
         not implemented — same guard as Board.open_items).
 
+        Order: the project's manual position order (#506), so "top of Up Next"
+        is the item the operator put first. A second query reads the ranks
+        (`_open_item_positions`); items it does not rank keep their incoming
+        order after the ranked ones. The repository query stays the source of
+        the rows because every fixture and caller is built on its shape.
+
         Mapping notes:
         - title, status, priority, labels come from the GraphQL response.
         - milestone and blocked_by are absent from _OPEN_ITEMS_QUERY → None/[].
@@ -360,7 +384,7 @@ class GitHubProjectsProvider:
                 "on this repo. Pagination not implemented — bump the first: cap "
                 "or add cursor-based pagination."
             )
-        result: list[BoardItem] = []
+        keyed: list[tuple[str | None, BoardItem]] = []
         for issue in issues_node.get("nodes", []) or []:
             if not isinstance(issue, dict):
                 continue
@@ -372,15 +396,43 @@ class GitHubProjectsProvider:
                 continue
             labels_node = issue.get("labels") or {}
             label_names = [n["name"] for n in (labels_node.get("nodes") or []) if "name" in n]
-            result.append(
-                self._item_from_flat(
-                    number=number,
-                    title=str(issue.get("title", "")),
-                    flat=flat,
-                    labels=label_names,
-                )
+            item = self._item_from_flat(
+                number=number,
+                title=str(issue.get("title", "")),
+                flat=flat,
+                labels=label_names,
             )
-        return result
+            keyed.append((flat.get("id"), item))
+        if not keyed:
+            return []
+        rank = self._open_item_positions()
+        unranked = len(rank)
+        keyed.sort(key=lambda pair: rank.get(pair[0] or "", unranked))
+        return [item for _, item in keyed]
+
+    def _open_item_positions(self) -> dict[str, int]:
+        """Map each open project item's node-id to its board position (0 = top).
+
+        An empty map is a valid answer — the caller's stable sort then leaves
+        the incoming order untouched.
+        """
+        rank: dict[str, int] = {}
+        cursor: str | None = None
+        while True:
+            variables: dict[str, str] = {"project": self.project_id}
+            if cursor is not None:
+                variables["cursor"] = cursor
+            data = _retry_transient_read(
+                functools.partial(run_graphql, _OPEN_ITEM_POSITIONS_QUERY, **variables)
+            )
+            items_node = ((data.get("data") or {}).get("node") or {}).get("items") or {}
+            for node in items_node.get("nodes") or []:
+                if isinstance(node, dict) and isinstance(node.get("id"), str):
+                    rank.setdefault(node["id"], len(rank))
+            page = items_node.get("pageInfo") or {}
+            cursor = page.get("endCursor")
+            if not page.get("hasNextPage") or not cursor:
+                return rank
 
     def get_item(self, ref: IssueRef) -> BoardItem | None:
         """Return the project item for issue `ref`, or None if not on board.
