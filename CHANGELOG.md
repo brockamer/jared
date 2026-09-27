@@ -7,6 +7,27 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.33.0 — 2026-09-27
+
+Interim release. Ships `jared set-milestone`, KanbanFlow milestone assignment, session locks that tolerate a non-git project, the Up Next position-order fix, and the `AGENTS.md` adoption. It is also the first tag after the history rewrites of 2026-09-26 and 2026-09-27: `v0.31.0` and `v0.32.0` now point at rewritten commits, and every commit since 2026-09-13 has a new SHA, so a clone or plugin install that predates 2026-09-27 should be re-cloned or reinstalled, never pulled. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
+
+**Features**
+- **`jared set-milestone <N> <milestone>`** assigns a milestone to an issue already on the board, on either backend; the items snapshot is invalidated after the write so a following `stage` ranks it. (#441, #427)
+- **KanbanFlow milestone assignment.** `MILESTONE_ASSIGNMENT` split out of `MILESTONE_STATE`, so `jared file --milestone` and `set-milestone` reach the swimlane code that already worked, while the open/close and due-date consumers stay gated. (#445, #390)
+- **Session locks on a non-git project** skip with a notice instead of exiting 1, and `--session N` downgrades to solo there, since a worktree needs git. (#439, #425)
+- **`bootstrap-project.py`** documents the `## Jared config` knobs on the GitHub board-doc template as well as the KanbanFlow one. (#440, #433)
+
+**Bug fixes**
+- `GitHubProjectsProvider.list_open_items()` returns items in the board's position order, so `jared summary` and `next-session-prompt` show the real top of Up Next instead of the newest issues. (#507, #506)
+
+**Doctrine**
+- `advisor()` is scoped to the `/jared-audit` batch pass; the four routine stubs carry the note. (#436, #412)
+- `/jared-stage` added to the `## Slash commands` inventory in `SKILL.md`. (#437)
+- `CLAUDE.md` renamed to `AGENTS.md`, with `CLAUDE.md` importing it; the auto-close guard test follows. (4205846, cf061a8)
+
+**Patch**
+- Private infrastructure and personal detail moved out of the tree; cited commit SHAs re-pointed after each history rewrite. (616b63d, 3a70da1, e90ae6d)
+
 ## v0.32.0 — 2026-09-19
 
 Interim release. Ships the model + reasoning-effort recommendation in `/jared-start`'s announce, a `/jared-groom` remediation step for Backlog pullability gaps, and `get-item --body`. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
