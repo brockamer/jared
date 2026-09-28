@@ -109,7 +109,13 @@ Flow:
 
    Always read the current body immediately before writing — `gh issue edit --body-file` **replaces** the body wholesale, so a merge against a stale copy silently drops whatever changed in between. `--body-file` rather than `-f body=…` because the body is multi-line markdown, and shell quoting mangles it; this is the route `archive-plan.py` already uses for its body patches.
 
-   **PII pre-flight runs on every drafted body before it is posted**, same as `jared file` and `/jared-audit`. A draft assembled from local context can pick up a phrase that only exists in a gitignored file; `pre_flight_check` (`lib/board.py`) is what catches that. If the report is not clean, show the operator what it flagged and do not post.
+   **PII pre-flight runs on every drafted body before it is posted.** A draft assembled from local context can pick up a phrase that only exists in a gitignored file. `gh issue edit` does not run the check, so run it on the draft yourself, before you ask for approval:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body-file <tmp>
+   ```
+
+   Exit 0: proceed. Exit 2: show the operator the flagged lines and do not post. Exit 3: nothing was scanned — say in the approval prompt that the draft was not checked, and let the operator decide. See `references/pii-pre-flight.md`.
 
    **On a `- backend: kanbanflow` board:** the gaps section and the drafting both work (the provider carries task descriptions on the row), but `gh issue edit` is not the route and there is no CLI surface for a body edit on that backend yet — see #403. Present the drafts, say plainly that they can't be applied from here, and stop.
 

@@ -117,6 +117,6 @@ Flow:
 
    Per-issue atomicity is provided by the existing atoms. Batch-level atomicity is out of scope; if item 4 of a batch fails after items 1–3 succeeded, re-run just item 4.
 
-10. **PII pre-flight runs on every proposed body edit and close comment**, same as `jared file`.
+10. **PII pre-flight runs on every proposed body edit and close comment.** `jared close --body-file` and `jared comment` run it themselves. The `gh api -X PATCH` body edit does not, so run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body-file <draft>` on each drafted body before the approval prompt. Exit 2: show the flagged lines and drop the edit from the batch. Exit 3: nothing was scanned — say so in the approval prompt and let the operator decide. A `warning: pre-flight scanned 0 private files` line from `jared close` / `jared comment` goes to the operator too. See `references/pii-pre-flight.md`.
 
 11. **Post-run summary.** Print a one-line delta to stdout: "Audited N items: K closed, M reshaped, P left alone."

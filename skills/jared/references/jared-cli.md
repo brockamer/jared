@@ -21,7 +21,8 @@ Global option:
 |---|---|
 | 0 | Success. |
 | 1 | Config or lookup error (missing board file, unknown field/option, issue not on project). Fix the convention doc or argument and retry. |
-| 2 | `gh` itself failed (auth, network, GitHub API error) or post-create verification detected a drift. Stderr carries the underlying message. |
+| 2 | `gh` itself failed (auth, network, GitHub API error) or post-create verification detected a drift. Stderr carries the underlying message. Also: the PII pre-flight found private content in the body (`file`, `comment`, `close --body*`, `pre-flight`) and nothing was posted. |
+| 3 | `jared pre-flight` only: no private source was found, so the draft was not checked. |
 
 ---
 
@@ -207,7 +208,9 @@ OK: closed #12, Status=Done
 
 PII pre-flight (#102) runs on the comment body, same as `jared comment`
 and `jared file`. A redaction-dirty body short-circuits before any gh call —
-neither the comment nor the close runs.
+neither the comment nor the close runs. A scan that found no private file
+posts anyway and prints `warning: pre-flight scanned 0 private files` to
+stderr (#443).
 
 ---
 
@@ -223,6 +226,29 @@ jared comment <issue_number> --body "Quick one-liner update."
 jared comment <issue_number> --body-file session-note.md
 cat session-note.md | jared comment <issue_number> --body-file -
 ```
+
+---
+
+## `jared pre-flight (--body TEXT | --body-file PATH)`
+
+**Purpose.** Run the PII pre-flight on a drafted body **without posting it**
+(#443). `jared file`, `comment` and `close` run the check themselves; any
+other body write — `gh issue edit`, `gh api -X PATCH`, `capture-context.py`,
+an MCP tool — runs this first. Needs no board: it works from anywhere inside
+the repo and ignores `--board`.
+
+```
+$ jared pre-flight --body-file draft.md
+OK: pre-flight scanned 1 private file; no matches.
+```
+
+| Exit | Meaning |
+|---|---|
+| 0 | Private sources scanned, no match. |
+| 2 | A match; stderr carries the diff. Do not post. |
+| 3 | No private source found; stderr carries the warning. The draft was not checked — the operator decides. |
+
+Full reference: `references/pii-pre-flight.md`.
 
 ---
 

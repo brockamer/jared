@@ -812,6 +812,42 @@ def test_cmd_file_refuses_on_dirty_pre_flight_report(
     )
 
 
+def test_cmd_file_warns_and_posts_when_pre_flight_scans_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#443: in a git repo with no private source the pre-flight checks
+    nothing. `jared file` still files the issue, and says on stderr that the
+    body was not checked — a 0-file pass must not be silent."""
+    board_md = _write_full_board(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Some content with no special meaning.",
+            "--priority",
+            "Low",
+            "--no-milestone",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "warning: pre-flight scanned 0 private files" in captured.err
+    assert any("issue" in c and "create" in c for c in calls)
+
+
 def test_file_validates_fields_before_milestone_get(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

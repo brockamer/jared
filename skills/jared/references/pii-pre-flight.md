@@ -1,18 +1,19 @@
 # PII Pre-Flight Redactor
 
-A runtime check that scans issue and comment bodies for content matched against gitignored claude-shaped local files. Refuses to post on hits. Closes the gap that jared's `gh` / MCP API calls bypass any local pre-commit hook protecting file-based commits.
+A runtime check that scans issue and comment bodies for content matched against the repo's gitignored private files. Refuses to post on hits, and says so when it had nothing to scan. Closes the gap that jared's `gh` / MCP API calls bypass any local pre-commit hook protecting file-based commits.
 
 ## What it scans
 
-The redactor looks under the project root for gitignored claude-shaped files at:
+The redactor looks under the project root for the repo's private sources:
 
 - `CLAUDE.local.md`
 - `.claude/CLAUDE.local.md`
 - `.claude/local/*.md`
+- **any gitignored `*.md` file at the repo root** (#443) — for example a `<project>-prompt.md` that a repo's own `AGENTS.md` names as private. Git decides what counts as ignored (`git check-ignore`), so `.gitignore`, `.git/info/exclude` and the global excludes file all apply, and a tracked file never counts.
 
-Files are only considered when the project root is a git repo (has a `.git/` directory). Without git, the allowlist semantics break, so the redactor returns clean rather than flagging everything inconsistently.
+Files are only considered when the project root is a git repo (has a `.git/` directory). Without git, the allowlist semantics break, so nothing is scanned — and the report says so (see "When nothing is scanned").
 
-**v1 scope: only the three patterns above.** A future change may extend this to arbitrary paths matched by `.gitignore` whose path component contains the literal substring `claude` (case-insensitive) — that broader rule is in the design spec but is not implemented yet. If you keep private claude-content under a non-standard path, move it to one of the three patterns above for v1 protection.
+**Root level only.** A gitignored markdown file in a subdirectory is not scanned, except under `.claude/local/`. Walking ignored trees would read `.venv/` and similar on every call. If you keep private content deeper in the tree, move it to the repo root (gitignored) or to `.claude/local/`.
 
 ## What counts as a "phrase"
 
@@ -31,11 +32,39 @@ This means: if you intentionally documented something publicly in `README.md` an
 
 ## What happens on a hit
 
-`jared file` and `jared comment` both run the pre-flight immediately after resolving the body and before any `gh` call. On a non-clean report:
+`jared file`, `jared comment` and `jared close --body*` all run the pre-flight immediately after resolving the body and before any `gh` call. When the report has matches:
 
 - Exit code: 2
 - Stderr: a structured diff naming each match — line number in the body, the matched phrase, and which gitignored file it came from
 - No issue is created; no comment is posted
+
+## When nothing is scanned
+
+A scan of zero files proves nothing, so it is never reported as clean (#443). `RedactionReport` has three outcomes: `matches` non-empty; `clean` (at least one file scanned, no match); or `vacuous` (no file scanned), with `unscanned_reason` set to `no-git` or `no-private-files`. A caller that gates on `clean` alone therefore fails closed.
+
+`jared file`, `jared comment` and `jared close` still post on a vacuous scan — refusing would block every repo that has no private file — but first print a warning to stderr:
+
+```
+warning: pre-flight scanned 0 private files — this body was not checked for private content.
+```
+
+followed by one line naming the reason and the fix. **Relay that warning to the operator.** It is the only sign that the post went out unchecked; a repo that does hold private context under an unrecognised path needs it moved to a scanned location.
+
+## Checking a draft without posting — `jared pre-flight`
+
+Only `jared file`, `jared comment` and `jared close` run the pre-flight themselves. **Every other route that puts a body on the board must run `jared pre-flight` on the draft first**: `gh issue edit --body-file` (`/jared-groom`), `gh api -X PATCH` (`/jared-audit`), `capture-context.py --current-state` / `--decision` (`/jared-wrap`), and MCP tools such as `issue_write` or `add_issue_comment`. Run it on the text you are adding, before the operator approves the write:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body-file <draft>   # or --body "<text>", or --body-file -
+```
+
+| Exit | Meaning | Do |
+|---|---|---|
+| 0 | Private sources scanned, no match. Stdout: `OK: pre-flight scanned N private file(s); no matches.` | Proceed to approval. |
+| 2 | A match. Stderr carries the diff. | Do not post. Show the operator the flagged lines and revise the draft. |
+| 3 | Nothing was scanned. Stderr carries the warning. | Tell the operator the draft was not checked, and let them decide whether to post. |
+
+It needs no board and runs from anywhere inside the repo (it walks up to the `.git/` root, like the posting commands).
 
 ## How to bypass intentionally
 
@@ -49,7 +78,7 @@ Two ways:
 - **No silent edits.** The redactor refuses; it never modifies the body. Silent edits are surprising; a paraphrase that survives redaction is still a leak.
 - **No on-disk cache.** Cache lives in process memory and dies with the `jared` invocation. Re-scan cost is negligible (a few milliseconds for typical local files).
 - **No configurable thresholds (yet).** v1 ships with hardcoded `MIN_WORDS=3, MIN_CHARS=20`. If false positives flood, the thresholds will become configurable via `docs/project-board.md`.
-- **No arbitrary `.gitignore`-pattern matching (yet).** v1 scans only the three fixed patterns above. The design spec calls for extending this to any `.gitignore`-matched path containing `claude` (case-insensitive); deferred to a future change.
+- **No deep `.gitignore` walk.** Beyond the three fixed patterns, only gitignored markdown at the repo root is scanned. The archived design spec's rule — any `.gitignore`-matched path containing `claude` — was never built, and would not have caught a root-level private file named for its project (#443).
 - **Not a replacement for the pre-commit hook.** The pre-commit hook protects file-system commits; the redactor protects API writes. Both are required for full coverage.
 
 ## See also
@@ -57,3 +86,4 @@ Two ways:
 - `references/operations.md` — Cautions section, cross-reference
 - `SKILL.md` § "The lane" — the doctrine the redactor enforces in code
 - Issue #102 — design and acceptance
+- Issue #443 — root-markdown discovery, the vacuous outcome, and `jared pre-flight`
