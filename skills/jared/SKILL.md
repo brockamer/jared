@@ -146,7 +146,7 @@ Read the board before anything else. Specifically:
 
 - What's In Progress, and what does its most recent Session note say?
 - Top 3 of Up Next.
-- Any items marked `blocked`.
+- Anything in the Blocked column.
 - Recent closed issues (last 7 days) for context on what just shipped.
 
 Produce a one-screen summary:
@@ -287,7 +287,7 @@ See `references/session-continuity.md` for details.
 
 **WIP limits.** In Progress caps at the project's configured limit (default 4), counted in *workstreams* — In Progress items sharing a `session-N` label collapse into one workstream count, so two `session-1`-labeled issues + one `session-2`-labeled issue = 2 workstreams against the cap. Up Next caps at 8 — more than that is overstocking, since only the top gets pulled anyway.
 
-**Blocked is a state, not a vibe.** When an issue is blocked, it gets the `blocked` label AND a `## Blocked by` section in the body naming the blocker and the owner of unblocking. Blocked items stay in their current column but visually flag. "Waiting for so-and-so" without an owner and a specific expected outcome is not blocked, it's abandoned.
+**Blocked is a state, not a vibe.** Blocked is a Status column, never a label — do not create a `blocked` label. When pulled work gets stuck, move it with `jared move <N> Blocked` and add a `## Blocked by` section to the body naming the blocker, the owner of unblocking, and the expected unblock. A native `blockedBy` edge alone does not put an item in the Blocked column: unstarted work that waits on a dependency stays in Backlog, and `/jared-stage` does not propose it until the blocker closes. "Waiting for so-and-so" without an owner and a specific expected outcome is not blocked, it's abandoned.
 
 **Pullable.** Before an item moves from Up Next to In Progress, Jared checks: does it have (a) a clear next action, (b) acceptance criteria, (c) unblocked dependencies? If any is No, the item isn't pullable yet — shape it first. This is Definition of Ready without ceremony.
 
@@ -316,7 +316,7 @@ When invoked against a repo that has no `docs/project-board.md`:
 
 1. Confirm with the user which GitHub project this repo should be paired with (ask for URL).
 2. Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py --url <project-url> --repo <owner>/<repo>` to introspect the board's field schema and emit a filled-in convention doc at `docs/project-board.md`. The doc includes a machine-readable header block that the `jared` CLI reads for field/option IDs — don't hand-edit that block.
-3. If the project is fresh (no fields beyond defaults), offer to create Status (Backlog / Up Next / In Progress / Done) and Priority (High / Medium / Low). Optionally offer a Work Stream field — useful for projects with multiple distinct categories of work, overkill for small/single-domain projects where labels can do the same job.
+3. If the project is fresh (no fields beyond defaults), offer to create Status (Backlog / Up Next / In Progress / Blocked / Done) and Priority (High / Medium / Low). Optionally offer a Work Stream field — useful for projects with multiple distinct categories of work, overkill for small/single-domain projects where labels can do the same job.
 4. Optionally scaffold `docs/plan-conventions.md` and an issue template if the project wants Superpowers-style planning artifacts.
 
 This makes Jared usable on a fresh repo, a mature repo, and non-software projects alike. A kanban board for renovating a house works identically — the work streams are "Demo", "Rough-in", "Finish", the conventions are the same.
