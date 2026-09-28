@@ -1764,8 +1764,8 @@ def _find_ignored_root_markdown(project_root: Path) -> list[Path]:
     """Return the gitignored `*.md` files directly under `project_root`.
 
     A repo's private source need not be named like `CLAUDE.local.md` (#443:
-    one lives at `<name>-ag-prompt.md`), but gitignoring a markdown file at
-    the root is itself the signal that it must stay private. `git
+    one was named for its project), but gitignoring a markdown file at the
+    root is itself the signal that it must stay private. `git
     check-ignore` asks git, so every ignore source (`.gitignore`,
     `.git/info/exclude`, the global excludes file) counts, and a tracked
     file is never reported. Root level only: walking ignored trees would
@@ -1777,9 +1777,13 @@ def _find_ignored_root_markdown(project_root: Path) -> list[Path]:
     if not candidates:
         return []
     try:
+        # --stdin -z: NUL-separated and unquoted both ways. Without it git
+        # C-quotes non-ASCII names (core.quotePath), so they never match a
+        # candidate and silently drop out. (git accepts -z only with --stdin.)
         proc = subprocess.run(
-            ["git", "check-ignore", "--", *(c.name for c in candidates)],
+            ["git", "check-ignore", "-z", "--stdin"],
             cwd=project_root,
+            input="".join(f"{c.name}\0" for c in candidates),
             capture_output=True,
             text=True,
             check=False,
@@ -1789,7 +1793,7 @@ def _find_ignored_root_markdown(project_root: Path) -> list[Path]:
     # Exit 0 = some ignored, 1 = none ignored, anything else = git error.
     if proc.returncode not in (0, 1):
         return []
-    ignored = set(proc.stdout.splitlines())
+    ignored = set(proc.stdout.split("\0"))
     return [c for c in candidates if c.name in ignored]
 
 

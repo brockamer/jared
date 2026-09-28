@@ -241,6 +241,16 @@ def test_find_private_sources_skips_tracked_and_unignored_root_markdown(
     assert _find_private_sources(tmp_path) == [tmp_path / "ops-prompt.md"]
 
 
+def test_find_private_sources_keeps_non_ascii_ignored_root_markdown(tmp_path: Path) -> None:
+    """git C-quotes non-ASCII paths in its output by default (core.quotePath),
+    so a quoted name would never match its candidate and the file would drop
+    out of discovery silently — the #443 failure in miniature."""
+    _git_init_with_tracked(tmp_path, {".gitignore": "*-notes.md\n"})
+    private = tmp_path / "café-notes.md"
+    private.write_text("private\n")
+    assert _find_private_sources(tmp_path) == [private]
+
+
 def test_find_private_sources_lists_ignored_claude_local_once(tmp_path: Path) -> None:
     """A gitignored CLAUDE.local.md matches both the pattern and the
     root-markdown rule; it is one source, not two."""
