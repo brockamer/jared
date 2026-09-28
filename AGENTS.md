@@ -130,8 +130,9 @@ These aren't just docs — the CLI validates them:
 
 ```
 .claude-plugin/           plugin.json + marketplace.json (self-hosted single-plugin marketplace)
-commands/                 Slash-command stubs (/jared, /jared-audit, /jared-file, /jared-groom,
-                          /jared-init, /jared-reshape, /jared-stage, /jared-start, /jared-wrap)
+commands/                 Slash-command stubs (/jared-status, /jared-audit, /jared-file,
+                          /jared-groom, /jared-init, /jared-reshape, /jared-stage, /jared-start,
+                          /jared-wrap)
 skills/jared/
   SKILL.md                The skill contract — what Jared is, when to trigger, the discipline
   references/             Loaded on demand: operations.md, structural-review.md, board-sweep.md,

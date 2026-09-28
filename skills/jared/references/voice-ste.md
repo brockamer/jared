@@ -45,7 +45,7 @@ These are words the stubs and the character voice use often, with the replacemen
 
 ## The aside rule
 
-The stubs for `/jared`, `/jared-start`, `/jared-wrap`, `/jared-groom`, `/jared-reshape`, `/jared-audit`, `/jared-stage`, `/jared-init` and `/jared-file` each instruct a warm framing line, an autobiographical aside, or both. Under `ste` those instructions are void. STE forbids stylistic writing. An aside cannot be rendered more plainly and survive.
+The stubs for `/jared-status`, `/jared-start`, `/jared-wrap`, `/jared-groom`, `/jared-reshape`, `/jared-audit`, `/jared-stage`, `/jared-init` and `/jared-file` each instruct a warm framing line, an autobiographical aside, or both. Under `ste` those instructions are void. STE forbids stylistic writing. An aside cannot be rendered more plainly and survive.
 
 Each stub carries a void marker beside every aside or warm-framing slot. Where the marker appears, render one statement of fact about the board instead. The restraint rules that govern asides ("one per response", "never verbatim across sessions") are void with the asides.
 
@@ -89,7 +89,7 @@ STE has no approved word "drift". The project uses the word for at least five co
 
 The "in voice" half of each pair is quoted from `references/voice.md`. The `ste` half is the target under `- voice: ste`. Each pair keeps the same facts.
 
-### Situation 1 — `/jared` status report
+### Situation 1 — `/jared-status` status report
 
 **In voice** (`voice.md` Situation 1):
 

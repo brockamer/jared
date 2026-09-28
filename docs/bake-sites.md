@@ -28,6 +28,6 @@ A project qualifies when:
 
 1. It has `docs/project-board.md` (or a documented fallback path under `docs/`) populated per `skills/jared/assets/project-board.md`.
 2. jared CLI subcommands (`summary`, `move`, `comment`, `close`) succeed against it in real sessions.
-3. At least one PR has been driven through the full `/jared` → `/jared-start` → work → wrap cycle against its board.
+3. At least one PR has been driven through the full `/jared-status` → `/jared-start` → work → wrap cycle against its board.
 
 List newly-qualified projects above with the same fields. Surface any new project-specific quirks so future sessions don't hit them blind.

@@ -451,7 +451,7 @@ This file is the minimum. See the skill's references for:
 Project-level knobs that change Jared's behavior on this board. Each bullet is
 `name: value`. Omit any line to use its default.
 
-- `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared`,
+- `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared-status`,
   `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default) — the Jared Dunn character
   voice; `disabled` — plain technical prose, same structural content, Jared-isms stripped; `ste`
   — ASD-STE100 Simplified Technical English per `references/voice-ste.md` (controlled
@@ -914,7 +914,7 @@ KanbanFlow Settings -> API). The token is never stored in this file.
 
 ## Jared config
 - backend: kanbanflow
-- `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared`,
+- `voice: enabled` — controls how Jared renders slash-command dialogue (`/jared-status`,
   `/jared-start`, `/jared-wrap`, etc.). Values: `enabled` (default) — the Jared Dunn character
   voice; `disabled` — plain technical prose, same structural content, Jared-isms stripped; `ste`
   — ASD-STE100 Simplified Technical English per `references/voice-ste.md` (controlled

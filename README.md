@@ -76,7 +76,7 @@ In Claude Code:
 /plugin install jared
 ```
 
-This makes the 9 slash commands available: `/jared`, `/jared-file`,
+This makes the 9 slash commands available: `/jared-status`, `/jared-file`,
 `/jared-start`, `/jared-stage`, `/jared-groom`, `/jared-audit`,
 `/jared-reshape`, `/jared-wrap`, `/jared-init`.
 
@@ -97,14 +97,14 @@ on every invocation, so it has to live in the repo.
 ### First command
 
 ```
-/jared
+/jared-status
 ```
 
 Shows your project URL, the In Progress count, and the top of Up Next /
 Blocked. On a fresh board this is mostly empty — that's expected. As
 you file and move issues, the posture fills out.
 
-> If `/jared` errors with "no docs/project-board.md found," the
+> If `/jared-status` errors with "no docs/project-board.md found," the
 > bootstrap step was skipped or the file lives elsewhere. The CLI
 > autodiscovers across `docs/project-board.md`,
 > `docs/maintainers/project-board.md`, `PROJECT_BOARD.md`, and
@@ -125,7 +125,7 @@ the discipline (stage, groom, plans) becomes incremental.
 
 | | Without Jared | With Jared |
 |---|---|---|
-| **Starting a session** | "What were we doing?" Skim recent commits, re-read CLAUDE.md, scroll the issue list trying to remember which ones are actually live right now. | `/jared` shows In Progress, top of Up Next, what's blocked, what's aging — in two seconds. `/jared-start <N>` loads issue body + latest Session note + linked plan. |
+| **Starting a session** | "What were we doing?" Skim recent commits, re-read CLAUDE.md, scroll the issue list trying to remember which ones are actually live right now. | `/jared-status` shows In Progress, top of Up Next, what's blocked, what's aging — in two seconds. `/jared-start <N>` loads issue body + latest Session note + linked plan. |
 | **Mid-session scope discovery** | "We should also fix X" — either filed as an issue you'll forget about, or done inline and lost in the diff. | The skill triggers on phrases like *"let me refactor X"*, *"I noticed"*, *"I'll file that later"*. `jared file` opens an issue with Priority + Status set atomically before the change happens. |
 | **Plans** | Plans accumulate as markdown files. Claude reads everything in the plans directory each time, so old, shipped, or superseded plans dilute the context that's actually relevant. | Each plan cites its issue. When the issue ships, `/jared-wrap` proposes archiving the plan into `archived/YYYY-MM/`. The active set stays small enough to be load-bearing. |
 | **Ending a session** | Rely on you remembering to commit cleanly, push, and update the right tracking artifact every time, even when the session ran long. The discipline is correct; it's also exactly the discipline that erodes first when you're tired. | `/jared-wrap` checkpoints the session: appends a structured `## Session YYYY-MM-DD` note (Progress / Decisions / Next action / Gotchas / State) to every issue touched, files any discovered scope, and proposes plan archivals. Next session reads from the issue, not your recollection. |
@@ -143,14 +143,14 @@ the discipline (stage, groom, plans) becomes incremental.
 | Every day | `/jared-groom` | Routine sweep — metadata, WIP cap, aging items, pullable check, plan/spec drift, label hygiene. Advisory; you approve each proposed change. |
 | Every day or so | `/jared-stage` | Propose promotions from Backlog → Up Next and revisit anything in Blocked. With `--sessions N`, also proposes cohesion-first `session-N` label assignments so parallel sessions work on file surfaces that overlap with their own, not each other's. Advisory; you approve each move. |
 | When the backlog gets long | `/jared-audit` | Skeptical walk through the oldest items — verdict per issue (close / reshape / leave-alone), operator approves any mutation. |
-| Per work session — start | `/jared` then `/jared-start <N>` | `/jared` orients in 2 seconds. `/jared-start` moves the issue to In Progress and loads everything you need to resume. |
+| Per work session — start | `/jared-status` then `/jared-start <N>` | `/jared-status` orients in 2 seconds. `/jared-start` moves the issue to In Progress and loads everything you need to resume. |
 | Per work session — end | `/jared-wrap` | Captures Progress / Decisions / Next action on every touched issue. Files any discovered scope. Proposes plan archivals. |
 | As scope arrives | `/jared-file` | One atomic operation: create issue, add to board, set Priority + Status + milestone, verify. Milestone is required — pass `--milestone NAME` or `--no-milestone` explicitly. No "filed but invisible" state. |
 
 ### What the cycle looks like
 
 <details>
-<summary><strong>Excerpt — <code>/jared</code> at session start</strong></summary>
+<summary><strong>Excerpt — <code>/jared-status</code> at session start</strong></summary>
 
 ```
 Where we are (2026-05-24):
@@ -291,7 +291,7 @@ Archive? [Y/n] y
 
 ## A note on voice
 
-Jared's conversational surfaces — `/jared` status reports, `/jared-start`
+Jared's conversational surfaces — `/jared-status` status reports, `/jared-start`
 announces, drift-reconcile prompts, error-mode chatter — speak as Jared
 Dunn from *Silicon Valley*: deferential, formally polite, quietly fierce
 about operational integrity. Board writes (issue bodies, Session notes,

@@ -78,7 +78,7 @@ board has Status + Priority set the moment it lands.
 ## 2. Look at the board
 
 ```
-/jared
+/jared-status
 ```
 
 You'll see something like:
@@ -91,7 +91,7 @@ In Progress (0):
 Up Next (top 3 of 0):
 ```
 
-Your new issue is in Backlog, which `/jared` deliberately doesn't list —
+Your new issue is in Backlog, which `/jared-status` deliberately doesn't list —
 the point of the snapshot is "what am I working on right now," not "what
 might I work on someday." To see the full backlog, open the board URL.
 Blocked is also omitted when empty; it appears as its own section as
@@ -212,7 +212,7 @@ handful of issues.
 
 ## Where to go next
 
-- **`/jared`** as you start each working session — orient on what's in
+- **`/jared-status`** as you start each working session — orient on what's in
   flight and what's queued.
 - **`/jared-stage`** once your backlog has more than ~5 items — promotes
   Backlog → Up Next based on pullability, priority, and milestone
