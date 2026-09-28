@@ -206,7 +206,7 @@ gh api graphql --cache 1h -f query='
 
 **ProjectV2 single-select mutations are destructive.** `updateProjectV2ItemFieldValue` overwrites the existing value — there is no "merge," "append," or "add to set." Bucketing tags that need additive semantics belong on issue labels (which *are* additive by nature), not on single-select fields. If you find yourself wanting to express "this issue belongs to multiple work streams," that's a label schema problem, not a field-value problem.
 
-**Pre-flight redaction.** Every `jared file` and `jared comment` runs a pre-flight scan against gitignored claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`). On a hit, the call is refused with a structured diff and exit 2; nothing is posted. Full reference: `references/pii-pre-flight.md`.
+**Pre-flight redaction.** Every `jared file`, `jared comment` and `jared close --body*` runs a pre-flight scan against the repo's gitignored private files (`CLAUDE.local.md`, `.claude/local/*.md`, gitignored `*.md` at the repo root). On a hit, the call is refused with a structured diff and exit 2; nothing is posted. When no private file exists to scan, the call posts and warns on stderr. Any body written another way — `gh issue edit`, `gh api`, an MCP tool — must pass `jared pre-flight --body-file <draft>` first. Full reference: `references/pii-pre-flight.md`.
 
 ## `/jared-audit`
 

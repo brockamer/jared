@@ -355,10 +355,13 @@ tools for single-call operations. The CLI handles everything
 multi-step. Raw `gh` is the last resort.
 
 Every issue body and comment passes through a PII pre-flight before
-any `gh` call — it scans for content sourced from gitignored
-claude-shaped local files (`CLAUDE.local.md`, `.claude/local/*.md`)
-and refuses to post on a hit, so private context Jared *reads* never
-leaks into the public board it *writes*.
+it is posted — it scans for content sourced from the repo's gitignored
+private files (`CLAUDE.local.md`, `.claude/local/*.md`, and gitignored
+`*.md` at the repo root) and refuses to post on a hit, so private
+context Jared *reads* never leaks into the public board it *writes*.
+When a repo has no such file the check warns that it scanned nothing,
+rather than passing silently. `jared pre-flight` runs the same check
+on a draft without posting it.
 
 For development setup, testing, and the layout of the plugin's
 internals, see [`CLAUDE.md`](CLAUDE.md).
