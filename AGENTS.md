@@ -16,13 +16,21 @@ source .venv/bin/activate
 uv pip install -e ".[dev]"    # installs pytest, ruff, mypy
 ```
 
-To test plugin changes interactively in Claude Code, install from the local clone — run from the repo root (the plugin cache at `~/.claude/plugins/cache/` is copied at install time, so edits require `/plugin update jared` + `/reload-plugins` to pick up):
+To test plugin changes interactively in Claude Code, install from the local clone — run from the repo root:
 
 ```
 /plugin marketplace remove jared-marketplace
 /plugin marketplace add ./
 /plugin install jared
 ```
+
+The plugin cache at `~/.claude/plugins/cache/` is a copy made at install time, keyed by the `version` in `.claude-plugin/plugin.json`. **`/plugin update jared` compares that version string, not the commit:** at an unchanged version it reports "already at the latest version" and keeps the old copy. To pick up edits without a version bump, uninstall and reinstall, then `/reload-plugins`:
+
+```bash
+claude plugin uninstall jared@jared-marketplace && claude plugin install jared@jared-marketplace
+```
+
+The same rule governs users: a merge to `main` reaches an existing install only with the release that bumps the version. To check a layout change (for example a command/skill name collision) without touching your own install, run `claude plugin marketplace add`, `claude plugin install` and `claude plugin details jared` with `CLAUDE_CONFIG_DIR` pointing at an empty directory.
 
 ## Common commands
 

@@ -7,6 +7,21 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.34.0 — 2026-09-28
+
+Interim release. Renames the status command to `/jared-status` and closes the pre-flight fail-open. The version bump is what delivers these: `/plugin update jared` compares the version string, so a merge alone reaches no existing install. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
+
+**Features**
+- **`jared pre-flight`** checks a drafted body against the repo's private sources without posting it: exit 0 clean, 2 on a match, 3 when nothing was scanned. (#510, #443)
+
+**Bug fixes**
+- **The status command is `/jared-status`.** `commands/jared.md` and `skills/jared/` both resolved to `/jared:jared`, so the component registered twice and a headless `/jared:jared` reached the status stub instead of the skill. `/jared:jared` now reaches the skill. (#512, #450)
+- **Pre-flight no longer reports a 0-file scan as clean.** Gitignored root `*.md` files count as private sources, non-ASCII file names survive discovery, and `jared file` / `comment` / `close` warn when nothing was scanned. (#510, #443)
+
+**Doctrine**
+- `/jared-groom`, `/jared-audit` and `/jared-wrap` run `jared pre-flight` on body text that bypasses the CLI. (#510, #443)
+- `AGENTS.md` § Developer setup: `/plugin update` is keyed by the version string; refresh a same-version install by uninstalling and reinstalling. (78af98e)
+
 ## v0.33.0 — 2026-09-27
 
 Interim release. Ships `jared set-milestone`, KanbanFlow milestone assignment, session locks that tolerate a non-git project, the Up Next position-order fix, and the `AGENTS.md` adoption. It is also the first tag after the history rewrites of 2026-09-26 and 2026-09-27: `v0.31.0` and `v0.32.0` now point at rewritten commits, and every commit since 2026-09-13 has a new SHA, so a clone or plugin install that predates 2026-09-27 should be re-cloned or reinstalled, never pulled. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
