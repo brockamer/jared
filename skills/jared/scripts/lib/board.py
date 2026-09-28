@@ -1662,16 +1662,32 @@ class RedactionMatch:
     source_file: Path
 
 
+# Why a pre-flight scanned nothing: no `.git/` (so no allowlist and no notion
+# of gitignored), or a git repo in which no private source was found.
+UnscannedReason = Literal["no-git", "no-private-files"]
+
+
 @dataclass
 class RedactionReport:
-    """Result of pre_flight_check. Pure data; caller decides how to react."""
+    """Result of pre_flight_check. Pure data; caller decides how to react.
+
+    Three outcomes, not two (#443): `matches` is non-empty; files were
+    scanned and nothing matched (`clean`); or no file was scanned at all
+    (`vacuous`). A vacuous report proves nothing, so it is never `clean` —
+    a caller that gates on `clean` alone fails closed, not open.
+    """
 
     matches: list[RedactionMatch]
     scanned_files: list[Path]
+    unscanned_reason: UnscannedReason | None = None
+
+    @property
+    def vacuous(self) -> bool:
+        return not self.scanned_files
 
     @property
     def clean(self) -> bool:
-        return not self.matches
+        return bool(self.scanned_files) and not self.matches
 
 
 # Lines shorter than this (post-strip) are too generic to be useful private content.
@@ -1744,6 +1760,52 @@ def _find_claude_shaped_files(project_root: Path) -> list[Path]:
     return found
 
 
+def _find_ignored_root_markdown(project_root: Path) -> list[Path]:
+    """Return the gitignored `*.md` files directly under `project_root`.
+
+    A repo's private source need not be named like `CLAUDE.local.md` (#443:
+    one lives at `<name>-ag-prompt.md`), but gitignoring a markdown file at
+    the root is itself the signal that it must stay private. `git
+    check-ignore` asks git, so every ignore source (`.gitignore`,
+    `.git/info/exclude`, the global excludes file) counts, and a tracked
+    file is never reported. Root level only: walking ignored trees would
+    read `.venv/` and friends on every call.
+    """
+    if not (project_root / ".git").exists():
+        return []
+    candidates = sorted(p for p in project_root.glob("*.md") if p.is_file())
+    if not candidates:
+        return []
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "--", *(c.name for c in candidates)],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
+    # Exit 0 = some ignored, 1 = none ignored, anything else = git error.
+    if proc.returncode not in (0, 1):
+        return []
+    ignored = set(proc.stdout.splitlines())
+    return [c for c in candidates if c.name in ignored]
+
+
+def _find_private_sources(project_root: Path) -> list[Path]:
+    """Every file the pre-flight treats as private, deduplicated, in order.
+
+    The CLAUDE-shaped patterns first, then gitignored root markdown. A
+    gitignored `CLAUDE.local.md` matches both rules and is listed once.
+    """
+    found = _find_claude_shaped_files(project_root)
+    for p in _find_ignored_root_markdown(project_root):
+        if p not in found:
+            found.append(p)
+    return found
+
+
 def _find_project_root(start: Path) -> Path:
     """Walk up from `start` to the nearest ancestor containing a `.git/` entry.
 
@@ -1800,15 +1862,20 @@ def _clear_pre_flight_cache() -> None:
     _PRE_FLIGHT_CACHE.clear()
 
 
+def _unscanned(root: Path) -> RedactionReport:
+    reason: UnscannedReason = "no-git" if not (root / ".git").exists() else "no-private-files"
+    return RedactionReport(matches=[], scanned_files=[], unscanned_reason=reason)
+
+
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
-    """Scan body against gitignored claude-shaped files; return a structured report."""
+    """Scan body against the repo's private sources; return a structured report."""
     root = project_root.resolve()
     cached = _PRE_FLIGHT_CACHE.get(root)
     if cached is None:
-        files = _find_claude_shaped_files(root)
+        files = _find_private_sources(root)
         if not files:
             _PRE_FLIGHT_CACHE[root] = ({}, [])
-            return RedactionReport(matches=[], scanned_files=[])
+            return _unscanned(root)
         tracked = _read_tracked_content(root)
         phrase_to_source: dict[str, Path] = {}
         for f in files:
@@ -1820,6 +1887,8 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
         cached = _PRE_FLIGHT_CACHE[root]
 
     phrase_to_source, scanned_files = cached
+    if not scanned_files:
+        return _unscanned(root)
     if not phrase_to_source:
         return RedactionReport(matches=[], scanned_files=scanned_files)
 
@@ -1845,12 +1914,12 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
     """Format a non-clean RedactionReport for stderr.
 
     Caller is responsible for the exit code; this only writes the diagnostic.
-    No-op when the report is clean — it's a guard against future callers that
-    invoke us without checking. Today's callers always gate with `if not
-    report.clean:`, but the guard prevents the "0 matches across 0 files"
-    nonsense output if that contract ever drifts.
+    No-op when the report has no matches — it's a guard against future
+    callers that invoke us without checking. Today's callers gate on
+    `report.matches`, but the guard prevents the "0 matches across 0 files"
+    nonsense output for a vacuous report, which is not `clean` (#443).
     """
-    if report.clean:
+    if not report.matches:
         return
     f = file if file is not None else sys.stderr
     print(
@@ -1878,6 +1947,36 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
         "    2. OR add the matched phrase to a tracked file if it's intentionally public.",
         file=f,
     )
+
+
+def print_unscanned_notice(
+    report: RedactionReport, project_root: Path, *, file: Any = None
+) -> None:
+    """Warn on stderr that a vacuous report checked nothing (#443).
+
+    Callers still post: the check has nothing to compare against, and
+    refusing would block every repo that has no private file. The warning
+    exists so a 0-file pass never reads as a real one. No-op otherwise.
+    """
+    if not report.vacuous:
+        return
+    f = file if file is not None else sys.stderr
+    print(
+        "warning: pre-flight scanned 0 private files — this body was not checked "
+        "for private content.",
+        file=f,
+    )
+    if report.unscanned_reason == "no-git":
+        print(
+            f"  {project_root} has no .git directory, so no file counts as gitignored.",
+            file=f,
+        )
+    else:
+        print(
+            f"  No private source in {project_root}: gitignore the file at the repo root "
+            "as *.md, or name it CLAUDE.local.md or .claude/local/*.md.",
+            file=f,
+        )
 
 
 def compute_velocity(

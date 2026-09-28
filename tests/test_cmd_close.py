@@ -462,3 +462,29 @@ def test_close_with_body_refuses_on_dirty_pre_flight_report(
     kinds = _call_kinds(calls)
     assert "comment" not in kinds, f"redactor must short-circuit before gh; calls: {kinds}"
     assert "close" not in kinds, f"redactor must block close too; calls: {kinds}"
+
+
+def test_close_with_body_warns_and_posts_when_pre_flight_scans_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#443: a 0-file pre-flight still posts the close comment and closes,
+    and warns on stderr that the body was not checked."""
+    board_md = _write_board_with_status(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls, bodies = _patch_gh_capture_close_with_body(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--body", "Closed as resolved."])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "warning: pre-flight scanned 0 private files" in captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" in kinds and "close" in kinds, kinds
+    assert kinds.index("comment") < kinds.index("close")
+    assert bodies == ["Closed as resolved."]

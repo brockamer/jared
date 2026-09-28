@@ -12,6 +12,7 @@ from skills.jared.scripts.lib.board import (
     RedactionReport,
     _extract_phrases,
     _find_claude_shaped_files,
+    _find_private_sources,
     _find_project_root,
     pre_flight_check,
 )
@@ -26,15 +27,17 @@ def _clear_redactor_cache() -> None:
 
 
 def test_pre_flight_check_empty_body_clean(tmp_path: Path) -> None:
-    """Empty body produces a clean report."""
+    """Empty body produces a clean report when a private file was scanned."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
     report = pre_flight_check("", project_root=tmp_path)
     assert report.clean
     assert report.matches == []
 
 
 def test_redaction_report_clean_property() -> None:
-    """clean is True iff matches is empty."""
-    assert RedactionReport(matches=[], scanned_files=[]).clean is True
+    """clean is True iff at least one file was scanned and nothing matched."""
+    assert RedactionReport(matches=[], scanned_files=[Path("z")]).clean is True
     assert (
         RedactionReport(
             matches=[
@@ -49,6 +52,14 @@ def test_redaction_report_clean_property() -> None:
         ).clean
         is False
     )
+
+
+def test_redaction_report_zero_files_is_vacuous_not_clean() -> None:
+    """#443: a scan of zero files proves nothing, so it must not read as clean."""
+    report = RedactionReport(matches=[], scanned_files=[])
+    assert report.clean is False
+    assert report.vacuous is True
+    assert RedactionReport(matches=[], scanned_files=[Path("z")]).vacuous is False
 
 
 def test_extract_phrases_returns_lines_with_3_plus_words_and_20_plus_chars(
@@ -176,12 +187,66 @@ def test_pre_flight_check_match_in_dot_claude_local_md_flagged(tmp_path: Path) -
     assert report.matches[0].source_file == local / "ops.md"
 
 
-def test_pre_flight_check_no_git_repo_returns_clean(tmp_path: Path) -> None:
+def test_pre_flight_check_no_git_repo_is_vacuous(tmp_path: Path) -> None:
+    """No .git/ means no allowlist, so nothing is scanned — and the report
+    says so, with a reason distinct from "git repo, no private file"."""
     (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
     body = "the deploy host is internal-foo-7.corp.example\n"
     report = pre_flight_check(body, project_root=tmp_path)
-    assert report.clean
+    assert report.matches == []
     assert report.scanned_files == []
+    assert not report.clean
+    assert report.vacuous
+    assert report.unscanned_reason == "no-git"
+
+
+def test_pre_flight_check_git_repo_without_private_file_is_vacuous(tmp_path: Path) -> None:
+    """#443's core defect: a git repo with no private source used to return
+    a bare clean. It must come back vacuous, naming why."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    report = pre_flight_check("Any body at all.\n", project_root=tmp_path)
+    assert not report.clean
+    assert report.vacuous
+    assert report.unscanned_reason == "no-private-files"
+
+
+def test_pre_flight_check_scans_gitignored_root_markdown(tmp_path: Path) -> None:
+    """#443 regression: a gitignored private file at the repo root whose name
+    matches none of the CLAUDE-shaped patterns is still scanned and flags."""
+    _git_init_with_tracked(
+        tmp_path,
+        {".gitignore": "ops-prompt.md\n", "README.md": "Public-safe content only.\n"},
+    )
+    private = tmp_path / "ops-prompt.md"
+    private.write_text("the recovery contact lives at 12 Example Lane\n")
+    body = "Context: the recovery contact lives at 12 Example Lane, per notes.\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert not report.clean
+    assert not report.vacuous
+    assert report.scanned_files == [private]
+    assert report.matches[0].source_file == private
+
+
+def test_find_private_sources_skips_tracked_and_unignored_root_markdown(
+    tmp_path: Path,
+) -> None:
+    """Only *gitignored* root markdown is private. A tracked README and an
+    untracked-but-not-ignored scratch note are not sources."""
+    _git_init_with_tracked(
+        tmp_path,
+        {".gitignore": "ops-prompt.md\n", "README.md": "Public-safe content only.\n"},
+    )
+    (tmp_path / "ops-prompt.md").write_text("private\n")
+    (tmp_path / "handoff.md").write_text("untracked, not ignored\n")
+    assert _find_private_sources(tmp_path) == [tmp_path / "ops-prompt.md"]
+
+
+def test_find_private_sources_lists_ignored_claude_local_once(tmp_path: Path) -> None:
+    """A gitignored CLAUDE.local.md matches both the pattern and the
+    root-markdown rule; it is one source, not two."""
+    _git_init_with_tracked(tmp_path, {".gitignore": "CLAUDE.local.md\n"})
+    (tmp_path / "CLAUDE.local.md").write_text("private\n")
+    assert _find_private_sources(tmp_path) == [tmp_path / "CLAUDE.local.md"]
 
 
 def test_pre_flight_check_records_line_number(tmp_path: Path) -> None:
@@ -321,19 +386,53 @@ def test_print_redaction_diff_format(capsys: pytest.CaptureFixture[str]) -> None
     assert captured.err.index("1. Re-issue") < captured.err.index("2. OR add")
 
 
-def test_print_redaction_diff_no_op_on_clean_report(capsys: pytest.CaptureFixture[str]) -> None:
-    """Guard added during Task 7 review: clean reports produce no output.
+def test_print_redaction_diff_no_op_without_matches(capsys: pytest.CaptureFixture[str]) -> None:
+    """Guard added during Task 7 review: a report without matches produces no
+    output — whether it is clean or vacuous (#443 made those two differ).
 
-    Real callers gate on `if not report.clean:` so this branch is unreachable
-    in practice, but the guard prevents misleading "0 matches across 0 files"
-    output if a future caller forgets to check.
+    Real callers gate on `report.matches` so this branch is unreachable in
+    practice, but the guard prevents misleading "0 matches across 0 files"
+    output if a future caller gates on `not report.clean` instead.
     """
     from skills.jared.scripts.lib.board import print_redaction_diff
 
     print_redaction_diff(RedactionReport(matches=[], scanned_files=[]))
+    print_redaction_diff(RedactionReport(matches=[], scanned_files=[Path("z")]))
     captured = capsys.readouterr()
     assert captured.err == ""
     assert captured.out == ""
+
+
+def test_print_unscanned_notice_names_the_reason(capsys: pytest.CaptureFixture[str]) -> None:
+    """The 0-file warning says the body was not checked and tells the two
+    reasons apart, so the operator knows what to fix."""
+    from skills.jared.scripts.lib.board import print_unscanned_notice
+
+    print_unscanned_notice(
+        RedactionReport(matches=[], scanned_files=[], unscanned_reason="no-git"),
+        Path("/proj"),
+    )
+    no_git = capsys.readouterr().err
+    print_unscanned_notice(
+        RedactionReport(matches=[], scanned_files=[], unscanned_reason="no-private-files"),
+        Path("/proj"),
+    )
+    no_files = capsys.readouterr().err
+    for err in (no_git, no_files):
+        assert err.startswith("warning: pre-flight scanned 0 private files")
+        assert "not checked" in err
+    assert ".git" in no_git
+    assert "gitignore" in no_files
+    assert no_git != no_files
+
+
+def test_print_unscanned_notice_no_op_when_files_were_scanned(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skills.jared.scripts.lib.board import print_unscanned_notice
+
+    print_unscanned_notice(RedactionReport(matches=[], scanned_files=[Path("z")]), Path("/p"))
+    assert capsys.readouterr().err == ""
 
 
 def test_find_project_root_returns_cwd_when_git_at_root(tmp_path: Path) -> None:

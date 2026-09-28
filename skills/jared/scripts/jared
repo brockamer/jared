@@ -42,6 +42,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     gh_env,
     pre_flight_check,
     print_redaction_diff,
+    print_unscanned_notice,
     resolve_body,
 )
 from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
@@ -82,6 +83,7 @@ ALL_SUBCOMMANDS = [
     "move",
     "close",
     "comment",
+    "pre-flight",
     "file",
     "add-to-board",
     "blocked-by",
@@ -213,6 +215,25 @@ def build_parser() -> argparse.ArgumentParser:
         help='Path to markdown file, or "-" for stdin.',
     )
     comment.set_defaults(func=_cmd_comment)
+
+    pre_flight = sub.add_parser(
+        "pre-flight",
+        help=(
+            "Check a drafted body for private content without posting it. "
+            "Exit 0 clean, 2 on a match, 3 when no private source was scanned."
+        ),
+        allow_abbrev=False,
+    )
+    pre_flight_body = pre_flight.add_mutually_exclusive_group(required=True)
+    pre_flight_body.add_argument(
+        "--body",
+        help="Inline body text.",
+    )
+    pre_flight_body.add_argument(
+        "--body-file",
+        help='Path to markdown file, or "-" for stdin.',
+    )
+    pre_flight.set_defaults(func=_cmd_pre_flight)
 
     file_p = sub.add_parser(
         "file",
@@ -552,6 +573,22 @@ def _cmd_get_item(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pre_flight_refuses(body: str) -> bool:
+    """Run the PII pre-flight on `body`; True means refuse to post (#102).
+
+    A hit prints the diff and refuses. A vacuous scan — no private source
+    found — prints a warning and lets the post go ahead (#443): the check
+    had nothing to compare against, and saying so is the operator's cue.
+    """
+    root = _find_project_root(Path.cwd())
+    report = pre_flight_check(body, project_root=root)
+    if report.matches:
+        print_redaction_diff(report, file=sys.stderr)
+        return True
+    print_unscanned_notice(report, root, file=sys.stderr)
+    return False
+
+
 def _cmd_move(args: argparse.Namespace) -> int:
     # Shortcut: set Status=<status>. Synthesize the attrs _cmd_set reads.
     args.field_name = "Status"
@@ -565,9 +602,7 @@ def _cmd_close(args: argparse.Namespace) -> int:
     body: str | None = None
     if args.body is not None or args.body_file is not None:
         body = resolve_body(args.body, args.body_file)
-        report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
-        if not report.clean:
-            print_redaction_diff(report, file=sys.stderr)
+        if _pre_flight_refuses(body):
             return 2
 
     # Optional comment-before-close (#184). Post the Session note first so a
@@ -714,11 +749,9 @@ def _cmd_file(args: argparse.Namespace) -> int:
     body = resolve_body(args.body, args.body_file)
 
     # Pre-flight redaction check (#102): refuse to post when body references
-    # content from gitignored claude-shaped local files. Pure stderr-only
-    # diagnostic; no temp file is staged when we refuse here.
-    report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
-    if not report.clean:
-        print_redaction_diff(report, file=sys.stderr)
+    # content from a gitignored private source. Pure stderr-only diagnostic;
+    # no temp file is staged when we refuse here.
+    if _pre_flight_refuses(body):
         return 2
 
     # provider.file() owns: staging, round-trip fence, gh issue create,
@@ -900,14 +933,35 @@ def _cmd_blocked_by(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pre_flight(args: argparse.Namespace) -> int:
+    """Run the PII pre-flight on a drafted body without posting it (#443).
+
+    For flows that write bodies through `gh` directly (`/jared-groom`,
+    `/jared-audit`), so they can check a draft before the operator approves
+    it. Needs no board. Exit 0: private sources scanned, no match. Exit 2: a
+    match, diff on stderr. Exit 3: nothing was scanned, warning on stderr —
+    the body was not checked, and the operator decides whether to post.
+    """
+    body = resolve_body(args.body, args.body_file)
+    root = _find_project_root(Path.cwd())
+    report = pre_flight_check(body, project_root=root)
+    if report.matches:
+        print_redaction_diff(report, file=sys.stderr)
+        return 2
+    if report.vacuous:
+        print_unscanned_notice(report, root, file=sys.stderr)
+        return 3
+    n = len(report.scanned_files)
+    print(f"OK: pre-flight scanned {n} private file{'' if n == 1 else 's'}; no matches.")
+    return 0
+
+
 def _cmd_comment(args: argparse.Namespace) -> int:
     board = _load_board(args.board)
     body = resolve_body(args.body, args.body_file)
 
     # Pre-flight redaction check (#102): same as _cmd_file.
-    report = pre_flight_check(body, project_root=_find_project_root(Path.cwd()))
-    if not report.clean:
-        print_redaction_diff(report, file=sys.stderr)
+    if _pre_flight_refuses(body):
         return 2
 
     # gh issue comment prints the new comment's URL as plain text, not JSON.

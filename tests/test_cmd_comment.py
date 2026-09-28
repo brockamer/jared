@@ -155,6 +155,16 @@ def test_comment_handles_plain_text_url_response(
 
     url = "https://github.com/brockamer/findajob/issues/42#issuecomment-4312200024"
 
+    # Give the pre-flight a real private source so its scan is clean, not
+    # vacuous — a vacuous scan warns on stderr by design (#443), and this
+    # test pins stderr to empty.
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.local.md").write_text("an unrelated private phrase lives here\n")
+    monkeypatch.chdir(tmp_path)
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+
     def fake_run(args: list[str], **kw: object) -> FakeGhResult:
         return FakeGhResult(stdout=url)
 
@@ -288,3 +298,25 @@ def test_cmd_comment_clean_when_no_claude_local(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     assert bodies == ["ordinary session note."]
+
+
+def test_comment_warns_and_posts_when_pre_flight_scans_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#443: a 0-file pre-flight posts the comment and warns on stderr."""
+    board_md = write_minimal_board(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "comment", "42", "--body", "A routine note."])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "warning: pre-flight scanned 0 private files" in captured.err
+    assert bodies == ["A routine note."]
