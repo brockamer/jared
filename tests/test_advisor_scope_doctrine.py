@@ -31,7 +31,7 @@ SKILL = REPO_ROOT / "skills" / "jared" / "SKILL.md"
 AUDIT_STUB = REPO_ROOT / "commands" / "jared-audit.md"
 
 ROUTINE_STUBS = [
-    REPO_ROOT / "commands" / "jared.md",
+    REPO_ROOT / "commands" / "jared-status.md",
     REPO_ROOT / "commands" / "jared-start.md",
     REPO_ROOT / "commands" / "jared-stage.md",
     REPO_ROOT / "commands" / "jared-file.md",
