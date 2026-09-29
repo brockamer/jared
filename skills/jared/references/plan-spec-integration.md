@@ -124,7 +124,6 @@ The script:
 3. If all closed, moves the file to `archived/YYYY-MM/` (month of latest close).
 4. Prepends the archival header.
 5. Updates the issue's `## Planning` section to point at the new path.
-6. Commits with a standardized message.
 
 ## When the project doesn't use plans/specs
 

@@ -111,4 +111,4 @@ Flow:
 - `--sessions N`: propose session-N label assignments across current candidates. See **Session-N partitioning** above.
 - `--up-next-cap <N>`: override the default Up Next cap of 3. Useful for projects with different WIP norms.
 
-See `docs/superpowers/specs/2026-05-14-jared-stage-design.md` for the full design.
+See `docs/superpowers/specs/archived/2026-05/2026-05-14-jared-stage-design.md` for the full design.

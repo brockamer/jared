@@ -165,4 +165,4 @@ If a rendered response may not be `ste`, examine it against this list:
 
 ## Provenance
 
-ASD-STE100 is the Simplified Technical English specification maintained by the AeroSpace and Defence Industries Association of Europe. Issue 8 is the current issue at the time of writing. The mode was requested on #374; the design is `docs/superpowers/specs/2026-09-13-voice-ste-design.md`.
+ASD-STE100 is the Simplified Technical English specification maintained by the AeroSpace and Defence Industries Association of Europe. Issue 8 is the current issue at the time of writing. The mode was requested on #374; the design is `docs/superpowers/specs/archived/2026-09/2026-09-13-voice-ste-design.md`.

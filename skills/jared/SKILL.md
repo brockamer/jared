@@ -98,8 +98,9 @@ Jared's job is to make the board unignorable. Every session starts by reading it
 Each project documents its conventions in a local file. Check these paths in order:
 
 1. `docs/project-board.md`
-2. `PROJECT_BOARD.md`
-3. `.github/project-board.md`
+2. `docs/maintainers/project-board.md`
+3. `PROJECT_BOARD.md`
+4. `.github/project-board.md`
 
 This file is the contract. It holds: project URL and IDs, field and option IDs (Status and Priority at minimum, plus any project-specific fields such as Work Stream), column definitions, label schema, and any project-specific overrides to the conventions in this skill (e.g., WIP limits, apply gates). Sweep and structural-review checks treat Status + Priority as universally required and any other documented field as required-when-defined.
 
@@ -133,7 +134,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt   # orienta
 
 See `references/jared-cli.md` for the full subcommand reference.
 
-**Tier 3 — batch / advisory / setup.** Named batch scripts under `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/`: `sweep.py`, `bootstrap-project.py`, `dependency-graph.py`, `capture-context.py`, `archive-plan.py`. Each has its own slash command; invoke by name via those commands, not directly in conversation.
+**Tier 3 — batch / advisory / setup.** Named batch scripts under `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/`, each run by a slash command rather than directly in conversation: `sweep.py` (`/jared-groom`), `bootstrap-project.py` (`/jared-init`), `dependency-graph.py` (`/jared-groom`, `/jared-reshape`), `capture-context.py` (`/jared-wrap`), `archive-plan.py` (`/jared-groom`, `/jared-init`), `stage.py` (`/jared-stage`).
 
 **Escape hatch.** Raw `gh issue`, `gh project`, `gh api graphql` only for cases none of the above cover. See `references/operations.md` for the reference card — and for the cache-discipline rules (`--cache 60s` on read-only `gh api` calls; prefer `jared get-item` over `gh issue view --json` for state-only checks) that keep conversational sessions inside the GraphQL budget.
 
@@ -227,7 +228,7 @@ Run the sweep (`scripts/sweep.py` for the mechanical pass, `references/board-swe
 - Reviewing a milestone before its due date → trigger `/jared-audit --type milestones` *(GitHub only — on `- backend: kanbanflow`, `--type milestones` is unavailable: `degraded: MILESTONE_STATE unavailable — --type milestones audit and date-based milestone triggers do not apply`)*
 
 **Doc-sync gate.** If a project's `docs/project-board.md` includes a
-`### Current-state operator docs` block, `jared groom` / `sweep.py` will
+`### Current-state operator docs` block, `/jared-groom` / `sweep.py` will
 emit an advisory when recent closed PRs touched the configured code
 surface (default `src/**`) without touching any listed doc. Opt-in per
 project; never blocks. See
@@ -245,7 +246,7 @@ Trigger when:
 - A complex piece just shipped and you want to reset the pipeline
 - You want a scheduled daily nudge — set up `/schedule jared-stage daily at 9am`
 
-The eval is deterministic: pullable + dependency-ready Backlog items are ranked by Priority > milestone proximity > age in Backlog; Blocked items are re-evaluated for closed blockers and proposed back to Backlog when unblocked. See `commands/jared-stage.md` and `docs/superpowers/specs/2026-05-14-jared-stage-design.md` for the full algorithm.
+The eval is deterministic: pullable + dependency-ready Backlog items are ranked by Priority > milestone proximity > age in Backlog; Blocked items are re-evaluated for closed blockers and proposed back to Backlog when unblocked. See `commands/jared-stage.md` and `docs/superpowers/specs/archived/2026-05/2026-05-14-jared-stage-design.md` for the full algorithm.
 
 Critically, `/jared-stage` never applies changes without operator approval — even on scheduled fires (the `--report-only` flag suppresses the approval prompt; the operator re-runs interactively to apply). The discipline preserves "Jared mirrors decisions, doesn't make them" while removing the "remembering to evaluate" burden.
 
