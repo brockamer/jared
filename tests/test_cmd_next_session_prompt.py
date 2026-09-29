@@ -1,7 +1,8 @@
 """Tests for `jared next-session-prompt` — the board-derived handoff skeleton.
 
 Covers the deterministic, mechanical output: In Progress section with last
-Session note one-liners, Up Next top 3, Recently closed last 7 days, footer.
+Session note one-liners, Up Next top 3, Blocked, Recently closed last 7 days,
+footer.
 All gh calls are patched; no network. Slash-command synthesis is not tested
 here (it lives in commands/jared-wrap.md, not in code).
 """
@@ -91,6 +92,66 @@ def test_next_session_prompt_renders_basic_sections(
     assert "[Medium]" in out
 
 
+def test_next_session_prompt_renders_blocked_column(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The Blocked column is part of the one orientation shape (#467).
+
+    `/jared-status` renders this output verbatim, and SKILL.md's orient list
+    names Blocked, so the section sits between the pull menu and history.
+    Rendered without priority, as `jared summary` renders it.
+    """
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 273, "title": "Filter facets", "state": "OPEN"},
+            {"number": 60, "title": "Waiting on measurement run", "state": "OPEN"},
+        ],
+        statuses={
+            273: ("Up Next", "High"),
+            60: ("Blocked", "Medium"),
+        },
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    blocked = _section(out, "## Blocked")
+    assert "- #60 Waiting on measurement run" in blocked
+    assert "[Medium]" not in blocked
+    assert "#273" not in blocked
+    assert out.find("## Top of Up Next") < out.find("## Blocked") < out.find("## Recently closed")
+
+
+def test_next_session_prompt_session_flag_does_not_filter_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Blocked is board state, not the pull menu — `--session N` leaves it whole."""
+    board_md = write_minimal_board(tmp_path)
+    patch_gh_multi(
+        monkeypatch,
+        open_issues=[
+            {"number": 60, "title": "Waiting on measurement run", "state": "OPEN"},
+        ],
+        statuses={60: ("Blocked", "Medium")},
+        labels_by_number={60: ["session-2"]},
+    )
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "next-session-prompt", "--session", "1"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "- #60 Waiting on measurement run" in _section(out, "## Blocked")
+
+
 def test_next_session_prompt_renders_session_label_inline_for_in_flight(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -156,6 +217,7 @@ def test_empty_board_renders_placeholders(
     assert rc == 0
     assert "(nothing in progress)" in out
     assert "(empty queue)" in out
+    assert "(nothing blocked)" in out
     assert "(none)" in out
 
 

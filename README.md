@@ -125,7 +125,7 @@ the discipline (stage, groom, plans) becomes incremental.
 
 | | Without Jared | With Jared |
 |---|---|---|
-| **Starting a session** | "What were we doing?" Skim recent commits, re-read CLAUDE.md, scroll the issue list trying to remember which ones are actually live right now. | `/jared-status` shows In Progress, top of Up Next, what's blocked, what's aging — in two seconds. `/jared-start <N>` loads issue body + latest Session note + linked plan. |
+| **Starting a session** | "What were we doing?" Skim recent commits, re-read CLAUDE.md, scroll the issue list trying to remember which ones are actually live right now. | `/jared-status` shows In Progress with each item's last next action, top of Up Next, what's blocked, and what just closed — in two seconds. `/jared-start <N>` loads issue body + latest Session note + linked plan. |
 | **Mid-session scope discovery** | "We should also fix X" — either filed as an issue you'll forget about, or done inline and lost in the diff. | The skill triggers on phrases like *"let me refactor X"*, *"I noticed"*, *"I'll file that later"*. `jared file` opens an issue with Priority + Status set atomically before the change happens. |
 | **Plans** | Plans accumulate as markdown files. Claude reads everything in the plans directory each time, so old, shipped, or superseded plans dilute the context that's actually relevant. | Each plan cites its issue. When the issue ships, `/jared-wrap` proposes archiving the plan into `archived/YYYY-MM/`. The active set stays small enough to be load-bearing. |
 | **Ending a session** | Rely on you remembering to commit cleanly, push, and update the right tracking artifact every time, even when the session ran long. The discipline is correct; it's also exactly the discipline that erodes first when you're tired. | `/jared-wrap` checkpoints the session: appends a structured `## Session YYYY-MM-DD` note (Progress / Decisions / Next action / Gotchas / State) to every issue touched, files any discovered scope, and proposes plan archivals. Next session reads from the issue, not your recollection. |
@@ -153,22 +153,31 @@ the discipline (stage, groom, plans) becomes incremental.
 <summary><strong>Excerpt — <code>/jared-status</code> at session start</strong></summary>
 
 ```
-Where we are (2026-05-24):
+Where we are, gosh — quick read of the board as of 2026-05-24.
 
-In Progress (1/4):
-  #89 [Low] feat(archive-plan): support recycled-issue plans
-    Last session: "Add ## Shipped section parser to lib/board.py; tests next"
+# Session handoff — brockamer/jared — 2026-05-24 09:12
 
-Up Next (top 3):
-  #76 [Medium] Jared roadmap — open strategic questions — pullable: yes
-  #80 [Medium] feat(ties): LLM-pass overlay for semantic ties — pullable: yes
-  #67 [Low] verify: #22 rate-limit fix smoke results on findajob — pullable: yes
+## In flight
 
-Blocked:
-  #60 — waiting on findajob measurement run for post-#51/#55 GraphQL delta
+- #89 [Low] feat(archive-plan): support recycled-issue plans
+  Last session: "Add ## Shipped section parser to lib/board.py; tests next"
 
-Aging: none
-Totals: 6 open (0 H / 3 M / 3 L)
+## Top of Up Next
+
+- #76 [Medium] Jared roadmap — open strategic questions
+- #80 [Medium] feat(ties): LLM-pass overlay for semantic ties
+- #67 [Low] verify: #22 rate-limit fix smoke results on findajob
+
+## Blocked
+
+- #60 Measure the post-#51/#55 GraphQL delta on findajob
+
+## Recently closed (last 7 days)
+
+- #88 feat(close): require a Guidance audit before closing  (2026-05-23)
+
+## To start
+...
 ```
 
 </details>

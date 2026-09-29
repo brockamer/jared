@@ -128,6 +128,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --b
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> [--body]   # JSON lookup helper; --body adds the issue body (#410)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary          # fast one-screen status
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt   # orientation posture; /jared-status and /jared-start print it
 ```
 
 See `references/jared-cli.md` for the full subcommand reference.
@@ -149,16 +150,9 @@ Read the board before anything else. Specifically:
 - Anything in the Blocked column.
 - Recent closed issues (last 7 days) for context on what just shipped.
 
-Produce a one-screen summary:
+`${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt` prints exactly these four, as the sections `## In flight`, `## Top of Up Next`, `## Blocked` and `## Recently closed (last 7 days)`. Print its output verbatim — do not re-shape it into a template of your own. It is the one orientation shape: `/jared-status` prints it, and `/jared-start` prints it with the pick and any session-start checks added. The section contract is in `references/session-continuity.md` § "Auto-orientation on session start".
 
-```
-Where we are: #<N> <title> — <last session summary one-liner>
-Next action: <from Session note>
-On deck: #<M> <title>, #<P> <title>
-Blockers: #<Q> (<reason>)
-```
-
-This replaces the handoff-prompt pattern entirely. Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary` for a quick surface; for full context see the richer query in `references/session-continuity.md`.
+This replaces the handoff-prompt pattern entirely. `jared summary` is a narrower one-screen read (no Session-note next action, no recently closed); use it for a quick check mid-session, not for orientation.
 
 ### Before substantive work — confirm it's on the board
 
@@ -339,7 +333,7 @@ See `references/new-board.md` for the full bootstrap flow and `assets/project-bo
 
 Triggers handle most invocations. Slash commands exist for explicit, guaranteed invocation:
 
-- **`/jared-status`** — fast status: In Progress + top 3 Up Next + blocked + aging. Read-only.
+- **`/jared-status`** — fast status: In Progress with the last next action, top 3 Up Next, Blocked, recently closed — the `jared next-session-prompt` output. Read-only. Aging is `/jared-groom`'s.
 - **`/jared-file`** — guided issue filing. Delegates to `jared file` (Tier 2) which creates the issue, adds it to the board, sets Priority + Status + any extra single-select fields, and verifies — killing the two-step footgun.
 - **`/jared-start <issue-ref>`** — begin work: move to In Progress, load context, announce the session plan.
 - **`/jared-wrap`** — end session: Session notes, drift reconciliation, discovered-scope filing, plan archival proposals.

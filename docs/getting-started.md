@@ -84,18 +84,34 @@ board has Status + Priority set the moment it lands.
 You'll see something like:
 
 ```
-Board: https://github.com/users/<you>/projects/<project-#>
+# Session handoff — <you>/<repo> — <date> <time>
 
-In Progress (0):
+## In flight
 
-Up Next (top 3 of 0):
+(nothing in progress)
+
+## Top of Up Next
+
+(empty queue)
+
+## Blocked
+
+(nothing blocked)
+
+## Recently closed (last 7 days)
+
+(none)
+
+## To start
+...
 ```
 
 Your new issue is in Backlog, which `/jared-status` deliberately doesn't list —
 the point of the snapshot is "what am I working on right now," not "what
 might I work on someday." To see the full backlog, open the board URL.
-Blocked is also omitted when empty; it appears as its own section as
-soon as the column has at least one item.
+An empty section keeps its heading and prints a placeholder, so the
+report has the same shape every time. `/jared-start` prints the same
+sections when a session begins.
 
 ---
 
