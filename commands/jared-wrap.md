@@ -157,7 +157,7 @@ Flow:
      EOF
      ```
 
-     Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
+     Write the closing `EOF` at column 0, here and in the heredocs below: bash ends a `<<'EOF'` heredoc only at a line that is exactly `EOF`, so an indented terminator swallows the rest of the command. Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
 
      On `skip`: exit wrap (the lock is still cleared at the end). Note that the staging above has already run, so `skip` leaves tracked changes in the index. Say so, and do **not** `git reset` to tidy it: a reset would also discard staging the operator did before wrap started, and re-running wrap re-runs `git add -u` anyway. Nothing is committed and nothing untracked was added, which is what `skip` promises.
 
