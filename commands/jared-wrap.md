@@ -122,10 +122,12 @@ Flow:
    Loop:
 
    ```bash
-   STEP=$(${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared wrap-state)
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared wrap-state
    ```
 
-   **Check the exit code before dispatching on `$STEP`.** `wrap-state` exits non-zero
+   It prints one step name on stdout. Run it bare: an assignment such as `STEP=$(…)` prints nothing, so the step never reaches the conversation that dispatches on it (#468).
+
+   **Check the exit code before dispatching on the printed step.** `wrap-state` exits non-zero
    with an empty stdout when it cannot determine PR state — `gh pr view` failed for a
    reason other than "no PR exists" (auth, network, rate limit), so reporting
    `create_pr` would tell you to open a PR that may already exist (F7, #371). On a
@@ -147,23 +149,37 @@ Flow:
 
      Show `git status` as before. If that second command lists anything, show the list and ask: *"Also stage these N untracked path(s)? (y/N)"* — default **No**. On `y`, stage them by explicit path (`git add -- <path> ...`); a blanket form cannot tell a file nobody added yet from one that must never enter git history, and this loop pushes and opens a PR a step later. A deliberately-untracked file has to be able to survive a wrap.
 
-     Then ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: run `git commit -m "$msg"`. Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
+     Then ask: *"Commit message? (or 'skip' to leave uncommitted and exit)"*. On a message: write it into a quoted heredoc, so a backtick or `$` in it stays literal text:
+
+     ```bash
+     git commit -F - <<'EOF'
+     <message>
+     EOF
+     ```
+
+     Loop continues after a successful commit. When only tracked files changed — the common case — the untracked question does not appear and this is still one prompt.
 
      On `skip`: exit wrap (the lock is still cleared at the end). Note that the staging above has already run, so `skip` leaves tracked changes in the index. Say so, and do **not** `git reset` to tidy it: a reset would also discard staging the operator did before wrap started, and re-running wrap re-runs `git add -u` anyway. Nothing is committed and nothing untracked was added, which is what `skip` promises.
 
    - **`push`** (local commits ahead of remote): Run `git push -u origin $(git rev-parse --abbrev-ref HEAD)`. On failure, surface the git error and exit. Loop continues on success.
 
-   - **`create_pr`** (no PR for the branch): Auto-generate title from the issue title (the issue moved to In Progress at start). Auto-generate body from the issue's first paragraph + the commit subjects on the branch. Run:
+   - **`create_pr`** (no PR for the branch): Auto-generate title from the issue title (the issue moved to In Progress at start). Auto-generate body from the issue's first paragraph + the commit subjects on the branch. Write both into the command as literal text inside quoted heredocs — they are generated in the conversation, not by an earlier Bash call, and a backtick in either would otherwise run as a command:
 
      ```bash
-     gh pr create --title "$TITLE" --body "$BODY"
+     TITLE=$(cat <<'EOF'
+     <title>
+     EOF
+     )
+     gh pr create --title "$TITLE" --body-file - <<'EOF'
+     <body>
+     EOF
      ```
 
      On failure, surface the gh error and exit. Loop continues on success.
 
    - **`wait_checks`** (PR exists, checks pending): Print *"PR #N: checks pending. Re-run `/jared-wrap` when they're green and I'll handle the merge."* Exit the loop (do not poll). The remaining wrap steps (lock-clear) still run.
 
-   - **`surface_failure`** (PR exists, checks failed): Print the failed check names from `gh pr checks $PR --json`. Exit the loop. Lock-clear runs.
+   - **`surface_failure`** (PR exists, checks failed): Print the failed check names from `gh pr checks <PR> --json name,bucket --jq '.[] | select(.bucket == "fail") | .name'`. Exit the loop. Lock-clear runs.
 
    - **`update_branch`** (`mergeStateStatus=BEHIND` — branch trails base): The branch is cleanly behind the default branch (no conflict, just out of date — the default branch advanced after the last push). Integrate and re-push: `git fetch origin && git merge --no-edit origin/HEAD`, re-run the project's format and test commands (as in the integrate step above), `git push`, then re-run `/jared-wrap`. Same merge-not-rebase rule as the integrate-before-PR step. Exit the loop. Lock-clear runs.
 
@@ -199,7 +215,17 @@ Flow:
 
      On `y`: run `gh pr merge <N> <strategy> --delete-branch`. On success, loop continues (next state will be `cleanup`). On failure (e.g., GitHub rejected as not-mergeable since the last check), surface the gh error and exit the loop.
 
-     On `edit`: prompt for new title/body inline; run `gh pr edit <N> --title "$NEW_TITLE" --body "$NEW_BODY"`; re-render the confirm block.
+     On `edit`: prompt for new title/body inline, write them in as `create_pr` does, and re-render the confirm block:
+
+     ```bash
+     TITLE=$(cat <<'EOF'
+     <new title>
+     EOF
+     )
+     gh pr edit <N> --title "$TITLE" --body-file - <<'EOF'
+     <new body>
+     EOF
+     ```
 
      On `no`: exit the loop. Lock-clear runs.
 
@@ -218,6 +244,8 @@ Flow:
      **Non-git checkout.** When the project root has no `.git` directory, this exits 0 having cleared nothing and prints one notice to stderr saying so (#425). Report the skip rather than a cleared lock — `/jared-start` wrote none either, so the locking protocol was inert for this session at both ends. Before #425 the clear was silently exit 0, which read identically to a successful removal and let wrap report a clean close-out for a protocol that never engaged. The skip is keyed on the absent `.git`, not on the backend, which is why it is not a `degraded:` line.
    - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the session's `feature/<N>-<slug>` branch has merged into the default branch, remove the worktree and delete the branch from the main checkout. Read the branch name from the worktree first — it's slugified from the issue title (#278), not a fixed string, so don't reconstruct it by hand:
      ```bash
+     GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
+     REPO_ROOT=$(realpath "$(dirname "$GIT_COMMON_DIR")")
      BRANCH=$(git -C "<worktree-path>" rev-parse --abbrev-ref HEAD)
      git -C "$REPO_ROOT" worktree remove "<worktree-path>"
      git -C "$REPO_ROOT" branch -d "$BRANCH"
