@@ -51,6 +51,7 @@ from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
     Capability,
     ClosedItem,
     Comment,
+    Edge,
 )
 from lib.capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     degraded_or_none,
@@ -61,6 +62,7 @@ from lib.github_provider import (  # type: ignore[import-not-found]  # noqa: E40
     FileRoundTripError,
     IssueResolutionError,
 )
+from lib.pick import Pick, choose, render_pick  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _normalize_priority(s: str) -> str:
@@ -346,6 +348,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help="Filter Top of Up Next to issues labeled session-N (e.g., --session 1).",
+    )
+    nsp.add_argument(
+        "--pick",
+        action="store_true",
+        help=(
+            "Add a ## Pick section: the next item for a bare /jared-start, the rule "
+            "step that chose it, and each item passed over with its reason (#516). "
+            "Needs --repo-root."
+        ),
+    )
+    nsp.add_argument(
+        "--repo-root",
+        default=None,
+        help="Main checkout whose git common dir holds the session locks (with --pick).",
     )
     nsp.set_defaults(func=_cmd_next_session_prompt)
 
@@ -1380,7 +1396,14 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
 
     The output's structural contract is what the slash command depends on,
     so changes here are user-visible.
+
+    `--pick` adds the `## Pick` section a bare `/jared-start` acts on (#516).
+    It reasons over the same `items` the posture prints, so the two cannot
+    disagree on order.
     """
+    if args.pick and args.repo_root is None:
+        print("jared: --pick needs --repo-root <main checkout>", file=sys.stderr)
+        return 2
     board = _load_board(args.board)
     if getattr(args, "fresh", False):
         board.invalidate_items()
@@ -1413,6 +1436,9 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     # stdout — which reads like a valid (but empty) posture (#395).
     comments_by_number: dict[int, list[Comment]] = board.provider.list_comments_batch(
         [item.number for item in in_progress]
+    )
+    pick: Pick | None = (
+        _pick(board, items, Path(args.repo_root).resolve(), session_filter) if args.pick else None
     )
 
     print(f"# Session handoff — {board.repo} — {_now_local_iso()}")
@@ -1447,6 +1473,12 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             prio = item.priority or "-"
             print(f"- #{item.number} [{prio}] {item.title}")
         print()
+    if pick is not None:
+        print("## Pick")
+        print()
+        for line in render_pick(pick):
+            print(line)
+        print()
     print("## Recently closed (last 7 days)")
     print()
     if recently_closed_note:
@@ -1468,7 +1500,10 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             print()
     print("## To start")
     print()
-    print("Read the sections above, decide which issue to pull, then:")
+    if pick is not None and pick.number is not None:
+        print("A bare /jared-start starts the pick above. To start another issue:")
+    else:
+        print("Read the sections above, decide which issue to pull, then:")
     print()
     print("```")
     print("/jared-start <#N>")
@@ -1480,6 +1515,26 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
         "Source of truth is the issues, plans, and memory."
     )
     return 0
+
+
+def _pick(board: Board, items: list[BoardItem], repo_root: Path, session: int | None) -> Pick:
+    """Read the locks and edges, then apply `lib.pick.choose` to `items`.
+
+    A non-git root has no lock directory (#425): the shared notice goes to
+    stderr and the pick runs with no locks, as `session-resolve` does.
+    """
+    locked: set[int] = set()
+    if not _announce_non_git_skip(repo_root):
+        locked = {lock.issue for lock in session_lock.list_active_locks(repo_root)}
+    edges: list[Edge] = board.provider.fetch_blocked_by_edges()
+
+    def body_of(item: BoardItem) -> str:
+        # GitHub's open-items query carries no body; KanbanFlow's does.
+        body: str = item.body or board.provider.get_body(item.number)
+        return body
+
+    pick: Pick = choose(items, edges=edges, locked=locked, session=session, body_of=body_of)
+    return pick
 
 
 def _cmd_ties(args: argparse.Namespace) -> int:
