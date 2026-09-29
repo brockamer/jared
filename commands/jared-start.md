@@ -107,7 +107,7 @@ Flow:
 3. **Check pullable state.** Read the target issue's body — `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, the same portable route step 5 uses, since this check runs before the move and on every backend — and verify:
    - First paragraph is a clear summary
    - `## Acceptance criteria` is populated (not empty or placeholder)
-   - `## Depends on` — all referenced issues are closed or already done
+   - No open blocker — the pick already skips items with an open native `blockedBy` edge; for an issue the operator named, run `jared ties <N>` (step 6) and treat a `blocking — sequence #M first` tie whose #M is still open as a stop
    If any is missing, pause and propose reshaping the issue first. Pullable is a discipline, not a formality.
 
 4. **Move to In Progress.** One call:

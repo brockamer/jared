@@ -177,7 +177,7 @@ Before writing code, load the full context for this issue:
 - Issue body (including `## Current state` and `## Decisions` sections)
 - Most recent Session note (top comment matching the Session note format)
 - Linked plan or spec, if the `## Planning` section references one
-- Any blockers named in `## Depends on`
+- Any open blockers (native `blockedBy` edges — `jared ties <N>` lists them)
 
 Announce the plan for the session in a short preamble. This primes you *and* creates a record the user can correct.
 
@@ -297,7 +297,7 @@ A reader glancing at the board must understand the state of the world. Enforce:
 
 - **Titles ≤ 70 characters, verb-first.** "Add X", "Fix Y", "Refactor Z". Not "X needs to happen" or "Feature: X".
 - **First line of body is a one-sentence summary.** Scannable without expanding.
-- **Structured sections** (`## Current state`, `## Decisions`, `## Depends on`, `## Planning`) carry living content.
+- **Structured sections** (`## Current state`, `## Decisions`, `## Planning`) carry living content.
 - **`<details>` blocks** hold the deep scope — acceptance criteria, implementation notes, reproduction steps. Hidden by default so the body isn't a wall.
 
 See `references/human-readable-board.md` for title/body templates and `assets/issue-body.md.template` for the default body scaffold.
