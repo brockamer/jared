@@ -28,7 +28,7 @@ Flow:
 
    **Never fabricate.** Empty fields stay empty. If you'd have to guess, ask or leave blank.
 
-   **Pre-flight redaction.** Session notes posted via `jared comment` / `jared close` are scanned by the same pre-flight as `jared file`; drafts referencing private content from a gitignored file are refused on post — fix the draft, don't fight the redactor. `## Current state` and `## Decisions` updates go through `capture-context.py`, which does not run the check: run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body "<text>"` on that text first (exit 2 = do not post; exit 3 = tell the operator it was not checked). Relay any `warning: pre-flight scanned 0 private files` line to the operator. See `references/pii-pre-flight.md`.
+   **Pre-flight redaction.** Session notes posted via `jared comment` / `jared close` are scanned by the same pre-flight as `jared file`; drafts referencing private content from a gitignored file are refused on post — fix the draft, don't fight the redactor. `## Current state` and `## Decisions` updates go through `capture-context.py`, which does not run the check: run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body "<text>"` on that text first (exit 2 = do not post; exit 3 = tell the operator it was not checked). Relay any `warning: pre-flight` line to the operator. See `references/pii-pre-flight.md`.
 
 3. **Reconcile drift.** Before posting, check for:
    - In Progress items that were actually completed → propose closing

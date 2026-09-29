@@ -208,9 +208,9 @@ OK: closed #12, Status=Done
 
 PII pre-flight (#102) runs on the comment body, same as `jared comment`
 and `jared file`. A redaction-dirty body short-circuits before any gh call —
-neither the comment nor the close runs. A scan that found no private file
-posts anyway and prints `warning: pre-flight scanned 0 private files` to
-stderr (#443).
+neither the comment nor the close runs. A scan that compared nothing — no
+private file, or none with a usable phrase — posts anyway and prints a
+`warning: pre-flight` line to stderr (#443, #526).
 
 ---
 

@@ -115,7 +115,7 @@ Flow:
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body-file <tmp>
    ```
 
-   Exit 0: proceed. Exit 2: show the operator the flagged lines and do not post. Exit 3: nothing was scanned — say in the approval prompt that the draft was not checked, and let the operator decide. See `references/pii-pre-flight.md`.
+   Exit 0: proceed. Exit 2: show the operator the flagged lines and do not post. Exit 3: nothing was checked — say in the approval prompt that the draft was not checked, and let the operator decide. See `references/pii-pre-flight.md`.
 
    **On a `- backend: kanbanflow` board:** the gaps section and the drafting both work (the provider carries task descriptions on the row), but `gh issue edit` is not the route and there is no CLI surface for a body edit on that backend yet — see #403. Present the drafts, say plainly that they can't be applied from here, and stop.
 

@@ -1,6 +1,6 @@
 # PII Pre-Flight Redactor
 
-A runtime check that scans issue and comment bodies for content matched against the repo's gitignored private files. Refuses to post on hits, and says so when it had nothing to scan. Closes the gap that jared's `gh` / MCP API calls bypass any local pre-commit hook protecting file-based commits.
+A runtime check that scans issue and comment bodies for content matched against the repo's gitignored private files. Refuses to post on hits, and says so when it had nothing to compare. Closes the gap that jared's `gh` / MCP API calls bypass any local pre-commit hook protecting file-based commits.
 
 ## What it scans
 
@@ -24,6 +24,8 @@ Each line of each scanned file is a candidate phrase if — after stripping mark
 
 Shorter content (single words, short tokens, generic markdown structure) is ignored. The thresholds catch rich content like `"the deploy host is internal-foo-7.corp.example"` while ignoring `"# Section"`, `"- foo"`, or `"hostname"`.
 
+A phrase matches only when the body contains the whole cleaned line. A list of short terms, one per line, therefore gives no phrase at all, and the check compares nothing against that file. The report is vacuous, not clean (#526) — see "When nothing is scanned".
+
 ## Allowlist semantics
 
 A phrase that appears in *any* tracked file is already public — the redactor does not flag it. The check is `phrase in <concatenated tracked file contents>` via one `git ls-files` call per `jared` invocation (cached process-locally).
@@ -40,15 +42,29 @@ This means: if you intentionally documented something publicly in `README.md` an
 
 ## When nothing is scanned
 
-A scan of zero files proves nothing, so it is never reported as clean (#443). `RedactionReport` has three outcomes: `matches` non-empty; `clean` (at least one file scanned, no match); or `vacuous` (no file scanned), with `unscanned_reason` set to `no-git` or `no-private-files`. A caller that gates on `clean` alone therefore fails closed.
+A check that compared nothing proves nothing, so it is never reported as clean (#443). `RedactionReport` has three outcomes: `matches` non-empty; `clean` (private phrases compared, no match); or `vacuous` (nothing compared), with `unscanned_reason` set to one of:
 
-`jared file`, `jared comment` and `jared close` still post on a vacuous scan — refusing would block every repo that has no private file — but first print a warning to stderr:
+| Reason | Cause |
+|---|---|
+| `no-git` | The project root has no `.git/` directory, so no file counts as gitignored. |
+| `no-private-files` | A git repo, but no private source was found. |
+| `no-usable-phrases` | Private files were found, but every line is under the phrase floor or also appears in a tracked file (#526). Only this reason comes with a non-empty `scanned_files`. |
+
+A caller that gates on `clean` alone therefore fails closed.
+
+`jared file`, `jared comment` and `jared close` still post on a vacuous scan — refusing would block every repo whose private file holds only short lines, or that has none — but first print a warning to stderr. With no private file found:
 
 ```
 warning: pre-flight scanned 0 private files — this body was not checked for private content.
 ```
 
-followed by one line naming the reason and the fix. **Relay that warning to the operator.** It is the only sign that the post went out unchecked; a repo that does hold private context under an unrecognised path needs it moved to a scanned location.
+followed by one line naming the reason and the fix. With private files that gave no phrase:
+
+```
+warning: pre-flight found no usable phrase in 1 private file — this body was not checked for private content.
+```
+
+followed by one line per file and one line stating the phrase rule. **Relay any `warning: pre-flight` line to the operator.** It is the only sign that the post went out unchecked. A repo that holds private context under an unrecognised path needs it moved to a scanned location; a private file of short terms is not checked term by term.
 
 ## Checking a draft without posting — `jared pre-flight`
 
@@ -60,9 +76,9 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body-file <draft> 
 
 | Exit | Meaning | Do |
 |---|---|---|
-| 0 | Private sources scanned, no match. Stdout: `OK: pre-flight scanned N private file(s); no matches.` | Proceed to approval. |
+| 0 | Private phrases compared, no match. Stdout: `OK: pre-flight scanned N private file(s); no matches.` | Proceed to approval. |
 | 2 | A match. Stderr carries the diff. | Do not post. Show the operator the flagged lines and revise the draft. |
-| 3 | Nothing was scanned. Stderr carries the warning. | Tell the operator the draft was not checked, and let them decide whether to post. |
+| 3 | Nothing was checked: no private file was found, or none gave a usable phrase. Stderr carries the warning. | Tell the operator the draft was not checked, and let them decide whether to post. |
 
 It needs no board and runs from anywhere inside the repo (it walks up to the `.git/` root, like the posting commands).
 
@@ -87,3 +103,4 @@ Two ways:
 - `SKILL.md` § "The lane" — the doctrine the redactor enforces in code
 - Issue #102 — design and acceptance
 - Issue #443 — root-markdown discovery, the vacuous outcome, and `jared pre-flight`
+- Issue #526 — a private file that gives no usable phrase is vacuous, not clean
