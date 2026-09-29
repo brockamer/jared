@@ -1662,19 +1662,23 @@ class RedactionMatch:
     source_file: Path
 
 
-# Why a pre-flight scanned nothing: no `.git/` (so no allowlist and no notion
-# of gitignored), or a git repo in which no private source was found.
-UnscannedReason = Literal["no-git", "no-private-files"]
+# Why a pre-flight compared nothing: no `.git/` (so no allowlist and no notion
+# of gitignored); a git repo in which no private source was found; or private
+# sources that yield no phrase once short lines and tracked lines are dropped
+# (#526). Only the last one comes with a non-empty `scanned_files`.
+UnscannedReason = Literal["no-git", "no-private-files", "no-usable-phrases"]
 
 
 @dataclass
 class RedactionReport:
     """Result of pre_flight_check. Pure data; caller decides how to react.
 
-    Three outcomes, not two (#443): `matches` is non-empty; files were
-    scanned and nothing matched (`clean`); or no file was scanned at all
-    (`vacuous`). A vacuous report proves nothing, so it is never `clean` —
-    a caller that gates on `clean` alone fails closed, not open.
+    Three outcomes, not two (#443): `matches` is non-empty; private phrases
+    were compared and nothing matched (`clean`); or nothing was compared at
+    all (`vacuous`). A vacuous report proves nothing, so it is never `clean`
+    — a caller that gates on `clean` alone fails closed, not open. Files can
+    be found and still leave the report vacuous (#526), so `vacuous` keys on
+    `unscanned_reason` as well as on the file count.
     """
 
     matches: list[RedactionMatch]
@@ -1683,11 +1687,11 @@ class RedactionReport:
 
     @property
     def vacuous(self) -> bool:
-        return not self.scanned_files
+        return not self.scanned_files or self.unscanned_reason is not None
 
     @property
     def clean(self) -> bool:
-        return bool(self.scanned_files) and not self.matches
+        return not self.vacuous and not self.matches
 
 
 # Lines shorter than this (post-strip) are too generic to be useful private content.
@@ -1894,7 +1898,11 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     if not scanned_files:
         return _unscanned(root)
     if not phrase_to_source:
-        return RedactionReport(matches=[], scanned_files=scanned_files)
+        # Files were found, but no line survived the phrase floor and the
+        # tracked-content filter. Nothing was compared (#526).
+        return RedactionReport(
+            matches=[], scanned_files=scanned_files, unscanned_reason="no-usable-phrases"
+        )
 
     matches: list[RedactionMatch] = []
     body_lines = body.splitlines()
@@ -1961,10 +1969,34 @@ def print_unscanned_notice(
     Callers still post: the check has nothing to compare against, and
     refusing would block every repo that has no private file. The warning
     exists so a 0-file pass never reads as a real one. No-op otherwise.
+
+    When files were found but gave no phrase (#526), "scanned 0 private
+    files" would be false. That notice names the files and states the
+    phrase rule instead, because a list of short terms is the usual cause.
     """
     if not report.vacuous:
         return
     f = file if file is not None else sys.stderr
+    if report.unscanned_reason == "no-usable-phrases":
+        n = len(report.scanned_files)
+        print(
+            f"warning: pre-flight found no usable phrase in {n} private "
+            f"file{'' if n == 1 else 's'} — this body was not checked for private content.",
+            file=f,
+        )
+        for p in report.scanned_files:
+            try:
+                shown = p.relative_to(project_root)
+            except ValueError:
+                shown = p
+            print(f"  {shown}", file=f)
+        print(
+            f"  A line counts only with {_MIN_PHRASE_CHARS}+ characters and "
+            f"{_MIN_PHRASE_WORDS}+ words, and it matches only when the body repeats "
+            "the whole line. A line that a tracked file also holds does not count.",
+            file=f,
+        )
+        return
     print(
         "warning: pre-flight scanned 0 private files — this body was not checked "
         "for private content.",

@@ -6,7 +6,12 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import FakeGhResult, import_cli, patch_gh_by_arg
+from tests.conftest import (
+    FakeGhResult,
+    import_cli,
+    patch_gh_by_arg,
+    write_short_line_private_file,
+)
 
 
 def _write_board_with_status(tmp_path: Path) -> Path:
@@ -487,4 +492,34 @@ def test_close_with_body_warns_and_posts_when_pre_flight_scans_nothing(
     kinds = _call_kinds(calls)
     assert "comment" in kinds and "close" in kinds, kinds
     assert kinds.index("comment") < kinds.index("close")
+    assert bodies == ["Closed as resolved."]
+
+
+def test_close_with_body_warns_and_posts_when_private_file_has_no_usable_phrase(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#526: a private file of short terms compares nothing. The close
+    comment posts and the issue closes; stderr names the file that checked
+    nothing."""
+    board_md = _write_board_with_status(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    # The gh fake intercepts `git check-ignore` too, so use a name that
+    # discovery finds without asking git.
+    write_short_line_private_file(tmp_path, "CLAUDE.local.md")
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls, bodies = _patch_gh_capture_close_with_body(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "close", "42", "--body", "Closed as resolved."])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "not checked" in captured.err
+    assert "CLAUDE.local.md" in captured.err
+    kinds = _call_kinds(calls)
+    assert "comment" in kinds and "close" in kinds, kinds
     assert bodies == ["Closed as resolved."]

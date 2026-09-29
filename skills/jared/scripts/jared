@@ -220,7 +220,8 @@ def build_parser() -> argparse.ArgumentParser:
         "pre-flight",
         help=(
             "Check a drafted body for private content without posting it. "
-            "Exit 0 clean, 2 on a match, 3 when no private source was scanned."
+            "Exit 0 clean, 2 on a match, 3 when nothing was compared "
+            "(no private source, or none with a usable phrase)."
         ),
         allow_abbrev=False,
     )
@@ -577,8 +578,9 @@ def _pre_flight_refuses(body: str) -> bool:
     """Run the PII pre-flight on `body`; True means refuse to post (#102).
 
     A hit prints the diff and refuses. A vacuous scan — no private source
-    found — prints a warning and lets the post go ahead (#443): the check
-    had nothing to compare against, and saying so is the operator's cue.
+    found, or none with a usable phrase (#526) — prints a warning and lets
+    the post go ahead (#443): the check had nothing to compare against, and
+    saying so is the operator's cue.
     """
     root = _find_project_root(Path.cwd())
     report = pre_flight_check(body, project_root=root)
@@ -938,9 +940,10 @@ def _cmd_pre_flight(args: argparse.Namespace) -> int:
 
     For flows that write bodies through `gh` directly (`/jared-groom`,
     `/jared-audit`), so they can check a draft before the operator approves
-    it. Needs no board. Exit 0: private sources scanned, no match. Exit 2: a
-    match, diff on stderr. Exit 3: nothing was scanned, warning on stderr —
-    the body was not checked, and the operator decides whether to post.
+    it. Needs no board. Exit 0: private phrases compared, no match. Exit 2: a
+    match, diff on stderr. Exit 3: nothing was compared (no private file, or
+    none with a usable phrase), warning on stderr — the body was not checked,
+    and the operator decides whether to post.
     """
     body = resolve_body(args.body, args.body_file)
     root = _find_project_root(Path.cwd())

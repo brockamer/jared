@@ -9,7 +9,7 @@ from textwrap import dedent
 import pytest
 
 from skills.jared.scripts.lib import cache
-from tests.conftest import FakeGhResult, import_cli
+from tests.conftest import FakeGhResult, import_cli, write_short_line_private_file
 
 
 def _write_full_board(tmp_path: Path) -> Path:
@@ -845,6 +845,46 @@ def test_cmd_file_warns_and_posts_when_pre_flight_scans_nothing(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     assert "warning: pre-flight scanned 0 private files" in captured.err
+    assert any("issue" in c and "create" in c for c in calls)
+
+
+def test_cmd_file_warns_and_posts_when_private_file_has_no_usable_phrase(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#526: a private file of short terms gives the pre-flight nothing to
+    compare. `jared file` files the issue, as in the 0-file case, and says on
+    stderr which file checked nothing."""
+    board_md = _write_full_board(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    # The gh fake intercepts `git check-ignore` too, so use a name that
+    # discovery finds without asking git.
+    write_short_line_private_file(tmp_path, "CLAUDE.local.md")
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls = _routed_fake(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(
+        [
+            "--board",
+            str(board_md),
+            "file",
+            "--title",
+            "Test",
+            "--body",
+            "Some content with no special meaning.",
+            "--priority",
+            "Low",
+            "--no-milestone",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "not checked" in captured.err
+    assert "CLAUDE.local.md" in captured.err
     assert any("issue" in c and "create" in c for c in calls)
 
 

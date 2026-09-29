@@ -204,6 +204,25 @@ def write_minimal_board(tmp_path: Path) -> Path:
     return board_md
 
 
+# Invented placeholder terms (#526). Each is under the pre-flight phrase floor
+# (20+ characters, 3+ words), so a file that lists them yields no phrase.
+SHORT_PRIVATE_TERMS = ("Zelda Quimby", "Orchard Lane")
+
+
+def write_short_line_private_file(root: Path, name: str = "private-notes.md") -> Path:
+    """Write a gitignored root markdown file that lists only short terms.
+
+    The caller must have run `git init` in `root`. Pre-flight treats the
+    default name as private only when `git check-ignore` reports it, so a
+    test that fakes `subprocess.run` for `gh` must pass `CLAUDE.local.md`,
+    which discovery finds by its name alone.
+    """
+    (root / ".gitignore").write_text(f"{name}\n")
+    private = root / name
+    private.write_text("".join(f"- {term}\n" for term in SHORT_PRIVATE_TERMS))
+    return private
+
+
 class FakeGhResult:
     """Minimal stand-in for subprocess.CompletedProcess used by Board.run_gh."""
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import import_cli
+from tests.conftest import SHORT_PRIVATE_TERMS, import_cli, write_short_line_private_file
 
 PHRASE = "the deploy host is internal-foo-7.corp.example"
 
@@ -68,4 +68,22 @@ def test_pre_flight_vacuous_exits_3_with_the_warning(
     captured = capsys.readouterr()
     assert rc == 3
     assert "warning: pre-flight scanned 0 private files" in captured.err
+    assert captured.out == ""
+
+
+def test_pre_flight_short_lines_only_exits_3_with_the_rule(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#526: a private file of short terms gives no phrase to compare. The
+    draft repeats both terms, but nothing was compared, so the exit is 3,
+    not the 0 of a real clean scan."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    write_short_line_private_file(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    body = f"{SHORT_PRIVATE_TERMS[0]} lives on {SHORT_PRIVATE_TERMS[1]}."
+    rc = import_cli().main(["pre-flight", "--body", body])
+    captured = capsys.readouterr()
+    assert rc == 3, captured.err
+    assert "private-notes.md" in captured.err
+    assert "20+ characters" in captured.err
     assert captured.out == ""
