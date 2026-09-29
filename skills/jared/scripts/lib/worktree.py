@@ -66,14 +66,39 @@ def list_worktrees(repo: Path) -> list[WorktreeEntry]:
     return entries
 
 
+def default_base(repo: Path) -> str:
+    """The remote-tracking ref of origin's default branch, e.g. `origin/master`.
+
+    Read from `refs/remotes/origin/HEAD`, which `git clone` writes and
+    `git remote add` does not. When it is absent, refuse rather than guess:
+    the literal `origin/main` this replaced fails on every repo whose default
+    branch has another name (#465). The `/jared-wrap` guard refuses the same
+    way, with the same remedy.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    base = result.stdout.strip()
+    if result.returncode != 0 or not base:
+        raise WorktreeError(
+            f"cannot resolve the default branch of origin in {repo}: "
+            f"refs/remotes/origin/HEAD is not set.\n"
+            f"  remediation: in {repo}, run `git remote set-head origin -a` once, then re-run."
+        )
+    return base
+
+
 def create_worktree(
-    repo: Path, target: Path, branch: str, base: str = "origin/main", fetch: bool = False
+    repo: Path, target: Path, branch: str, base: str | None = None, fetch: bool = False
 ) -> Path:
     """Create a new worktree at `target` checked out on a fresh `branch`.
 
-    `base` defaults to `origin/main` so session branches are cut from the remote
-    tip, not local main — squash-merge leaves local main carrying zombie commits
-    that would otherwise ride into every new session branch (#283). When `fetch`
+    `base` defaults to `default_base(repo)` — origin's default branch — so
+    session branches are cut from the remote tip, not the local branch:
+    squash-merge leaves a local default branch carrying zombie commits that
+    would otherwise ride into every new session branch (#283). When `fetch`
     is true, the base's remote is refreshed before the worktree add so the ref is
     current; callers basing off a remote ref should pass `fetch=True`.
 
@@ -94,9 +119,12 @@ def create_worktree(
             f"or run `git -C {repo} worktree remove {target}` if it was once registered."
         )
 
+    if base is None:
+        base = default_base(repo)
+
     if fetch:
         # Refresh the base ref before cutting the branch. Without this, even
-        # base=origin/main is only as current as the last fetch (#283).
+        # a remote-tracking base is only as current as the last fetch (#283).
         remote = base.split("/", 1)[0] if "/" in base else None
         fetch_cmd = ["git", "-C", str(repo), "fetch", *([remote] if remote else [])]
         fetch_result = subprocess.run(fetch_cmd, capture_output=True, text=True)

@@ -150,3 +150,43 @@ def test_session_branch_cut_from_origin_main_after_fetch(tmp_path: Path) -> None
     assert branch_tip == upstream_tip
     # The upstream-only commit rode in — proves the fetch ran before the worktree add.
     assert (target / "feature.txt").exists()
+
+
+def _clone(tmp_path: Path, default_branch: str) -> tuple[Path, Path]:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    git_cmd(upstream, "init", "-b", default_branch)
+    git_cmd(upstream, "config", "user.email", "u@example.com")
+    git_cmd(upstream, "config", "user.name", "u")
+    (upstream / "README.md").write_text("initial\n")
+    git_cmd(upstream, "add", "README.md")
+    git_cmd(upstream, "commit", "-m", "initial")
+    local = tmp_path / "local"
+    git_cmd(tmp_path, "clone", str(upstream), str(local))
+    return upstream, local
+
+
+def test_default_base_is_the_branch_origin_head_names(tmp_path: Path) -> None:
+    """#465: the base was the literal `origin/main`, which does not exist on a
+    repo whose default branch is `master`."""
+    upstream, local = _clone(tmp_path, "master")
+    (upstream / "later.txt").write_text("upstream advance\n")
+    git_cmd(upstream, "add", "later.txt")
+    git_cmd(upstream, "commit", "-m", "advance")
+
+    target = tmp_path / "local-465"
+    worktree.create_worktree(repo=local, target=target, branch="feature/465-test", fetch=True)
+
+    assert git_cmd(local, "rev-parse", "feature/465-test") == git_cmd(
+        upstream, "rev-parse", "master"
+    )
+
+
+def test_default_base_refuses_when_origin_head_is_unset(tmp_path: Path) -> None:
+    _, local = _clone(tmp_path, "master")
+    git_cmd(local, "remote", "set-head", "origin", "--delete")
+
+    target = tmp_path / "local-465"
+    with pytest.raises(worktree.WorktreeError, match="git remote set-head origin -a"):
+        worktree.create_worktree(repo=local, target=target, branch="feature/465-test")
+    assert not target.exists()
