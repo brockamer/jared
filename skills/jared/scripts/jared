@@ -1389,10 +1389,10 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
     """Emit a board-derived session handoff skeleton.
 
     Pure read: lists In Progress (with last Session-note one-liners), top 3
-    Up Next, recently closed (last 7 days), plus a kickoff footer. No
-    GitHub side effects; no synthesis. /jared-start calls this at session
-    start and renders the output verbatim; nothing is written to disk, so
-    the posture cannot go stale between sessions.
+    Up Next, the Blocked column, recently closed (last 7 days), plus a
+    kickoff footer. No GitHub side effects; no synthesis. /jared-start and
+    /jared-status render the output verbatim (#467); nothing is written to
+    disk, so the posture cannot go stale between sessions.
 
     The output's structural contract is what the slash command depends on,
     so changes here are user-visible.
@@ -1423,6 +1423,9 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             item for item in items if item.status == "Backlog" and label in item.labels
         ]
     up_next = up_next_all[:3]
+    # Unfiltered under --session: Blocked is board state, not the pull menu, and
+    # the pick never walks it. Filtering would hide a blocker another session left.
+    blocked = [i for i in items if i.status == "Blocked"]
     recently_closed_note = degraded_or_none(
         board,
         Capability.VELOCITY_TIMESTAMPS,
@@ -1473,6 +1476,15 @@ def _cmd_next_session_prompt(args: argparse.Namespace) -> int:
             prio = item.priority or "-"
             print(f"- #{item.number} [{prio}] {item.title}")
         print()
+    # No priority, as in `jared summary`: the state matters more than ranking.
+    print("## Blocked")
+    print()
+    if blocked:
+        for item in blocked:
+            print(f"- #{item.number} {item.title}")
+    else:
+        print("(nothing blocked)")
+    print()
     if pick is not None:
         print("## Pick")
         print()
