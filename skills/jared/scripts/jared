@@ -43,6 +43,7 @@ from lib.board import (  # type: ignore[import-not-found]  # noqa: E402
     pre_flight_check,
     print_redaction_diff,
     print_unscanned_notice,
+    print_unused_sources_notice,
     resolve_body,
 )
 from lib.board_provider import (  # type: ignore[import-not-found]  # noqa: E402
@@ -221,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Check a drafted body for private content without posting it. "
             "Exit 0 clean, 2 on a match, 3 when nothing was compared "
-            "(no private source, or none with a usable phrase)."
+            "(no private source, or none with a usable phrase or term)."
         ),
         allow_abbrev=False,
     )
@@ -578,9 +579,10 @@ def _pre_flight_refuses(body: str) -> bool:
     """Run the PII pre-flight on `body`; True means refuse to post (#102).
 
     A hit prints the diff and refuses. A vacuous scan — no private source
-    found, or none with a usable phrase (#526) — prints a warning and lets
-    the post go ahead (#443): the check had nothing to compare against, and
-    saying so is the operator's cue.
+    found, or none with a usable phrase or term (#526, #528) — prints a
+    warning and lets the post go ahead (#443): the check had nothing to
+    compare against, and saying so is the operator's cue. A private file
+    that gave nothing while others did gets its own warning (#528).
     """
     root = _find_project_root(Path.cwd())
     report = pre_flight_check(body, project_root=root)
@@ -588,6 +590,7 @@ def _pre_flight_refuses(body: str) -> bool:
         print_redaction_diff(report, file=sys.stderr)
         return True
     print_unscanned_notice(report, root, file=sys.stderr)
+    print_unused_sources_notice(report, root, file=sys.stderr)
     return False
 
 
@@ -940,10 +943,11 @@ def _cmd_pre_flight(args: argparse.Namespace) -> int:
 
     For flows that write bodies through `gh` directly (`/jared-groom`,
     `/jared-audit`), so they can check a draft before the operator approves
-    it. Needs no board. Exit 0: private phrases compared, no match. Exit 2: a
-    match, diff on stderr. Exit 3: nothing was compared (no private file, or
-    none with a usable phrase), warning on stderr — the body was not checked,
-    and the operator decides whether to post.
+    it. Needs no board. Exit 0: private phrases or terms compared, no match —
+    a private file that gave nothing to compare is named on stderr (#528).
+    Exit 2: a match, diff on stderr. Exit 3: nothing was compared (no private
+    file, or none with a usable phrase or term), warning on stderr — the body
+    was not checked, and the operator decides whether to post.
     """
     body = resolve_body(args.body, args.body_file)
     root = _find_project_root(Path.cwd())
@@ -954,6 +958,7 @@ def _cmd_pre_flight(args: argparse.Namespace) -> int:
     if report.vacuous:
         print_unscanned_notice(report, root, file=sys.stderr)
         return 3
+    print_unused_sources_notice(report, root, file=sys.stderr)
     n = len(report.scanned_files)
     print(f"OK: pre-flight scanned {n} private file{'' if n == 1 else 's'}; no matches.")
     return 0

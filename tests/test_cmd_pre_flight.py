@@ -87,3 +87,88 @@ def test_pre_flight_short_lines_only_exits_3_with_the_rule(
     assert "private-notes.md" in captured.err
     assert "20+ characters" in captured.err
     assert captured.out == ""
+
+
+# ---------- `## Pre-flight terms` (#528) ----------
+
+
+def _repo_with_terms(
+    tmp_path: Path, *terms: str, readme: str = "Public-safe content only.\n"
+) -> None:
+    """A git repo with a tracked README and a private file of terms only."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text(readme)
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    (tmp_path / "CLAUDE.local.md").write_text(
+        "## Pre-flight terms\n" + "".join(f"- {t}\n" for t in terms)
+    )
+
+
+def test_pre_flight_term_hit_exits_2_and_names_the_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#528 AC1."""
+    _repo_with_terms(tmp_path, "Jane Doe")
+    monkeypatch.chdir(tmp_path)
+    rc = import_cli().main(["pre-flight", "--body", "Met Jane Doe's team"])
+    captured = capsys.readouterr()
+    assert rc == 2, captured.err
+    assert "CLAUDE.local.md" in captured.err
+    assert "not checked" not in captured.err
+
+
+def test_pre_flight_term_inside_a_longer_word_exits_0(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#528 AC2."""
+    _repo_with_terms(tmp_path, "Jane Doe")
+    monkeypatch.chdir(tmp_path)
+    rc = import_cli().main(["pre-flight", "--body", "Janet Doerr called"])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert captured.err == ""
+
+
+def test_pre_flight_term_in_tracked_readme_exits_0(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#528 AC3: the tracked README makes `Jane Doe` public. The second term
+    is private-only, so the scan compared something and the exit is 0."""
+    _repo_with_terms(tmp_path, "Jane Doe", "Zelda Quimby", readme="Thanks, Jane Doe.\n")
+    monkeypatch.chdir(tmp_path)
+    rc = import_cli().main(["pre-flight", "--body", "Met Jane Doe's team"])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+
+
+def test_pre_flight_terms_all_too_short_exits_3_and_names_the_heading(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#528 AC4."""
+    _repo_with_terms(tmp_path, "JD", "Q")
+    monkeypatch.chdir(tmp_path)
+    rc = import_cli().main(["pre-flight", "--body", "JD and Q met"])
+    captured = capsys.readouterr()
+    assert rc == 3, captured.err
+    assert "## Pre-flight terms" in captured.err
+
+
+def test_pre_flight_file_that_adds_nothing_warns_and_exits_0(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A second private file lists short names with no terms heading. The
+    scan is still clean, but stderr names the file whose names were never
+    compared."""
+    _repo_with_private_source(tmp_path)
+    people = tmp_path / ".claude" / "local" / "people.md"
+    people.parent.mkdir(parents=True)
+    people.write_text("".join(f"- {t}\n" for t in SHORT_PRIVATE_TERMS))
+    monkeypatch.chdir(tmp_path)
+    rc = import_cli().main(["pre-flight", "--body", f"{SHORT_PRIVATE_TERMS[0]} called."])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "scanned 2 private files" in captured.out
+    # The command stubs tell sessions to relay lines with this prefix.
+    assert captured.err.startswith("warning: pre-flight")
+    assert ".claude/local/people.md" in captured.err
+    assert "## Pre-flight terms" in captured.err

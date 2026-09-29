@@ -359,9 +359,12 @@ it is posted — it scans for content sourced from the repo's gitignored
 private files (`CLAUDE.local.md`, `.claude/local/*.md`, and gitignored
 `*.md` at the repo root) and refuses to post on a hit, so private
 context Jared *reads* never leaks into the public board it *writes*.
-When a repo has no such file, or its lines are too short to compare,
-the check warns that it checked nothing, rather than passing silently. `jared pre-flight` runs the same check
-on a draft without posting it.
+It compares whole private lines, and names or places listed as bullets
+under a `## Pre-flight terms` heading in one of those files. When a
+repo has no such file, or nothing in it is long enough or listed, the
+check warns that it checked nothing, rather than passing silently. `jared pre-flight` runs the same check
+on a draft without posting it. See
+[`references/pii-pre-flight.md`](skills/jared/references/pii-pre-flight.md).
 
 For development setup, testing, and the layout of the plugin's
 internals, see [`CLAUDE.md`](CLAUDE.md).

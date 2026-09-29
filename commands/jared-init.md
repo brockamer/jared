@@ -86,7 +86,19 @@ Flow:
 
 6. **Post-migration sweep.** Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/sweep.py` to confirm the board is clean. Report residuals.
 
-7. **Close with the standard session-start orientation** so the user sees the board in its new steady state.
+7. **Tell the operator about pre-flight.** `jared file`, `jared comment` and `jared close` check every body against the repo's private files before they post (`references/pii-pre-flight.md`). Jared never creates or edits those files (`SKILL.md` § "The lane"), so the operator must know that the check exists and what it reads. Pick the message by where board posts land:
+
+   - **GitHub backend, public repo** — `gh repo view <owner>/<repo> --json visibility -q .visibility` prints `PUBLIC`, so every board post is public. Run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared pre-flight --body "init probe"` and show its output verbatim: exit 0 means private content is already in place, exit 3 means nothing is checked yet. Then tell the operator these five facts, in the command's voice with each fact kept scannable:
+     - **Where pre-flight looks:** `CLAUDE.local.md`, `.claude/CLAUDE.local.md`, `.claude/local/*.md`, and any gitignored `*.md` at the repo root.
+     - **Full-line phrases:** a line with 20+ characters and 3+ words. It matches only when a draft repeats the whole line, so it catches copied notes, not names.
+     - **Names and places:** bullets under a `## Pre-flight terms` heading in one of those files, one term per bullet, 3+ characters. A term matches as a whole word and is case-sensitive, so list each form to catch.
+     - **Tracked content is public:** a line or term that a tracked file also holds does not count.
+     - **Jared does not create the file.** The operator writes it, and gitignores it when it is a root `*.md`.
+   - **Otherwise** — a KanbanFlow board, or a GitHub repo that is `PRIVATE` or `INTERNAL`. Say one line: pre-flight still runs, but posts on this board reach only people who can already see it, so a miss costs less; `references/pii-pre-flight.md` has the setup if the repo is made public later.
+
+   This step is advisory and changes nothing on disk. A step that wrote the file would put jared in the private-file lane.
+
+8. **Close with the standard session-start orientation** so the user sees the board in its new steady state.
 
 This is a one-time event per project. From here on, routine discipline (`/jared-wrap`, `/jared-groom`, triggers) keeps the project in shape without another migration.
 

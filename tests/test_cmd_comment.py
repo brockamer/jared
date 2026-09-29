@@ -352,3 +352,32 @@ def test_comment_warns_and_posts_when_private_file_has_no_usable_phrase(
     assert "not checked" in captured.err
     assert "CLAUDE.local.md" in captured.err
     assert bodies == ["A routine note."]
+
+
+def test_comment_warns_and_posts_when_a_private_file_adds_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#528: one private file has a usable phrase, the other only short names
+    with no terms heading. The comment posts, and stderr names the second
+    file. Both names are found by path, so the gh fake that intercepts
+    `git check-ignore` does not matter here."""
+    board_md = write_minimal_board(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "CLAUDE.local.md").write_text("an unrelated private phrase lives here\n")
+    people = tmp_path / ".claude" / "local" / "people.md"
+    people.parent.mkdir(parents=True)
+    people.write_text("- Zelda Quimby\n")
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "comment", "42", "--body", "A routine note."])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert ".claude/local/people.md" in captured.err
+    assert bodies == ["A routine note."]
