@@ -2157,9 +2157,11 @@ def print_unused_sources_notice(
     f = file if file is not None else sys.stderr
     n = len(report.unused_files)
     total = len(report.scanned_files)
+    # Same `warning: pre-flight` prefix as the vacuous notices: the command
+    # stubs tell sessions to relay lines that start with it.
     print(
-        f"warning: {n} of {total} private files gave pre-flight nothing to compare — "
-        "this body was checked against the others only.",
+        f"warning: pre-flight got nothing to compare from {n} of {total} private "
+        "files — this body was checked against the others only.",
         file=f,
     )
     _print_source_paths(report.unused_files, project_root, f)

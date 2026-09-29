@@ -43,7 +43,7 @@ Flow:
    from a file via `--body-file <path>`, or from stdin via `--body-file -`.
    Use exactly one — they're mutually exclusive.
 
-   **Pre-flight redaction.** `jared file` runs the body through a pre-flight scan against the repo's gitignored private files before posting. If any rich phrase from one appears in the body, the call refuses with a stderr diff and exit 2. If it found no private file, or none with a line it could compare, it files anyway and prints a `warning: pre-flight` line — relay that line to the operator. See `references/pii-pre-flight.md`.
+   **Pre-flight redaction.** `jared file` runs the body through a pre-flight scan against the repo's gitignored private files before posting. If any rich phrase or `## Pre-flight terms` term from one appears in the body, the call refuses with a stderr diff and exit 2. If it found no private file, or a private file gave no phrase or term it could compare, it files anyway and prints a `warning: pre-flight` line — relay that line to the operator. See `references/pii-pre-flight.md`.
 
 5. **File atomically.** One call does it all:
 

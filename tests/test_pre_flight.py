@@ -719,7 +719,7 @@ def test_print_unused_sources_notice_names_file_and_heading(
         Path("/proj"),
     )
     err = capsys.readouterr().err
-    assert err.startswith("warning: 1 of 2 private files")
+    assert err.startswith("warning: pre-flight got nothing to compare from 1 of 2 private files")
     assert ".claude/local/people.md" in err
     assert "/proj/.claude" not in err
     assert "## Pre-flight terms" in err

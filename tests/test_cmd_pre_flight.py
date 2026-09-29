@@ -168,5 +168,7 @@ def test_pre_flight_file_that_adds_nothing_warns_and_exits_0(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     assert "scanned 2 private files" in captured.out
+    # The command stubs tell sessions to relay lines with this prefix.
+    assert captured.err.startswith("warning: pre-flight")
     assert ".claude/local/people.md" in captured.err
     assert "## Pre-flight terms" in captured.err
