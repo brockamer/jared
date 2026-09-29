@@ -128,6 +128,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared comment <N> (--body "..." | --b
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <dependent> <blocker> [--remove]
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> [--body]   # JSON lookup helper; --body adds the issue body (#410)
 ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared summary          # fast one-screen status
+${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt   # orientation posture; /jared-status and /jared-start print it
 ```
 
 See `references/jared-cli.md` for the full subcommand reference.
