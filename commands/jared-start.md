@@ -10,48 +10,45 @@ description: Begin work on an issue — move to In Progress, load full context (
 
 **No advisor pass.** Routine board operation — fetch, render, approve, apply. It does not warrant an `advisor()` call; Jared prescribes exactly one, the optional batch pass in `/jared-audit`. A genuine design decision arising mid-session still does — the trigger is the finding, not the command. (`SKILL.md` § "The lane".)
 
-Invoke the Jared skill to start work on an issue. Takes an optional argument: the issue reference (number or URL).
-
-Argument parsing: `$ARGUMENTS` may contain `#14`, `14`, a URL, a short string like "the excluded employers issue", or be empty. Resolve to a specific issue number, asking to clarify if ambiguous.
+Invoke the Jared skill to start work on an issue. Takes an optional issue reference (number or URL) and two optional flags, `--session N` and `--no-worktree`.
 
 Flow:
+
+0. **Parse the arguments first.** Every later step uses what this step finds, so no command runs before it. Read `$ARGUMENTS` and take out three things:
+   - **The issue reference** — `#14`, `14`, a URL, a short string like "the excluded employers issue", or nothing. Resolve it to one issue number, and ask the operator when it is ambiguous. When there is none, step 1 resolves the target.
+   - **`--session N`** — the operator's claim of which parallel session this is (1, 2, ...). It opts into worktree isolation.
+   - **`--no-worktree`** — the operator's explicit acceptance of the shared-`.git/HEAD` risk. It is mutually exclusive with `--session N`. When both are present, still pass both to `session-resolve` in step 1b, which refuses with `REFUSE_CONFLICTING_FLAGS`; the refusal text lives in the CLI, not here.
+
+   **Write literal values into every command.** The commands below hold no shell variable for a flag or for a value that an earlier command printed. Write the literal value in its place: `--session 2`, not a variable that holds `2`; the absolute repo root that step 1b prints, not `$REPO_ROOT`. Every Bash call starts a fresh shell, so a variable set in one call is empty in the next — and an empty variable drops its flag without an error, so `session-resolve` reports a solo verdict to an operator who asked for a worktree (#468). A variable is safe only inside the one block that assigns it. `tests/test_stub_shell_variables.py` enforces this on every stub.
 
 1. **Assemble the board posture on-demand.** Run:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks ${SESSION_FLAG:+--session $SESSION_FLAG}
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks
    ```
 
-   When the operator passes `--session N`, the Top of Up Next section is filtered to `session-N`-labeled items. The menu shown for "Which issue would you like to pull?" is the session-N partition; items labeled for other sessions are hidden. Session-N work that is labeled but still sits in Backlog appears under a distinct `## Session-N staged (not yet in Up Next)` subsection — these are *not* directly pullable; promote them to Up Next via `/jared-stage --sessions N` first. If no items are labeled session-N in **either** Up Next or Backlog, the section prints `(none labeled session-N in Up Next or Backlog)` and the operator must label items via `/jared-stage --sessions N` before pulling.
+   When step 0 found `--session N`, add it to this command with the literal number (`--session 2`). The Top of Up Next section is then filtered to `session-N`-labeled items. The menu shown for "Which issue would you like to pull?" is the session-N partition; items labeled for other sessions are hidden. Session-N work that is labeled but still sits in Backlog appears under a distinct `## Session-N staged (not yet in Up Next)` subsection — these are *not* directly pullable; promote them to Up Next via `/jared-stage --sessions N` first. If no items are labeled session-N in **either** Up Next or Backlog, the section prints `(none labeled session-N in Up Next or Backlog)` and the operator must label items via `/jared-stage --sessions N` before pulling.
 
    Capture stdout. The CLI walks the live board and emits structured sections — In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Recently closed (7d), and a `## Quick health check` block iff the board has `## Session start checks` configured. Use this output verbatim as the **posture block** in step 8 (no further parsing or condensing required).
 
    Resolve the target issue:
-   - If `$ARGUMENTS` is non-empty: use it.
-   - If `$ARGUMENTS` is empty: surface the posture block, then ask: *"Which issue would you like to pull?"* The In Progress and Up Next sections are the menu — In Progress means resuming an interrupted issue; top of Up Next is the natural next pull. Wait for user input.
+   - If step 0 found an issue reference: use it.
+   - If it found none: surface the posture block, then ask: *"Which issue would you like to pull?"* The In Progress and Up Next sections are the menu — In Progress means resuming an interrupted issue; top of Up Next is the natural next pull. Wait for user input.
 
    No drift-check is needed: the posture is computed from current board state at this moment, so the recommendation cannot be stale by construction.
 
-1b. **Session-presence resolution.** Before mutating the board, decide whether this is a solo session, a multi-session opt-in, or a B-leg refusal.
+1b. **Session-presence resolution.** Before mutating the board, decide whether this is a solo session, a multi-session opt-in, or a B-leg refusal. The flags are the ones step 0 found.
 
-   Parse arguments for two new flags (in addition to the issue reference):
-   - `--session N` — operator's claim of which parallel session this is (1, 2, ...). Triggers worktree creation.
-   - `--no-worktree` — explicit acknowledgment of shared-`.git/HEAD` risk. Mutually exclusive with `--session N`.
-
-   Resolve the repo's lock directory:
+   Resolve the repo root — the main checkout, whose git common dir holds the lock directory. The command prints one absolute path; it is `<repo-root>` in every command below:
 
    ```bash
-   GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
-   REPO_ROOT=$(realpath "$(dirname "$GIT_COMMON_DIR")")
+   realpath "$(dirname "$(git rev-parse --git-common-dir 2>/dev/null)")"
    ```
 
-   Walk the active locks and decide the action via the Python lib:
+   Walk the active locks and decide the action via the Python lib. Add `--session N` or `--no-worktree` when step 0 found it:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-resolve \
-     --repo-root "$REPO_ROOT" \
-     ${SESSION_FLAG:+--session $SESSION_FLAG} \
-     ${NO_WORKTREE_FLAG:+--no-worktree}
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-resolve --repo-root <repo-root>
    ```
 
    (The `jared session-resolve` subcommand wraps `lib.session_lock.list_active_locks` + `resolve_action` and prints a single line: `PROCEED_SOLO`, `PROCEED_MULTI`, `PROCEED_ACK_RISK`, or one of the REFUSE_* outcomes plus the rendered error message.)
@@ -63,27 +60,25 @@ Flow:
    ```bash
    TITLE=$(gh issue view <N> --json title -q .title)
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared worktree-add \
-     --repo-root "$REPO_ROOT" \
+     --repo-root <repo-root> \
      --issue <N> \
-     --session "$SESSION_FLAG" \
+     --session <session> \
      --title "$TITLE"
    ```
 
-   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from the tip of origin's default branch (the branch `origin/HEAD` names; it refuses when that ref is unset), and emits the target path on stdout. **CWD does not shift to the worktree** — the harness resets the shell's working directory to the repo root on every Bash call, and `worktree-add` is a Python subprocess that cannot move the parent shell's cwd anyway. Capture the emitted path and prefix every subsequent git/gh op with `git -C <abs-worktree-path>` (or pass an absolute path); do not rely on a persistent `cd`, and do not reach for a `WORKTREE` env var either — env vars don't survive across Bash calls. Passing `--title` lets `worktree-add` slugify the branch name without a second `gh` round-trip; if omitted (e.g. manual invocation), the CLI fetches the title itself and falls back to `feature/<N>-worktree` when none can be derived.
+   `<N>` is the issue number and `<session>` is the literal number from `--session N`. `TITLE` is the one variable left, and it is safe: this block assigns it and reads it in the same call. Do not replace it with the literal title — inside double quotes, a title that contains a backtick or `$(` runs as a command.
+
+   This calls `lib.worktree.create_worktree` to make `~/Code/<repo>-<N>/` (path shape per spec D1), checks out a fresh `feature/<N>-<slug>` branch from the tip of origin's default branch (the branch `origin/HEAD` names; it refuses when that ref is unset), and emits the target path on stdout; that path is `<worktree-path>` below. **CWD does not shift to the worktree** — the harness resets the shell's working directory to the repo root on every Bash call, and `worktree-add` is a Python subprocess that cannot move the parent shell's cwd anyway. Capture the emitted path and prefix every subsequent git/gh op with `git -C <abs-worktree-path>` (or pass an absolute path); do not rely on a persistent `cd`, and do not reach for a `WORKTREE` env var either — env vars don't survive across Bash calls. Passing `--title` lets `worktree-add` slugify the branch name without a second `gh` round-trip; if omitted (e.g. manual invocation), the CLI fetches the title itself and falls back to `feature/<N>-worktree` when none can be derived.
 
    **In all PROCEED cases:** write the session lock:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-write \
-     --repo-root "$REPO_ROOT" \
-     --issue <N> \
-     ${SESSION_FLAG:+--session $SESSION_FLAG} \
-     ${WORKTREE_PATH:+--worktree-path $WORKTREE_PATH}
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-write --repo-root <repo-root> --issue <N>
    ```
 
-   Solo sessions (`--session` absent) still write a lock with `session=null, worktree_path=null`. This is load-bearing: it lets a later sibling session detect the solo one and refuse with guidance, rather than silently sharing `.git/HEAD`.
+   On `PROCEED_MULTI`, add `--session <session> --worktree-path <worktree-path>` with the literal values. Solo sessions (`--session` absent) add neither and still write a lock with `session=null, worktree_path=null`. This is load-bearing: it lets a later sibling session detect the solo one and refuse with guidance, rather than silently sharing `.git/HEAD`.
 
-   **Non-git checkout.** On a project whose root has no `.git` directory, `git rev-parse` above fails and `REPO_ROOT` collapses to the current directory. All three lock subcommands — `session-resolve`, `session-lock-write`, `session-lock-clear` — then **skip, exit 0, and print one notice to stderr** naming the absent `.git`. `session-resolve` still prints its `PROCEED_*` line on stdout, so the parsing above is unchanged. Expect the notice; it is not an error, and no lock is written at either end of the session.
+   **Non-git checkout.** On a project whose root has no `.git` directory, `git rev-parse` above fails and the repo-root command prints the current directory. All three lock subcommands — `session-resolve`, `session-lock-write`, `session-lock-clear` — then **skip, exit 0, and print one notice to stderr** naming the absent `.git`. `session-resolve` still prints its `PROCEED_*` line on stdout, so the parsing above is unchanged. Expect the notice; it is not an error, and no lock is written at either end of the session.
 
    Locking is skipped rather than relocated because the hazard it guards is a shared `.git/HEAD`, which does not exist here — and every remedy the sibling refusal offers (`--session N`, a worktree, `--no-worktree`) needs a git checkout. **Do not run `git init` to satisfy the step.** That is an unrequested change to the operator's directory, and some projects forbid it outright. The decision and its reasoning are recorded on #425.
 
