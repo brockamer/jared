@@ -36,7 +36,6 @@ Flow:
    - `## Current state` — "Not started."
    - `## Decisions` — "(none yet)"
    - `## Acceptance criteria` — in `<details>` block, list criteria
-   - `## Depends on` / `## Blocks` — fill in if applicable, else "(none)"
    - `## Planning` — fill in if a plan/spec already exists, else "(none)"
 
    Body content can be passed three ways: inline via `--body "<text>"`,
@@ -66,7 +65,8 @@ Flow:
    `OK: filed #N → <status>, Priority=<prio>`. Any failing step exits
    non-zero with a diagnostic; don't proceed past a failure.
 
-6. **If dependencies were specified**, add them as native GitHub edges:
+6. **If dependencies were specified**, add them as native GitHub edges (the body
+   carries no `## Depends on` or `## Blocks` section; same-repo dependencies live only as edges):
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared blocked-by <new-issue> <blocker>

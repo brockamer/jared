@@ -43,7 +43,7 @@ The recommendation is derived from data steps 1–6 already fetched. It adds no 
 | Acceptance-criteria count | bullets under `## Acceptance criteria` in the body | Breadth |
 | Code paths cited in the body | backticked paths, function names, line references | Breadth, and whether the shape is already fixed |
 | `## Planning` | the body — a path, or `(none)` | A linked spec with phases means breadth |
-| `## Depends on` | the body | A non-empty list means the work sits in a chain |
+| Native `blockedBy` edges | `jared ties <N>` — the `blocker` tie | An edge in either direction means the work sits in a chain |
 | An unsettled question | a body heading that asks one, or the words "decide", "settle", "choose between" | Depth |
 | Ties | `jared ties <N>` stdout plus the semantic scan | Breadth — a `strong` tie means a second issue's surface is in play |
 | Title prefix | the posture block — e.g. `[kanbanflow]` | Which subsystem, hence which landmines |
