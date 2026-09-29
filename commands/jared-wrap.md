@@ -106,16 +106,18 @@ Flow:
 
    `tests/test_wrap_stub_guards.py` extracts this block and runs it against synthetic repositories — a `master` default branch, a foreign `origin`, all four URL shapes, and a repo with no `origin/HEAD`. Edit the block and the tests exercise the edit; rephrase a `SKIP:` or `PROCEED:` line and they fail first.
 
-   **Integrate `main` before the PR.** Parallel sessions diverge from `main` while they work. Before pushing or opening the PR, fold the current `main` into the branch and resolve *here* — in the session that has full context — rather than discovering it at merge time:
+   **Integrate the default branch before the PR.** Parallel sessions diverge from the default branch while they work. Before pushing or opening the PR, fold its current tip into the branch and resolve *here* — in the session that has full context — rather than discovering it at merge time:
 
    ```bash
-   git fetch origin && git merge --no-edit origin/main
+   git fetch origin && git merge --no-edit origin/HEAD
    ```
 
-   - **Clean merge:** re-run the formatter and tests (`ruff format . && ruff check . && pytest`), then enter the loop. Formatting *on top of* `main` is the point — it collapses spurious whitespace/format conflicts (a line you never logically touched, reformatted differently on each branch) before they can reach the PR.
-   - **Conflict:** resolve in place, re-run format + tests, and `git commit` the merge. Genuine logic collisions (two sessions editing the same function) surface here, in-session, instead of as a terse "unmergeable" after the PR already exists.
+   `origin/HEAD` is the ref the guard above resolved the default branch from, and the guard has already confirmed that it is set. Do not carry `$DEFAULT_BRANCH` over from the guard: every Bash call starts a fresh shell, so the variable is empty here and `origin/$DEFAULT_BRANCH` names nothing (#465).
 
-   Merge, not rebase — the branch may already be pushed, and a merge avoids the force-push a rebase would require. See `references/parallel-sessions.md` § "Integrate `main` before the PR" for the rationale and the two conflict classes this addresses.
+   - **Clean merge:** run the project's own format and test commands, then enter the loop. Take them from the project's `CLAUDE.md` or `AGENTS.md`. If neither names a command, skip the step and say so in the wrap output — never substitute a command from another project, because a formatter the project does not use rewrites every file and the loop then commits and opens a PR with the result (#465). Formatting *on top of* the default branch is the point — it collapses spurious whitespace/format conflicts (a line you never logically touched, reformatted differently on each branch) before they can reach the PR.
+   - **Conflict:** resolve in place, re-run the same format and test commands, and `git commit` the merge. Genuine logic collisions (two sessions editing the same function) surface here, in-session, instead of as a terse "unmergeable" after the PR already exists.
+
+   Merge, not rebase — the branch may already be pushed, and a merge avoids the force-push a rebase would require. See `references/parallel-sessions.md` § "Integrate the default branch before the PR" for the rationale and the two conflict classes this addresses.
 
    Loop:
 
@@ -163,9 +165,9 @@ Flow:
 
    - **`surface_failure`** (PR exists, checks failed): Print the failed check names from `gh pr checks $PR --json`. Exit the loop. Lock-clear runs.
 
-   - **`update_branch`** (`mergeStateStatus=BEHIND` — branch trails base): The branch is cleanly behind `main` (no conflict, just out of date — `main` advanced after the last push). Integrate and re-push: `git fetch origin && git merge --no-edit origin/main`, re-run format + tests, `git push`, then re-run `/jared-wrap`. Same merge-not-rebase rule as the integrate-before-PR step. Exit the loop. Lock-clear runs.
+   - **`update_branch`** (`mergeStateStatus=BEHIND` — branch trails base): The branch is cleanly behind the default branch (no conflict, just out of date — the default branch advanced after the last push). Integrate and re-push: `git fetch origin && git merge --no-edit origin/HEAD`, re-run the project's format and test commands (as in the integrate step above), `git push`, then re-run `/jared-wrap`. Same merge-not-rebase rule as the integrate-before-PR step. Exit the loop. Lock-clear runs.
 
-   - **`surface_conflict`** (checks green but not mergeable): Print *"PR #N: conflict with main. Integrate in this worktree (`git fetch && git merge origin/main`), resolve, push, and re-run `/jared-wrap`."* Exit the loop. Lock-clear runs. (This is the fallback when the integrate-before-PR step above was skipped or `main` advanced after it ran — merge, not rebase, since the branch is already pushed.)
+   - **`surface_conflict`** (checks green but not mergeable): Print *"PR #N: conflict with the default branch. Integrate in this worktree (`git fetch origin && git merge origin/HEAD`), resolve, push, and re-run `/jared-wrap`."* Exit the loop. Lock-clear runs. (This is the fallback when the integrate-before-PR step above was skipped or the default branch advanced after it ran — merge, not rebase, since the branch is already pushed.)
 
    - **`blocked_on_review`** (`reviewDecision=REVIEW_REQUIRED`, or `mergeStateStatus=BLOCKED`): The PR is reported `mergeable` but branch protection won't let it merge — typically a solo-author PR needing a review that will never arrive, or a protected-branch block. GitHub reports this as `MERGEABLE`, which is why the loop used to mis-route it to `confirm_merge`. Print *"PR #N: blocked by required review / branch protection."* Then check `docs/project-board.md` § `## Jared config` for an `admin-merge` sanction:
      - **If `- admin-merge: <strategy>` is present** (e.g. `--merge`): offer the operator-confirmed escape — render a confirm block, and on `y` run `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection; it is offered *only* because the board doc explicitly sanctions it, and run *only* on an explicit operator `y`. The strategy comes from the board doc (not hardcoded), so the sanction also pins `--merge` vs `--squash`.
@@ -173,13 +175,21 @@ Flow:
 
      Exit the loop. Lock-clear runs.
 
-   - **`confirm_merge`** (checks green, mergeable): Render the confirm-merge block:
+   - **`confirm_merge`** (checks green, mergeable): Resolve the merge strategy first. If `docs/project-board.md` § `## Jared config` has an `admin-merge:` bullet, use its strategy — the project pinned it there, and the `blocked_on_review` escape above uses the same value. Otherwise use the first method the repository allows, in the order merge commit, squash, rebase:
+
+     ```bash
+     gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
+       -q 'if .mergeCommitAllowed then "--merge" elif .squashMergeAllowed then "--squash" else "--rebase" end'
+     ```
+
+     A merge commit comes first because it keeps the branch's commits on the default branch. Never pass a method the repository disallows: GitHub rejects it, so the fixed `--merge` this replaced could not merge on a repository that allows only squash (#465). Then render the confirm-merge block:
 
      ```
      PR #<N>: <title>
        branch:     <branch>
        mergeable:  yes
        checks:     <count> passed | none (no CI checks ran)
+       strategy:   <--merge | --squash | --rebase> (from admin-merge: | allowed by the repository)
        sibling:    <enumerate other session locks if present, with their branches>
 
      Merge? (y / edit / no)
@@ -187,7 +197,7 @@ Flow:
 
      Render the `checks:` line honestly from `checks_status`: `<count> passed` when checks ran and passed, or `none (no CI checks ran)` when the status-check rollup was empty — never label an empty rollup as "passed" (#285).
 
-     On `y`: run `gh pr merge <N> --merge --delete-branch`. On success, loop continues (next state will be `cleanup`). On failure (e.g., GitHub rejected as not-mergeable since the last check), surface the gh error and exit the loop.
+     On `y`: run `gh pr merge <N> <strategy> --delete-branch`. On success, loop continues (next state will be `cleanup`). On failure (e.g., GitHub rejected as not-mergeable since the last check), surface the gh error and exit the loop.
 
      On `edit`: prompt for new title/body inline; run `gh pr edit <N> --title "$NEW_TITLE" --body "$NEW_BODY"`; re-render the confirm block.
 
@@ -206,12 +216,14 @@ Flow:
      Removes `<repo>/.git/jared/session-<N>.lock` so the next `/jared-start` doesn't see this session as a live sibling. The lock lives under the git common dir (#376) so it is untrackable — `REPO_ROOT` above is already the main checkout, so no call site changes. Sibling sessions' locks (other issues) are left untouched.
 
      **Non-git checkout.** When the project root has no `.git` directory, this exits 0 having cleared nothing and prints one notice to stderr saying so (#425). Report the skip rather than a cleared lock — `/jared-start` wrote none either, so the locking protocol was inert for this session at both ends. Before #425 the clear was silently exit 0, which read identically to a successful removal and let wrap report a clean close-out for a protocol that never engaged. The skip is keyed on the absent `.git`, not on the backend, which is why it is not a `degraded:` line.
-   - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the session's `feature/<N>-<slug>` branch has merged into main, remove the worktree and delete the branch from the main checkout. Read the branch name from the worktree first — it's slugified from the issue title (#278), not a fixed string, so don't reconstruct it by hand:
+   - **Worktree removal (multi-session only).** When this session worked from a worktree (created by `/jared-start <N> --session N` — non-null `worktree_path` on the lock) AND the session's `feature/<N>-<slug>` branch has merged into the default branch, remove the worktree and delete the branch from the main checkout. Read the branch name from the worktree first — it's slugified from the issue title (#278), not a fixed string, so don't reconstruct it by hand:
      ```bash
      BRANCH=$(git -C "<worktree-path>" rev-parse --abbrev-ref HEAD)
      git -C "$REPO_ROOT" worktree remove "<worktree-path>"
      git -C "$REPO_ROOT" branch -d "$BRANCH"
      ```
+     After a squash or rebase merge, `git branch -d` refuses: the branch's own commits are not on the default branch. Make sure the PR shows as merged, then delete the branch with `git branch -D`.
+
      The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around). The rule comes from operator feedback after the 2026-05-24 wrap of #227's session-1 left an orphan `~/Code/jared-227/` on disk.
 
 6. **Confirm and close out.** Render the closing line in voice:

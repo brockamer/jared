@@ -215,28 +215,44 @@ def append_decision(sections: dict[str, str], text: str) -> None:
         sections["Decisions"] = heading + entry
 
 
+def section_layout(sections: dict[str, str], original_order: list[str]) -> list[str]:
+    """The order to write sections in: every existing section where the body had it.
+
+    A section this run created has no original position. It goes directly
+    before the earliest section in the body that SECTION_ORDER lists after it;
+    with none, directly after the last section that SECTION_ORDER lists before
+    it; with neither, at the end. Sorting by SECTION_ORDER instead moved every
+    section it does not list — `## Proposed fix` on each audit-filed body —
+    below `## Planning` (#465).
+    """
+    layout = [name for name in original_order if name in sections]
+    for name in SECTION_ORDER:
+        if name not in sections or name in layout:
+            continue
+        rank = SECTION_ORDER.index(name)
+        following = [
+            i for i, n in enumerate(layout) if n in SECTION_ORDER and SECTION_ORDER.index(n) > rank
+        ]
+        preceding = [
+            i for i, n in enumerate(layout) if n in SECTION_ORDER and SECTION_ORDER.index(n) < rank
+        ]
+        if following:
+            layout.insert(following[0], name)
+        elif preceding:
+            layout.insert(preceding[-1] + 1, name)
+        else:
+            layout.append(name)
+    return layout
+
+
 def reassemble(preamble: str, sections: dict[str, str], original_order: list[str]) -> str:
-    """Reassemble the body, using preferred order for known sections but preserving unknowns."""
+    """Reassemble the body with every section in its original position (see `section_layout`)."""
     out_parts = [preamble.rstrip("\n") + "\n\n" if preamble.strip() else ""]
 
-    placed = set()
-
-    # First, place known sections in preferred order
-    for name in SECTION_ORDER:
-        if name in sections:
-            out_parts.append(sections[name])
-            if not sections[name].endswith("\n"):
-                out_parts.append("\n")
-            placed.add(name)
-
-    # Then place any other sections in their original order (preserves custom user sections)
-    for name in original_order:
-        if name in placed:
-            continue
-        if name in sections:
-            out_parts.append(sections[name])
-            if not sections[name].endswith("\n"):
-                out_parts.append("\n")
+    for name in section_layout(sections, original_order):
+        out_parts.append(sections[name])
+        if not sections[name].endswith("\n"):
+            out_parts.append("\n")
 
     result = "".join(out_parts)
     # Trim excessive trailing whitespace

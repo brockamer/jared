@@ -84,7 +84,9 @@ branch, and a commit from either side risks stealing the other's WIP.
 
 ```bash
 git fetch origin
-git worktree add ~/Code/<repo>-<issue> -b feature/<issue>-<slug> origin/main
+# origin/HEAD is the tip of the repo's default branch, whatever its name.
+# `jared worktree-add` resolves the base the same way (#465).
+git worktree add ~/Code/<repo>-<issue> -b feature/<issue>-<slug> origin/HEAD
 # Don't rely on `cd` — the harness resets cwd to the repo root between Bash
 # calls (and env vars don't persist either). Prefix every op with the
 # absolute worktree path instead:
@@ -110,7 +112,7 @@ uv pip install -e ".[dev]"    # or: uv sync --extra dev
 
 ## The wrap back-end
 
-`/jared-wrap` runs the full commit → integrate `main` → push → PR create → mergeable check → confirm merge → cleanup sequence after Session notes are posted. The operator confirms only the merge (the irreversible step against protected `main`).
+`/jared-wrap` runs the full commit → integrate the default branch → push → PR create → mergeable check → confirm merge → cleanup sequence after Session notes are posted. The operator confirms only the merge (the irreversible step against the protected default branch).
 
 Idempotency: each step inspects current state via `jared wrap-state`. Re-running `/jared-wrap` after a failure or interruption picks up at the current state — no in-flight lock, no manual recovery sequencing. The state IS the lock.
 
@@ -122,23 +124,23 @@ Staging scope: the commit step stages tracked modifications and deletions only (
 
 Precondition: before any push or PR, wrap confirms that `origin` matches the `- Repo:` bullet in `docs/project-board.md` and that the current branch is not the repo's default branch, which it derives from `refs/remotes/origin/HEAD` rather than assuming `main`. Any fact it cannot establish skips the back-end flow with a `SKIP:` line naming the missing one; Session notes still post and locks still clear (F72, #393). A clone of an upstream you cannot push to therefore wraps without a network write against it.
 
-## Integrate `main` before the PR
+## Integrate the default branch before the PR
 
-Parallel sessions branch from the same `origin/main` and then diverge. By
-the time the second session wraps, `main` has usually moved — the first
-session's work landed. The wrap back-end therefore folds `main` into the
-branch (`git fetch && git merge --no-edit origin/main`) *before* pushing or
-opening the PR, not after GitHub reports the PR unmergeable.
+Parallel sessions branch from the same default-branch tip and then diverge.
+By the time the second session wraps, the default branch has usually moved —
+the first session's work landed. The wrap back-end therefore folds it into
+the branch (`git fetch origin && git merge --no-edit origin/HEAD`) *before*
+pushing or opening the PR, not after GitHub reports the PR unmergeable.
 
 Two distinct conflict classes motivate this, and integrating early addresses
 both:
 
-- **Spurious (formatting/whitespace).** A whole-file `ruff format` run
+- **Spurious (formatting/whitespace).** A whole-file formatter run
   reformats lines *outside* your diff — a comprehension collapsed to one
   line, an import reordered. If the other branch reformatted the same line
   in a different surrounding context, the two diverge and git flags a
-  conflict on code neither session logically touched. Integrating `main`
-  *before* you format means you format on top of `main`'s canonical form and
+  conflict on code neither session logically touched. Integrating the default
+  branch *before* you format means you format on top of its canonical form and
   produce the identical output — the divergence never arises. This is the
   common, two-minute-to-resolve class, and integrating early eliminates it
   rather than just relocating it.

@@ -266,13 +266,41 @@ def test_session_lock_clear_removes_file(tmp_path: Path) -> None:
     assert not lock_path.exists()
 
 
-def _add_origin(main_repo: Path) -> None:
-    # worktree-add fetches origin and bases the new branch on origin/main
-    # (#283), so the repo needs a reachable origin carrying main.
+def _add_origin(main_repo: Path, *, set_head: bool = True) -> None:
+    # worktree-add fetches origin (#283) and bases the new branch on the
+    # branch `origin/HEAD` names (#465), so the repo needs a reachable origin
+    # carrying main and, like a real clone, an `origin/HEAD`.
     origin = main_repo.parent / "origin.git"
-    git_cmd(main_repo, "init", "--bare", str(origin))
+    git_cmd(main_repo, "init", "--bare", "-b", "main", str(origin))
     git_cmd(main_repo, "remote", "add", "origin", str(origin))
     git_cmd(main_repo, "push", "origin", "main")
+    if set_head:
+        git_cmd(main_repo, "remote", "set-head", "origin", "-a")
+
+
+def _clone_with_default_branch(tmp_path: Path, default_branch: str) -> tuple[Path, str]:
+    """An upstream on `default_branch` and a clone of it; upstream then advances.
+
+    Returns (clone, upstream tip). The clone's remote-tracking ref is stale
+    until something fetches, so a branch cut at the upstream tip proves the
+    fetch ran and the base was the default branch.
+    """
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    git_cmd(upstream, "init", "-b", default_branch)
+    git_cmd(upstream, "config", "user.email", "u@example.com")
+    git_cmd(upstream, "config", "user.name", "u")
+    (upstream / "README.md").write_text("initial\n")
+    git_cmd(upstream, "add", "README.md")
+    git_cmd(upstream, "commit", "-m", "initial")
+
+    clone = tmp_path / "widget"
+    git_cmd(tmp_path, "clone", str(upstream), str(clone))
+
+    (upstream / "later.txt").write_text("upstream advance\n")
+    git_cmd(upstream, "add", "later.txt")
+    git_cmd(upstream, "commit", "-m", "advance")
+    return clone, git_cmd(upstream, "rev-parse", default_branch)
 
 
 def _patch_gh_title(
@@ -378,6 +406,42 @@ def test_worktree_add_falls_back_to_worktree_when_title_unavailable(
     target = main_repo.parent / f"{main_repo.name}-278"
     branch = git_cmd(target, "rev-parse", "--abbrev-ref", "HEAD")
     assert branch == "feature/278-worktree"
+
+
+def test_worktree_add_bases_the_branch_on_a_master_default_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#465: worktree-add passed `origin/main` on every repo, so on a repo
+    whose default branch is `master` the `git worktree add` failed."""
+    clone, upstream_tip = _clone_with_default_branch(tmp_path, "master")
+    _patch_gh_title(monkeypatch, title="")
+
+    mod = import_cli()
+    result = mod.main(
+        ["worktree-add", "--repo-root", str(clone), "--issue", "465", "--title", "Wrap"]
+    )
+
+    assert result == 0
+    assert git_cmd(clone, "rev-parse", "feature/465-wrap") == upstream_tip
+
+
+def test_worktree_add_refuses_when_origin_head_is_unset(
+    main_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No `origin/HEAD` means the default branch is unknown. Refuse and name
+    the fix, the same as the /jared-wrap guard, rather than guess `main`."""
+    _add_origin(main_repo, set_head=False)
+    _patch_gh_title(monkeypatch, title="")
+
+    mod = import_cli()
+    result = mod.main(["worktree-add", "--repo-root", str(main_repo), "--issue", "465"])
+
+    assert result == 1
+    assert "git remote set-head origin -a" in capsys.readouterr().err
+    assert not (main_repo.parent / f"{main_repo.name}-465").exists()
 
 
 def test_slugify_normalizes_and_truncates() -> None:

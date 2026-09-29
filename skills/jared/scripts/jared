@@ -1760,8 +1760,10 @@ def _cmd_worktree_add(args: argparse.Namespace) -> int:
     target = repo_root.parent / f"{repo_basename}-{args.issue}"
     branch = f"feature/{args.issue}-{_resolve_worktree_slug(args)}"
     try:
+        # No `base`: create_worktree resolves origin's default branch from
+        # `origin/HEAD` and refuses when it is unset (#465).
         created = _worktree.create_worktree(
-            repo=repo_root, target=target, branch=branch, base="origin/main", fetch=True
+            repo=repo_root, target=target, branch=branch, fetch=True
         )
     except _worktree.WorktreeError as e:
         print(str(e), file=sys.stderr)

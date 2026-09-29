@@ -15,8 +15,9 @@ behaviour a session actually gets.
 
 Blocks are located by content — the staging block is the one containing
 `git add -u`, the precondition guard the one containing
-`refs/remotes/origin/HEAD` — so the doctrine carries no marker comment that
-exists only for this file.
+`refs/remotes/origin/HEAD`, the integrate step the one containing
+`git merge --no-edit` — so the doctrine carries no marker comment that exists
+only for this file.
 
 The guard's `SKIP:` / `PROCEED:` lines are machine-fixed strings in the sense of
 `references/voice-ste.md`: an operator reads them, and this module greps them.
@@ -310,3 +311,61 @@ def test_stub_does_not_hardcode_the_default_branch_name() -> None:
         '"main" again. F72 (#393): a repo whose default branch is `master` '
         "falls through that check and runs the PR loop on its default branch."
     )
+
+
+# --- #465: the integrate step merges the repo's own default branch ----------
+
+
+def _identify(repo: Path) -> None:
+    _git(["config", "user.email", "test@example.invalid"], repo)
+    _git(["config", "user.name", "Wrap Guard Test"], repo)
+    _git(["config", "commit.gpgsign", "false"], repo)
+
+
+@requires_bash
+@requires_git
+def test_integrate_step_merges_the_default_branch_of_a_master_repo(tmp_path: Path) -> None:
+    """#465: the guard resolved the default branch, then the integrate step ran
+    `git merge --no-edit origin/main`, which fails on a `master` repository.
+
+    Unlike the guard tests, this needs a remote that `git fetch` can reach, so
+    `origin` is a real local repository and the session repo is a real clone.
+    """
+    block = _block_containing("git merge --no-edit")
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, default_branch="master")
+    session = tmp_path / "session"
+    _git(["clone", "--quiet", str(upstream), str(session)], tmp_path)
+    _identify(session)
+    _git(["checkout", "--quiet", "-b", "feature/465-thing"], session)
+    (session / "feature.txt").write_text("session work\n", encoding="utf-8")
+    _git(["add", "feature.txt"], session)
+    _git(["commit", "--quiet", "-m", "session work"], session)
+    feature_tip = _git(["rev-parse", "HEAD"], session).stdout.strip()
+
+    (upstream / "upstream.txt").write_text("landed meanwhile\n", encoding="utf-8")
+    _git(["add", "upstream.txt"], upstream)
+    _git(["commit", "--quiet", "-m", "landed meanwhile"], upstream)
+    upstream_tip = _git(["rev-parse", "master"], upstream).stdout.strip()
+
+    proc = _run(["bash", "-c", block], session)
+
+    assert proc.returncode == 0, (
+        "the integrate step failed on a repo whose default branch is `master`. "
+        f"stderr was {proc.stderr!r}"
+    )
+    for ancestor in (upstream_tip, feature_tip):
+        is_ancestor = _run(["git", "merge-base", "--is-ancestor", ancestor, "HEAD"], session)
+        assert is_ancestor.returncode == 0
+    head = _git(["rev-parse", "--abbrev-ref", "HEAD"], session).stdout.strip()
+    assert head == "feature/465-thing"
+
+
+def test_stub_names_no_literal_default_branch_and_no_formatter() -> None:
+    """#465: the stub runs on every project jared manages. `origin/main` is one
+    repository's default branch, and `ruff` is this repository's own formatter;
+    on a Python project without ruff the loop reformatted every file and
+    opened a PR with the result."""
+    text = WRAP_STUB.read_text(encoding="utf-8")
+    assert "origin/main" not in text
+    assert "ruff" not in text
