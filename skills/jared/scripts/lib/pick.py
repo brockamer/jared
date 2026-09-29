@@ -62,10 +62,11 @@ class Pick:
     skipped: list[Skip] = field(default_factory=list)
 
 
-def _lock_reason(number: int) -> str:
+def _lock_reason(number: int, repo_root: str) -> str:
     return (
         "held by a session lock — another session is on it, or one ended without "
-        f"/jared-wrap; if no session is live, run: jared session-lock-clear --issue {number}"
+        "/jared-wrap; if no session is live, run: "
+        f"jared session-lock-clear --repo-root {repo_root} --issue {number}"
     )
 
 
@@ -76,8 +77,13 @@ def choose(
     locked: Collection[int],
     session: int | None = None,
     body_of: Callable[[BoardItem], str] | None = None,
+    repo_root: str = "<repo-root>",
 ) -> Pick:
-    """Apply the rule to `items`, which must be in board order."""
+    """Apply the rule to `items`, which must be in board order.
+
+    `repo_root` only fills the clear command in a lock skip reason, so the
+    operator can run it as printed.
+    """
     if session is not None:
         label = f"session-{session}"
         partition = [item for item in items if label in item.labels]
@@ -100,7 +106,7 @@ def choose(
                 continue
             reason: str | None = None
             if item.number in locked:
-                reason = _lock_reason(item.number)
+                reason = _lock_reason(item.number, repo_root)
             elif item.number in blockers:
                 refs = ", ".join(f"#{n}" for n in sorted(blockers[item.number]))
                 reason = f"blocked by open {refs}"

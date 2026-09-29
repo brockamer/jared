@@ -41,7 +41,7 @@ Flow:
 
    Resolve the target issue:
    - If step 0 found an issue reference: use it. It overrides the pick.
-   - If it found none and the section says `Pick: #N`: take N and continue to step 1b. The posture block carries the rule and the skipped items into the announce, so the operator sees why this item and not the one above it. Step 8 still waits for the operator's "go". If the operator declines the pick there, restore the item's previous Status with `jared move` and clear its lock with `jared session-lock-clear --issue <N>`.
+   - If it found none and the section says `Pick: #N`: take N and continue to step 1b. The posture block carries the rule and the skipped items into the announce, so the operator sees why this item and not the one above it. Step 8 still waits for the operator's "go". If the operator declines the pick there, restore the item's previous Status with `jared move` and clear its lock with `jared session-lock-clear --repo-root <repo-root> --issue <N>`.
    - If it says `Pick: none`: surface the posture block, then ask: *"Which issue would you like to pull?"* The `Skipped:` lines say what stopped each item; the `Pick: none` line points at `/jared-stage` to promote a Backlog item. Wait for user input.
 
    No drift-check is needed: the posture is computed from current board state at this moment, so the recommendation cannot be stale by construction.
@@ -94,7 +94,15 @@ Flow:
    - `In Progress (N):` — no `session-N` labels in play. `N` is the workstream count, equal to the item count.
    - `In Progress (M workstreams · N items):` — `session-N` labels collapse same-session items into one workstream. `M` (the leading number) is what to compare against the cap. `N` (the item count) is for operator orientation only.
 
-   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
+   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP. **A target that is already In Progress skips this comparison** — a rule-1 resume from the pick, or an In Progress issue the operator named. It is already counted, so starting it adds no workstream.
+
+   **A stop after step 1b clears the lock.** Step 1b wrote the lock before this check. If the flow stops here or at step 3, clear it — otherwise the next bare `/jared-start` skips the item as held by another session:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root <repo-root> --issue <N>
+   ```
+
+   If step 1b created a worktree, tell the operator its path. Do not remove it.
 
 3. **Check pullable state.** Read the target issue's body — `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, the same portable route step 5 uses, since this check runs before the move and on every backend — and verify:
    - First paragraph is a clear summary

@@ -635,7 +635,7 @@ def test_pick_skips_blocked_and_not_pullable_items_on_github(
     assert out.find("## Top of Up Next") < out.find("## Pick") < out.find("## Recently closed")
 
 
-def test_pick_ignores_a_blocker_that_is_no_longer_open_on_github(
+def test_pick_ignores_a_blocker_outside_the_open_set_on_github(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -720,7 +720,7 @@ def test_pick_skips_an_in_progress_item_that_holds_a_lock(
     assert rc == 0
     assert "Pick: #11 — rule 2:" in out
     assert "Skipped: #20 [In Progress] — held by a session lock" in out
-    assert "jared session-lock-clear --issue 20" in out
+    assert f"jared session-lock-clear --repo-root {repo_root} --issue 20" in out
 
 
 def test_pick_with_session_reasons_only_over_the_partition(
@@ -861,15 +861,17 @@ def _run_kf_pick(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tasks: list[KfTaskSpec],
+    *,
+    session: int | None = None,
 ) -> tuple[int, str]:
     board_md = write_minimal_kanbanflow_board(tmp_path)
     monkeypatch.setenv("JARED_NO_CACHE", "1")
     mod = import_cli()  # before the patch — see patch_kf_board_provider's ORDERING note
     patch_kf_board_provider(monkeypatch, tmp_path, tasks)
-    rc = mod.main(
-        ["--board", str(board_md), "next-session-prompt", "--pick"]
-        + ["--repo-root", str(_git_root(tmp_path))]
-    )
+    argv = ["--board", str(board_md), "next-session-prompt", "--pick"]
+    if session is not None:
+        argv += ["--session", str(session)]
+    rc = mod.main(argv + ["--repo-root", str(_git_root(tmp_path))])
     return rc, capsys.readouterr().out
 
 
@@ -932,3 +934,104 @@ def test_pick_ignores_a_blocker_in_done_on_kanbanflow(
     assert rc == 0
     assert "Pick: #1 — rule 2:" in out
     assert "Skipped:" not in out
+
+
+def test_pick_resumes_an_in_progress_task_on_kanbanflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = _run_kf_pick(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        [
+            {"number": 1, "name": "ready", "column": "Up Next", "description": PULLABLE},
+            {"number": 2, "name": "half done", "column": "In Progress", "description": PULLABLE},
+        ],
+    )
+
+    assert rc == 0
+    assert "Pick: #2 — rule 1:" in out
+
+
+def test_pick_skips_a_not_pullable_task_on_kanbanflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = _run_kf_pick(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        [
+            {"number": 1, "name": "unshaped", "column": "Up Next", "description": NO_CRITERIA},
+            {"number": 2, "name": "ready", "column": "Up Next", "description": PULLABLE},
+        ],
+    )
+
+    assert rc == 0
+    assert "Pick: #2 — rule 2:" in out
+    assert "Skipped: #1 [Up Next] — not pullable" in out
+
+
+def test_pick_skips_a_locked_task_on_kanbanflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skills.jared.scripts.lib import session_lock
+
+    session_lock.write_lock(
+        _git_root(tmp_path),
+        session_lock.Lock(
+            pid=1, started="2026-09-29T00:00:00Z", session=None, worktree_path=None, issue=1
+        ),
+    )
+    rc, out = _run_kf_pick(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        [
+            {"number": 1, "name": "held", "column": "Up Next", "description": PULLABLE},
+            {"number": 2, "name": "ready", "column": "Up Next", "description": PULLABLE},
+        ],
+    )
+
+    assert rc == 0
+    assert "Pick: #2 — rule 2:" in out
+    assert "Skipped: #1 [Up Next] — held by a session lock" in out
+
+
+def test_pick_keeps_session_labels_beside_blocked_by_labels_on_kanbanflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The provider strips `blocked-by:` labels from `labels`; `session-N` must survive."""
+    rc, out = _run_kf_pick(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        [
+            {
+                "number": 1,
+                "name": "other session",
+                "column": "Up Next",
+                "description": PULLABLE,
+                "labels": ["session-1"],
+            },
+            {
+                "number": 2,
+                "name": "this session",
+                "column": "Up Next",
+                "description": PULLABLE,
+                "labels": ["session-2", "blocked-by:9"],
+            },
+        ],
+        session=2,
+    )
+
+    assert rc == 0
+    assert "Pick: #2 — rule 2:" in out
+    assert "(session-2 partition)" in out

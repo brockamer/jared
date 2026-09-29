@@ -207,7 +207,7 @@ If a piece of "what's load-bearing right now" doesn't have a durable home on an 
 ## Pick
 
 Pick: #31 — rule 2: the first Up Next item that holds no session lock, has no open blocker and is pullable
-Skipped: #14 [In Progress] — held by a session lock — another session is on it, or one ended without /jared-wrap; if no session is live, run: jared session-lock-clear --issue 14
+Skipped: #14 [In Progress] — held by a session lock — another session is on it, or one ended without /jared-wrap; if no session is live, run: jared session-lock-clear --repo-root /home/me/proj --issue 14
 ```
 
 The rule lives in `lib/pick.py`, and nowhere else: resume the first In Progress item that holds no session lock and has no open blocker; otherwise take the first Up Next item, in board order, that holds no session lock, has no open blocker and is pullable. Each item passed over before the pick gets a `Skipped:` line with its reason. When nothing qualifies, the line is `Pick: none — …` and points at `/jared-stage`. The pick walks the same items the posture prints, so the two cannot disagree on order. An issue number given to `/jared-start` overrides it.

@@ -1533,7 +1533,14 @@ def _pick(board: Board, items: list[BoardItem], repo_root: Path, session: int | 
         body: str = item.body or board.provider.get_body(item.number)
         return body
 
-    pick: Pick = choose(items, edges=edges, locked=locked, session=session, body_of=body_of)
+    pick: Pick = choose(
+        items,
+        edges=edges,
+        locked=locked,
+        session=session,
+        body_of=body_of,
+        repo_root=str(repo_root),
+    )
     return pick
 
 

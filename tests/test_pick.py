@@ -45,12 +45,12 @@ def test_resumes_an_unlocked_in_progress_item() -> None:
 def test_skips_a_locked_in_progress_item_and_names_the_clear_command() -> None:
     items = [_item(20, "In Progress"), _item(10, "Up Next")]
 
-    pick = choose(items, edges=[], locked={20})
+    pick = choose(items, edges=[], locked={20}, repo_root="/src/proj")
 
     assert pick.number == 10
     assert pick.rule == 2
     assert [s.number for s in pick.skipped] == [20]
-    assert "jared session-lock-clear --issue 20" in pick.skipped[0].reason
+    assert "jared session-lock-clear --repo-root /src/proj --issue 20" in pick.skipped[0].reason
 
 
 def test_takes_the_first_up_next_item_in_board_order() -> None:
