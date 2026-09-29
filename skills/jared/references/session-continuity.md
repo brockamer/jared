@@ -6,7 +6,7 @@ Manual session-handoff prompts are a symptom of the board not being trustworthy.
 
 **End of session:** `/jared-wrap` appends a standardized Session note to every In Progress issue, plus any other issue meaningfully touched this session. No `tmp/` artifact is written.
 
-**Start of next session:** `/jared-start` invokes `jared next-session-prompt`, which walks current board state and renders the posture (In flight with one-liner Session-note summaries, Top of Up Next, Recently closed). That *is* the handoff — assembled fresh from board state, never stored.
+**Start of next session:** `/jared-start` invokes `jared next-session-prompt`, which walks current board state and renders the posture (In flight with one-liner Session-note summaries, Top of Up Next, Blocked, Recently closed). That *is* the handoff — assembled fresh from board state, never stored.
 
 The shape: durable records (issues + Session-note comments + plans/specs + memory) on the board, ephemeral assembly (the posture) at start time, no file pattern in between.
 
@@ -144,6 +144,10 @@ The orientation output:
 - #27 [Medium] Logging consistency pass
 - #35 [Medium] Config externalization for prefilter
 
+## Blocked
+
+- #29 Vendor API key for the scoring tier
+
 ## Recently closed (last 7 days)
 
 - #12 Strip priority labels from open issues  (2026-04-17)
@@ -160,9 +164,16 @@ Read the sections above, decide which issue to pull, then:
 `next-session-prompt` emits exactly these sections — plus `## Session-N
 staged` under `--session N`, `## Pick` under `--pick` (see "The pick"
 below), and `## Quick health check on session start` when the board
-configures one. There is no Blocked section and no Aging
-section; those belong to `/jared-groom`. The `Last session:` line carries
-the next action only, with no date.
+configures one. An empty section prints a placeholder (`(nothing
+blocked)`, `(empty queue)`) and keeps its heading. `## Blocked` lists the
+Blocked column without priority and is not filtered by `--session N`: it
+is board state, not the pull menu. There is no Aging section and no count
+by Priority; aging belongs to `/jared-groom`. The `Last session:` line
+carries the next action only, with no date.
+
+This is the one orientation shape (#467). `/jared-status` prints it
+verbatim, `/jared-start` prints it with the pick, and SKILL.md § "At
+session start — orient" lists the same four sections.
 
 That's the handoff. No tmp file required.
 
@@ -187,11 +198,11 @@ Retro Session notes are marked as such in the header: `## Session 2026-04-19 (re
 
 ## The posture assembly
 
-**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, the **Recently closed (last 7 days)** section of the posture is omitted — closed-at timestamps are unavailable on this backend: `degraded: VELOCITY_TIMESTAMPS unavailable — recently-closed section omitted from session posture` (VELOCITY_TIMESTAMPS absent). The In flight and Top of Up Next sections are unaffected.
+**Backend gate.** If `docs/project-board.md` § Jared config has `- backend: kanbanflow`, the **Recently closed (last 7 days)** section keeps its heading and prints one line in place of the list — closed-at timestamps are unavailable on this backend: `degraded: recently-closed (7d) unavailable on kanbanflow — no closed-at timestamps on this backend` (VELOCITY_TIMESTAMPS absent). The In flight, Top of Up Next and Blocked sections are unaffected.
 
-`${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt` emits the board-derived posture deterministically: In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Recently closed (last 7 days), and a `## Quick health check` block iff the board has `## Session start checks` configured.
+`${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt` emits the board-derived posture deterministically: In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Blocked, Recently closed (last 7 days), and a `## Quick health check` block iff the board has `## Session start checks` configured.
 
-The CLI is the single canonical assembly point — both `/jared-start` (session begin) and ad-hoc orientation calls invoke it the same way. There is no synthesis layer above it, no human-authored "Frame" prose. The cross-issue narrative that prose used to carry now lives where it belongs:
+The CLI is the single canonical assembly point — `/jared-start` (session begin), `/jared-status` and ad-hoc orientation calls all invoke it. There is no synthesis layer above it, no human-authored "Frame" prose. The cross-issue narrative that prose used to carry now lives where it belongs:
 
 - **Strategic frame** — in `CLAUDE.md`, memory entries, or the issue body's `## Decisions`.
 - **Anti-targets** — on the relevant issue's `## Blocked by` / `## Acceptance criteria` / explicit Session-note Gotchas.
@@ -201,7 +212,7 @@ If a piece of "what's load-bearing right now" doesn't have a durable home on an 
 
 ### The pick
 
-`/jared-start` adds `--pick --repo-root <repo-root>`, so a bare `/jared-start` starts the right item without the operator naming it (#516). The `## Pick` section sits between Top of Up Next and Recently closed:
+`/jared-start` adds `--pick --repo-root <repo-root>`, so a bare `/jared-start` starts the right item without the operator naming it (#516). The `## Pick` section sits between Blocked and Recently closed:
 
 ```
 ## Pick
