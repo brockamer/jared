@@ -489,8 +489,11 @@ Project-level knobs that change Jared's behavior on this board. Each bullet is
   `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection, so the
   sanction is opt-in per project, and the value pins the strategy (`--merge` preserves
   a phase-by-phase commit trail; `--squash` discards it). Leave the line out and wrap
-  only reports the block. Doctrine-only like the bullets above: `commands/jared-wrap.md`
-  reads it from this doc and no CLI subcommand parses it.
+  only reports the block. The ordinary `confirm_merge` step uses the same strategy; with
+  the line absent it takes the first method the repository allows (merge commit, squash,
+  rebase), so pinning a strategy here also sanctions the escape. Doctrine-only like the
+  bullets above: `commands/jared-wrap.md` reads it from this doc and no CLI subcommand
+  parses it.
 """
 
 
@@ -944,8 +947,11 @@ KanbanFlow Settings -> API). The token is never stored in this file.
   `gh pr merge <N> --admin <strategy>`. `--admin` bypasses branch protection, so the
   sanction is opt-in per project, and the value pins the strategy (`--merge` preserves
   a phase-by-phase commit trail; `--squash` discards it). Leave the line out and wrap
-  only reports the block. Doctrine-only like the bullets above: `commands/jared-wrap.md`
-  reads it from this doc and no CLI subcommand parses it.
+  only reports the block. The ordinary `confirm_merge` step uses the same strategy; with
+  the line absent it takes the first method the repository allows (merge commit, squash,
+  rebase), so pinning a strategy here also sanctions the escape. Doctrine-only like the
+  bullets above: `commands/jared-wrap.md` reads it from this doc and no CLI subcommand
+  parses it.
 """
 
 
