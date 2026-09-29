@@ -19,31 +19,34 @@ Flow:
    - **`--session N`** — the operator's claim of which parallel session this is (1, 2, ...). It opts into worktree isolation.
    - **`--no-worktree`** — the operator's explicit acceptance of the shared-`.git/HEAD` risk. It is mutually exclusive with `--session N`. When both are present, still pass both to `session-resolve` in step 1b, which refuses with `REFUSE_CONFLICTING_FLAGS`; the refusal text lives in the CLI, not here.
 
-   **Write literal values into every command.** The commands below hold no shell variable for a flag or for a value that an earlier command printed. Write the literal value in its place: `--session 2`, not a variable that holds `2`; the absolute repo root that step 1b prints, not `$REPO_ROOT`. Every Bash call starts a fresh shell, so a variable set in one call is empty in the next — and an empty variable drops its flag without an error, so `session-resolve` reports a solo verdict to an operator who asked for a worktree (#468). A variable is safe only inside the one block that assigns it. `tests/test_stub_shell_variables.py` enforces this on every stub.
+   **Write literal values into every command.** The commands below hold no shell variable for a flag or for a value that an earlier command printed. Write the literal value in its place: `--session 2`, not a variable that holds `2`; the absolute repo root that step 1 prints, not `$REPO_ROOT`. Every Bash call starts a fresh shell, so a variable set in one call is empty in the next — and an empty variable drops its flag without an error, so `session-resolve` reports a solo verdict to an operator who asked for a worktree (#468). A variable is safe only inside the one block that assigns it. `tests/test_stub_shell_variables.py` enforces this on every stub.
 
-1. **Assemble the board posture on-demand.** Run:
-
-   ```bash
-   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks
-   ```
-
-   When step 0 found `--session N`, add it to this command with the literal number (`--session 2`). The Top of Up Next section is then filtered to `session-N`-labeled items. The menu shown for "Which issue would you like to pull?" is the session-N partition; items labeled for other sessions are hidden. Session-N work that is labeled but still sits in Backlog appears under a distinct `## Session-N staged (not yet in Up Next)` subsection — these are *not* directly pullable; promote them to Up Next via `/jared-stage --sessions N` first. If no items are labeled session-N in **either** Up Next or Backlog, the section prints `(none labeled session-N in Up Next or Backlog)` and the operator must label items via `/jared-stage --sessions N` before pulling.
-
-   Capture stdout. The CLI walks the live board and emits structured sections — In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Recently closed (7d), and a `## Quick health check` block iff the board has `## Session start checks` configured. Use this output verbatim as the **posture block** in step 8 (no further parsing or condensing required).
-
-   Resolve the target issue:
-   - If step 0 found an issue reference: use it.
-   - If it found none: surface the posture block, then ask: *"Which issue would you like to pull?"* The In Progress and Up Next sections are the menu — In Progress means resuming an interrupted issue; top of Up Next is the natural next pull. Wait for user input.
-
-   No drift-check is needed: the posture is computed from current board state at this moment, so the recommendation cannot be stale by construction.
-
-1b. **Session-presence resolution.** Before mutating the board, decide whether this is a solo session, a multi-session opt-in, or a B-leg refusal. The flags are the ones step 0 found.
-
-   Resolve the repo root — the main checkout, whose git common dir holds the lock directory. The command prints one absolute path; it is `<repo-root>` in every command below:
+1. **Assemble the board posture and the pick on-demand.** Resolve the repo root first — the main checkout, whose git common dir holds the lock directory. The command prints one absolute path; it is `<repo-root>` in every command below:
 
    ```bash
    realpath "$(dirname "$(git rev-parse --git-common-dir 2>/dev/null)")"
    ```
+
+   Then run:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared next-session-prompt --include-session-checks --pick --repo-root <repo-root>
+   ```
+
+   When step 0 found `--session N`, add it to this command with the literal number (`--session 2`). Top of Up Next and the pick then see only `session-N`-labeled items; items labeled for other sessions are hidden. Session-N work that is labeled but still sits in Backlog appears under a distinct `## Session-N staged (not yet in Up Next)` subsection — these are *not* directly pullable; promote them to Up Next via `/jared-stage --sessions N` first. If no items are labeled session-N in **either** Up Next or Backlog, the section prints `(none labeled session-N in Up Next or Backlog)` and the operator must label items via `/jared-stage --sessions N` before pulling.
+
+   Capture stdout. The CLI walks the live board and emits structured sections — In flight (with each issue's most recent Session-note one-liner), Top of Up Next, Pick, Recently closed (7d), and a `## Quick health check` block iff the board has `## Session start checks` configured. Use this output verbatim as the **posture block** in step 7 (no further parsing or condensing required).
+
+   The `## Pick` section applies a fixed rule in the CLI (`lib/pick.py`, #516): resume the first In Progress item that holds no session lock and has no open blocker; otherwise take the first Up Next item, in board order, that holds no session lock, has no open blocker and is pullable. Its first line is `Pick: #N — rule <k>: …` or `Pick: none — …`. Each `Skipped: #M [<Status>] — <reason>` line after it names an item passed over and why. Do not re-derive the rule here; the CLI is the one place it lives.
+
+   Resolve the target issue:
+   - If step 0 found an issue reference: use it. It overrides the pick.
+   - If it found none and the section says `Pick: #N`: take N and continue to step 1b. The posture block carries the rule and the skipped items into the announce, so the operator sees why this item and not the one above it. Step 8 still waits for the operator's "go". If the operator declines the pick there, restore the item's previous Status with `jared move` and clear its lock with `jared session-lock-clear --repo-root <repo-root> --issue <N>`.
+   - If it says `Pick: none`: surface the posture block, then ask: *"Which issue would you like to pull?"* The `Skipped:` lines say what stopped each item; the `Pick: none` line points at `/jared-stage` to promote a Backlog item. Wait for user input.
+
+   No drift-check is needed: the posture is computed from current board state at this moment, so the recommendation cannot be stale by construction.
+
+1b. **Session-presence resolution.** Before mutating the board, decide whether this is a solo session, a multi-session opt-in, or a B-leg refusal. The flags are the ones step 0 found, and `<repo-root>` is the path step 1 printed.
 
    Walk the active locks and decide the action via the Python lib. Add `--session N` or `--no-worktree` when step 0 found it:
 
@@ -78,7 +81,7 @@ Flow:
 
    On `PROCEED_MULTI`, add `--session <session> --worktree-path <worktree-path>` with the literal values. Solo sessions (`--session` absent) add neither and still write a lock with `session=null, worktree_path=null`. This is load-bearing: it lets a later sibling session detect the solo one and refuse with guidance, rather than silently sharing `.git/HEAD`.
 
-   **Non-git checkout.** On a project whose root has no `.git` directory, `git rev-parse` above fails and the repo-root command prints the current directory. All three lock subcommands — `session-resolve`, `session-lock-write`, `session-lock-clear` — then **skip, exit 0, and print one notice to stderr** naming the absent `.git`. `session-resolve` still prints its `PROCEED_*` line on stdout, so the parsing above is unchanged. Expect the notice; it is not an error, and no lock is written at either end of the session.
+   **Non-git checkout.** On a project whose root has no `.git` directory, `git rev-parse` in step 1 fails and the repo-root command prints the current directory. The pick then reads no locks, and all three lock subcommands — `session-resolve`, `session-lock-write`, `session-lock-clear` — then **skip, exit 0, and print one notice to stderr** naming the absent `.git`. `session-resolve` still prints its `PROCEED_*` line on stdout, so the parsing above is unchanged. Expect the notice; it is not an error, and no lock is written at either end of the session.
 
    Locking is skipped rather than relocated because the hazard it guards is a shared `.git/HEAD`, which does not exist here — and every remedy the sibling refusal offers (`--session N`, a worktree, `--no-worktree`) needs a git checkout. **Do not run `git init` to satisfy the step.** That is an unrequested change to the operator's directory, and some projects forbid it outright. The decision and its reasoning are recorded on #425.
 
@@ -91,7 +94,15 @@ Flow:
    - `In Progress (N):` — no `session-N` labels in play. `N` is the workstream count, equal to the item count.
    - `In Progress (M workstreams · N items):` — `session-N` labels collapse same-session items into one workstream. `M` (the leading number) is what to compare against the cap. `N` (the item count) is for operator orientation only.
 
-   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP.
+   Compare `M` (or `N` in the no-collapse case) against the project's configured cap (default 4, per #245). If it's at the cap, STOP and ask what moves out or pauses. Do NOT silently exceed WIP. **A target that is already In Progress skips this comparison** — a rule-1 resume from the pick, or an In Progress issue the operator named. It is already counted, so starting it adds no workstream.
+
+   **A stop after step 1b clears the lock.** Step 1b wrote the lock before this check. If the flow stops here or at step 3, clear it — otherwise the next bare `/jared-start` skips the item as held by another session:
+
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared session-lock-clear --repo-root <repo-root> --issue <N>
+   ```
+
+   If step 1b created a worktree, tell the operator its path. Do not remove it.
 
 3. **Check pullable state.** Read the target issue's body — `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/jared get-item <N> --body`, the same portable route step 5 uses, since this check runs before the move and on every backend — and verify:
    - First paragraph is a clear summary

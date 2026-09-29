@@ -315,6 +315,7 @@ def patch_gh_multi(
     comments_batch_json: str | None = None,
     labels_by_number: dict[int, list[str]] | None = None,
     positions: list[int] | None = None,
+    blocked_by: dict[int, list[int]] | None = None,
 ) -> None:
     """Patch the multi-gh-call shape produced by the batched open-only path (#185).
 
@@ -333,6 +334,11 @@ def patch_gh_multi(
     - `gh api graphql` with `field: POSITION` → the board's manual order
       (#506), built from `positions` (issue numbers, top first). Omitted, the
       response ranks nothing and the provider keeps `open_issues` order.
+    - `gh api graphql` with `blockedBy(first:20)` → the edge fetch, built from
+      `blocked_by` (dependent → blocker numbers). A blocker in `open_issues`
+      reports `OPEN`, any other `CLOSED`.
+    - `gh api repos/<owner>/<repo>/issues/<N>` → `{"body": ...}` from the
+      matching `open_issues` entry, which is what `get_body` reads (#516).
 
     Most tests only need `open_issues` + `statuses`. Stuck-closed tests
     additionally provide `closed_issues` + `closed_statuses`. The handoff
@@ -343,6 +349,9 @@ def patch_gh_multi(
     statuses = statuses or {}
     closed_statuses = closed_statuses or {}
     labels_by_number = labels_by_number or {}
+    blocked_by = blocked_by or {}
+    open_numbers = {issue.get("number") for issue in open_issues}
+    bodies = {issue.get("number"): issue.get("body", "") for issue in open_issues}
     empty_comments_json = '{"data": {"repository": {}}}'
 
     def _open_items_batched_response() -> str:
@@ -399,10 +408,43 @@ def patch_gh_multi(
                 repo_block[f"i{n}"] = {"projectItems": {"nodes": []}}
         return _json.dumps({"data": {"repository": repo_block}})
 
+    def _edges_response() -> str:
+        nodes = [
+            {
+                "number": issue.get("number"),
+                "blockedBy": {
+                    "nodes": [
+                        {"number": b, "state": "OPEN" if b in open_numbers else "CLOSED"}
+                        for b in blocked_by.get(int(str(issue.get("number"))), [])
+                    ]
+                },
+            }
+            for issue in open_issues
+        ]
+        return _json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": nodes,
+                        }
+                    }
+                }
+            }
+        )
+
     def fake_run(args: list[str], **_: object) -> FakeGhResult:
+        import re as _re
+
         joined = " ".join(args)
         if "issue list" in joined and "--state closed" in joined:
             return FakeGhResult(stdout=closed_list_json)
+        if "api" in args:
+            for tok in args:
+                m = _re.fullmatch(r"repos/[^/]+/[^/]+/issues/(\d+)", tok)
+                if m:
+                    return FakeGhResult(stdout=_json.dumps({"body": bodies.get(int(m.group(1)))}))
         if "api graphql" in joined:
             query_arg = next(
                 (
@@ -428,6 +470,8 @@ def patch_gh_multi(
                         }
                     )
                 )
+            if "blockedBy(first:20)" in query_arg:
+                return FakeGhResult(stdout=_edges_response())
             if "issues(states: OPEN" in query_arg:
                 return FakeGhResult(stdout=_open_items_batched_response())
             if "comments(last:" in query_arg:
