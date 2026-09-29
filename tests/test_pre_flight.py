@@ -536,3 +536,210 @@ def test_find_project_root_returns_start_when_no_git_found(tmp_path: Path) -> No
     sub.mkdir(parents=True)
     # Result is .resolve()'d
     assert _find_project_root(sub) == sub.resolve()
+
+
+# ---------- `## Pre-flight terms` (#528) ----------
+
+
+def _terms_file(root: Path, *terms: str, name: str = "CLAUDE.local.md") -> Path:
+    """Write a private file that holds only a `## Pre-flight terms` section."""
+    private = root / name
+    private.parent.mkdir(parents=True, exist_ok=True)
+    private.write_text("## Pre-flight terms\n\n" + "".join(f"- {t}\n" for t in terms))
+    return private
+
+
+def test_extract_terms_reads_bullets_under_the_heading_only(tmp_path: Path) -> None:
+    """Bullets under the heading, up to the next heading, are terms. A bullet
+    under another heading is not, and a term under 3 characters is dropped."""
+    from skills.jared.scripts.lib.board import _extract_terms
+
+    f = tmp_path / "CLAUDE.local.md"
+    f.write_text(
+        "# Notes\n"
+        "- Not a term\n"
+        "## Pre-flight terms\n"
+        "Names that stay off the board:\n"
+        "- Jane Doe\n"
+        "* Orchard Lane\n"
+        "- Al\n"
+        "## Later\n"
+        "- Also not a term\n"
+    )
+    assert _extract_terms(f) == ["Jane Doe", "Orchard Lane"]
+
+
+def test_extract_phrases_skips_term_bullets(tmp_path: Path) -> None:
+    """A long term follows the term rule, not the phrase rule, so it is not
+    also a phrase. Other lines in the section still follow the phrase rule."""
+    f = tmp_path / "CLAUDE.local.md"
+    f.write_text(
+        "## Pre-flight terms\n"
+        "- Acme Robotics Holdings International\n"
+        "These names must stay off the public board.\n"
+    )
+    assert _extract_phrases(f) == ["These names must stay off the public board."]
+
+
+def test_pre_flight_check_term_hit_names_the_source(tmp_path: Path) -> None:
+    """#528 AC1: a listed term flags a draft that uses it, possessive
+    included. The report has a match and is not vacuous."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    private = _terms_file(tmp_path, "Jane Doe")
+    report = pre_flight_check("Met Jane Doe's team\n", project_root=tmp_path)
+    assert not report.vacuous
+    assert len(report.matches) == 1
+    assert report.matches[0].matched_phrase == "Jane Doe"
+    assert report.matches[0].source_file == private
+    assert report.matches[0].line_no == 1
+
+
+def test_pre_flight_check_term_matches_whole_tokens_only(tmp_path: Path) -> None:
+    """#528 AC2: `Janet Doerr` holds `Jane Doe` as a substring, not as a
+    whole token, so the draft is clean."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    _terms_file(tmp_path, "Jane Doe")
+    report = pre_flight_check("Janet Doerr called\n", project_root=tmp_path)
+    assert report.clean
+
+
+def test_pre_flight_check_term_is_case_sensitive(tmp_path: Path) -> None:
+    """A documented false negative: the operator lists each form to catch."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    _terms_file(tmp_path, "Jane Doe")
+    report = pre_flight_check("met jane doe today\n", project_root=tmp_path)
+    assert report.clean
+
+
+def test_pre_flight_check_allowlists_term_tracked_as_whole_token(tmp_path: Path) -> None:
+    """#528 AC3: a term that a tracked file holds as a whole token is public
+    and is dropped. The second term keeps the report from being vacuous."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Thanks to Jane Doe for the fix.\n"})
+    _terms_file(tmp_path, "Jane Doe", "Zelda Quimby")
+    report = pre_flight_check("Met Jane Doe's team\n", project_root=tmp_path)
+    assert report.clean, report.matches
+
+
+def test_pre_flight_check_term_inside_a_tracked_word_is_not_allowlisted(
+    tmp_path: Path,
+) -> None:
+    """The allowlist uses the same boundary rule as the body. A substring
+    test would drop `Jane` because the tracked README holds `Janeway`."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Named for Captain Janeway.\n"})
+    _terms_file(tmp_path, "Jane")
+    report = pre_flight_check("Ask Jane about it\n", project_root=tmp_path)
+    assert [m.matched_phrase for m in report.matches] == ["Jane"]
+
+
+def test_pre_flight_check_terms_all_too_short_is_vacuous(tmp_path: Path) -> None:
+    """#528 AC4: terms under 3 characters are ignored. With no phrase in the
+    file either, nothing was compared."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    _terms_file(tmp_path, "JD", "Q")
+    report = pre_flight_check("JD and Q met\n", project_root=tmp_path)
+    assert report.vacuous
+    assert report.unscanned_reason == "no-usable-phrases"
+
+
+def test_pre_flight_check_names_a_private_file_that_adds_nothing(tmp_path: Path) -> None:
+    """One file has a usable phrase; the other lists short names with no
+    terms heading. The report is clean, but it names the second file, so
+    the operator sees that its names were never compared."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+    people = tmp_path / ".claude" / "local" / "people.md"
+    people.parent.mkdir(parents=True)
+    people.write_text("".join(f"- {t}\n" for t in SHORT_PRIVATE_TERMS))
+    report = pre_flight_check(f"{SHORT_PRIVATE_TERMS[0]} called.\n", project_root=tmp_path)
+    assert report.clean
+    assert report.unused_files == [people]
+
+
+def test_pre_flight_check_every_file_used_lists_none_unused(tmp_path: Path) -> None:
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    (tmp_path / "CLAUDE.local.md").write_text("the deploy host is internal-foo-7.corp.example\n")
+    _terms_file(tmp_path, "Jane Doe", name=".claude/local/people.md")
+    report = pre_flight_check("Nothing private.\n", project_root=tmp_path)
+    assert report.clean
+    assert report.unused_files == []
+
+
+def test_print_redaction_diff_names_the_matched_term(capsys: pytest.CaptureFixture[str]) -> None:
+    """A term can sit anywhere in a long line, so the diff names it."""
+    from skills.jared.scripts.lib.board import print_redaction_diff
+
+    report = RedactionReport(
+        matches=[
+            RedactionMatch(
+                line_no=3,
+                line_text="We met Jane Doe's team at the offsite last week.",
+                matched_phrase="Jane Doe",
+                source_file=Path("CLAUDE.local.md"),
+                kind="term",
+            )
+        ],
+        scanned_files=[Path("CLAUDE.local.md")],
+    )
+    print_redaction_diff(report)
+    err = capsys.readouterr().err
+    assert '↳ matches CLAUDE.local.md (term "Jane Doe")' in err
+    assert "claude-shaped" not in err
+
+
+def test_print_unscanned_notice_no_usable_phrases_names_the_terms_heading(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#528 AC4: the vacuous warning tells the operator where short names go."""
+    from skills.jared.scripts.lib.board import print_unscanned_notice
+
+    print_unscanned_notice(
+        RedactionReport(
+            matches=[],
+            scanned_files=[Path("/proj/CLAUDE.local.md")],
+            unscanned_reason="no-usable-phrases",
+        ),
+        Path("/proj"),
+    )
+    err = capsys.readouterr().err
+    assert "## Pre-flight terms" in err
+    assert "3+ characters" in err
+
+
+def test_print_unused_sources_notice_names_file_and_heading(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skills.jared.scripts.lib.board import print_unused_sources_notice
+
+    print_unused_sources_notice(
+        RedactionReport(
+            matches=[],
+            scanned_files=[Path("/proj/CLAUDE.local.md"), Path("/proj/.claude/local/people.md")],
+            unused_files=[Path("/proj/.claude/local/people.md")],
+        ),
+        Path("/proj"),
+    )
+    err = capsys.readouterr().err
+    assert err.startswith("warning: 1 of 2 private files")
+    assert ".claude/local/people.md" in err
+    assert "/proj/.claude" not in err
+    assert "## Pre-flight terms" in err
+
+
+def test_print_unused_sources_notice_no_op_without_unused_files(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Silent on a clean report with every file used, and on a vacuous one,
+    whose own notice already names every file."""
+    from skills.jared.scripts.lib.board import print_unused_sources_notice
+
+    print_unused_sources_notice(RedactionReport(matches=[], scanned_files=[Path("z")]), Path("/p"))
+    print_unused_sources_notice(
+        RedactionReport(
+            matches=[],
+            scanned_files=[Path("z")],
+            unscanned_reason="no-usable-phrases",
+            unused_files=[Path("z")],
+        ),
+        Path("/p"),
+    )
+    assert capsys.readouterr().err == ""

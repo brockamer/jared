@@ -1654,18 +1654,25 @@ def resolve_body(body: str | None, body_file: str | None) -> str:
 
 @dataclass
 class RedactionMatch:
-    """One body line that matched a phrase from a gitignored claude-shaped file."""
+    """One body line that matched a phrase or a listed term from a private file.
+
+    `kind` says which rule matched (#528): a phrase is a whole private line
+    the body repeats; a term is a bullet under `## Pre-flight terms` that the
+    body holds as a whole token. `matched_phrase` carries either one.
+    """
 
     line_no: int
     line_text: str
     matched_phrase: str
     source_file: Path
+    kind: Literal["phrase", "term"] = "phrase"
 
 
 # Why a pre-flight compared nothing: no `.git/` (so no allowlist and no notion
 # of gitignored); a git repo in which no private source was found; or private
-# sources that yield no phrase once short lines and tracked lines are dropped
-# (#526). Only the last one comes with a non-empty `scanned_files`.
+# sources that yield no phrase and no term once short and tracked entries are
+# dropped (#526, #528). Only the last one comes with a non-empty
+# `scanned_files`. The literal predates terms and keeps its name.
 UnscannedReason = Literal["no-git", "no-private-files", "no-usable-phrases"]
 
 
@@ -1679,11 +1686,16 @@ class RedactionReport:
     — a caller that gates on `clean` alone fails closed, not open. Files can
     be found and still leave the report vacuous (#526), so `vacuous` keys on
     `unscanned_reason` as well as on the file count.
+
+    `unused_files` names the scanned files that gave no phrase and no term
+    (#528). A report with another usable file is still `clean`, but those
+    files' contents were never compared, and the caller says so.
     """
 
     matches: list[RedactionMatch]
     scanned_files: list[Path]
     unscanned_reason: UnscannedReason | None = None
+    unused_files: list[Path] = field(default_factory=list)
 
     @property
     def vacuous(self) -> bool:
@@ -1702,24 +1714,62 @@ _MIN_PHRASE_WORDS = 3
 # Markdown-leader characters stripped from line starts before length checks.
 _MARKDOWN_LEADER_RE = re.compile(r"^[\s\-\*\>#\|`]+")
 
+# The section that lists short private terms (#528). Any heading level, so a
+# `###` does not silently turn the list back into too-short lines.
+TERMS_HEADING = "## Pre-flight terms"
+_TERMS_HEADING_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+pre-flight terms[ \t#]*$", re.IGNORECASE)
+_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
+_BULLET_RE = re.compile(r"^\s*[-*+][ \t]+(.*?)\s*$")
+# Terms shorter than this match too eagerly to be useful.
+_MIN_TERM_CHARS = 3
 
-def _extract_phrases(file_path: Path) -> list[str]:
-    """Extract candidate phrases from one gitignored claude-shaped file.
 
-    A phrase is a line of the file that — after stripping markdown leaders
-    (`-`, `*`, `>`, `#`, `|`, backticks, leading whitespace) — has at least
-    `_MIN_PHRASE_WORDS` whitespace-separated words AND at least
-    `_MIN_PHRASE_CHARS` characters. Returns the cleaned phrases in file order.
+def _split_private_lines(file_path: Path) -> tuple[list[str], list[str]]:
+    """Split one private file into phrase-candidate lines and term bullets.
 
-    Missing file → empty list, not an exception (the caller has already
-    decided this file is in scope; we don't want to second-guess).
+    A term is the text of a bullet under a `## Pre-flight terms` heading, up
+    to the next heading. Every other line — a non-bullet line inside that
+    section too — is a phrase candidate. Missing or undecodable file → two
+    empty lists, not an exception (the caller has already decided this file
+    is in scope; we don't want to second-guess).
     """
     try:
         text = file_path.read_text(encoding="utf-8")
     except (FileNotFoundError, UnicodeDecodeError):
-        return []
-    out = []
+        return [], []
+    lines: list[str] = []
+    terms: list[str] = []
+    in_terms = False
     for raw in text.splitlines():
+        if _HEADING_RE.match(raw):
+            in_terms = bool(_TERMS_HEADING_RE.match(raw))
+        elif in_terms and (m := _BULLET_RE.match(raw)):
+            terms.append(m.group(1))
+            continue
+        lines.append(raw)
+    return lines, terms
+
+
+def _extract_terms(file_path: Path) -> list[str]:
+    """Terms listed under `## Pre-flight terms` in one private file (#528).
+
+    Terms under `_MIN_TERM_CHARS` characters are dropped. Returns the terms
+    in file order.
+    """
+    return [t for t in _split_private_lines(file_path)[1] if len(t) >= _MIN_TERM_CHARS]
+
+
+def _extract_phrases(file_path: Path) -> list[str]:
+    """Extract candidate phrases from one private file.
+
+    A phrase is a line of the file that — after stripping markdown leaders
+    (`-`, `*`, `>`, `#`, `|`, backticks, leading whitespace) — has at least
+    `_MIN_PHRASE_WORDS` whitespace-separated words AND at least
+    `_MIN_PHRASE_CHARS` characters. A term bullet is never a phrase: it
+    follows the term rule (#528). Returns the cleaned phrases in file order.
+    """
+    out = []
+    for raw in _split_private_lines(file_path)[0]:
         cleaned = _MARKDOWN_LEADER_RE.sub("", raw).rstrip()
         if len(cleaned) < _MIN_PHRASE_CHARS:
             continue
@@ -1859,10 +1909,37 @@ def _read_tracked_content(project_root: Path) -> str:
     return "\n".join(chunks)
 
 
-# Process-local cache for pre_flight_check scan inputs (phrases + tracked
-# content). Keyed on the resolved absolute project_root path. Survives only
-# within one `jared` invocation; that's the intended scope per the spec.
-_PRE_FLIGHT_CACHE: dict[Path, tuple[dict[str, Path], list[Path]]] = {}
+def _has_token(term: str, text: str) -> bool:
+    """True when `text` holds `term` as a whole token (#528).
+
+    A whole token has a non-alphanumeric character or the edge of the text
+    on each side, so `Jane Doe's` holds `Jane Doe` and `Janet` does not hold
+    `Jane`. Case-sensitive.
+    """
+    start = 0
+    while (i := text.find(term, start)) >= 0:
+        j = i + len(term)
+        if (i == 0 or not text[i - 1].isalnum()) and (j == len(text) or not text[j].isalnum()):
+            return True
+        start = i + 1
+    return False
+
+
+@dataclass
+class _ScanInputs:
+    """What one project's private sources give pre_flight_check to compare."""
+
+    phrases: dict[str, Path]
+    terms: dict[str, Path]
+    files: list[Path]
+    unused: list[Path]
+
+
+# Process-local cache for pre_flight_check scan inputs (phrases, terms and the
+# files they came from). Keyed on the resolved absolute project_root path.
+# Survives only within one `jared` invocation; that's the intended scope per
+# the spec.
+_PRE_FLIGHT_CACHE: dict[Path, _ScanInputs] = {}
 
 
 def _clear_pre_flight_cache() -> None:
@@ -1875,38 +1952,54 @@ def _unscanned(root: Path) -> RedactionReport:
     return RedactionReport(matches=[], scanned_files=[], unscanned_reason=reason)
 
 
+def _scan_inputs(root: Path) -> _ScanInputs:
+    """Read the private sources once, dropping what a tracked file holds.
+
+    A phrase is public when a tracked file holds it as a substring; a term is
+    public when a tracked file holds it as a whole token (#528) — a substring
+    test would drop `Jane` because a tracked file says `Janeway`.
+    """
+    files = _find_private_sources(root)
+    inputs = _ScanInputs(phrases={}, terms={}, files=files, unused=[])
+    if not files:
+        return inputs
+    tracked = _read_tracked_content(root)
+    for f in files:
+        phrases = [p for p in _extract_phrases(f) if not (tracked and p in tracked)]
+        terms = [t for t in _extract_terms(f) if not _has_token(t, tracked)]
+        for phrase in phrases:
+            inputs.phrases.setdefault(phrase, f)
+        for term in terms:
+            inputs.terms.setdefault(term, f)
+        if not phrases and not terms:
+            inputs.unused.append(f)
+    return inputs
+
+
 def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
     """Scan body against the repo's private sources; return a structured report."""
     root = project_root.resolve()
-    cached = _PRE_FLIGHT_CACHE.get(root)
-    if cached is None:
-        files = _find_private_sources(root)
-        if not files:
-            _PRE_FLIGHT_CACHE[root] = ({}, [])
-            return _unscanned(root)
-        tracked = _read_tracked_content(root)
-        phrase_to_source: dict[str, Path] = {}
-        for f in files:
-            for phrase in _extract_phrases(f):
-                if tracked and phrase in tracked:
-                    continue
-                phrase_to_source.setdefault(phrase, f)
-        _PRE_FLIGHT_CACHE[root] = (phrase_to_source, files)
-        cached = _PRE_FLIGHT_CACHE[root]
+    inputs = _PRE_FLIGHT_CACHE.get(root)
+    if inputs is None:
+        inputs = _PRE_FLIGHT_CACHE[root] = _scan_inputs(root)
 
-    phrase_to_source, scanned_files = cached
+    scanned_files = inputs.files
     if not scanned_files:
         return _unscanned(root)
-    if not phrase_to_source:
-        # Files were found, but no line survived the phrase floor and the
-        # tracked-content filter. Nothing was compared (#526).
+    if not inputs.phrases and not inputs.terms:
+        # Files were found, but no line survived the phrase floor and no term
+        # the term floor, once tracked content was dropped. Nothing was
+        # compared (#526, #528).
         return RedactionReport(
-            matches=[], scanned_files=scanned_files, unscanned_reason="no-usable-phrases"
+            matches=[],
+            scanned_files=scanned_files,
+            unscanned_reason="no-usable-phrases",
+            unused_files=list(inputs.unused),
         )
 
     matches: list[RedactionMatch] = []
     body_lines = body.splitlines()
-    for phrase, source in phrase_to_source.items():
+    for phrase, source in inputs.phrases.items():
         if phrase in body:
             for i, line in enumerate(body_lines, start=1):
                 if phrase in line:
@@ -1919,7 +2012,24 @@ def pre_flight_check(body: str, project_root: Path) -> RedactionReport:
                         )
                     )
                     break
-    return RedactionReport(matches=matches, scanned_files=scanned_files)
+    # A term split across two lines is a documented false negative: the
+    # match runs per line, like the phrase match above.
+    for term, source in inputs.terms.items():
+        for i, line in enumerate(body_lines, start=1):
+            if _has_token(term, line):
+                matches.append(
+                    RedactionMatch(
+                        line_no=i,
+                        line_text=line,
+                        matched_phrase=term,
+                        source_file=source,
+                        kind="term",
+                    )
+                )
+                break
+    return RedactionReport(
+        matches=matches, scanned_files=scanned_files, unused_files=list(inputs.unused)
+    )
 
 
 def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
@@ -1935,11 +2045,11 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
         return
     f = file if file is not None else sys.stderr
     print(
-        "error: pre-flight redaction check failed — body references content from",
+        "error: pre-flight redaction check failed — body repeats a line or a listed",
         file=f,
     )
     print(
-        "gitignored claude-shaped local files. Refusing to post.",
+        "term from a private local file. Refusing to post.",
         file=f,
     )
     print("", file=f)
@@ -1951,12 +2061,38 @@ def print_redaction_diff(report: RedactionReport, *, file: Any = None) -> None:
     print(f"  {n} {match_word} across {nf} {file_word}:", file=f)
     for m in report.matches:
         print(f'    line {m.line_no}: "{m.line_text}"', file=f)
-        print(f"      ↳ matches {m.source_file}", file=f)
+        term = f' (term "{m.matched_phrase}")' if m.kind == "term" else ""
+        print(f"      ↳ matches {m.source_file}{term}", file=f)
     print("", file=f)
     print("  next steps:", file=f)
     print("    1. Re-issue the call with private content removed.", file=f)
     print(
-        "    2. OR add the matched phrase to a tracked file if it's intentionally public.",
+        "    2. OR add the matched phrase or term to a tracked file if it's intentionally public.",
+        file=f,
+    )
+
+
+def _print_source_paths(paths: list[Path], project_root: Path, f: Any) -> None:
+    for p in paths:
+        try:
+            shown = p.relative_to(project_root)
+        except ValueError:
+            shown = p
+        print(f"  {shown}", file=f)
+
+
+def _print_source_rules(f: Any) -> None:
+    """State what a private file must hold for pre-flight to use it."""
+    print(
+        f"  A line counts only with {_MIN_PHRASE_CHARS}+ characters and "
+        f"{_MIN_PHRASE_WORDS}+ words, and it matches only when the body repeats "
+        "the whole line. A line that a tracked file also holds does not count.",
+        file=f,
+    )
+    print(
+        f"  List short names as bullets under a {TERMS_HEADING} heading. A term "
+        f"counts with {_MIN_TERM_CHARS}+ characters and matches as a whole word, "
+        "case-sensitive. A term that a tracked file also holds does not count.",
         file=f,
     )
 
@@ -1970,9 +2106,10 @@ def print_unscanned_notice(
     refusing would block every repo that has no private file. The warning
     exists so a 0-file pass never reads as a real one. No-op otherwise.
 
-    When files were found but gave no phrase (#526), "scanned 0 private
-    files" would be false. That notice names the files and states the
-    phrase rule instead, because a list of short terms is the usual cause.
+    When files were found but gave no phrase and no term (#526, #528),
+    "scanned 0 private files" would be false. That notice names the files
+    and states both rules instead, because a list of short names outside a
+    `## Pre-flight terms` section is the usual cause.
     """
     if not report.vacuous:
         return
@@ -1980,22 +2117,12 @@ def print_unscanned_notice(
     if report.unscanned_reason == "no-usable-phrases":
         n = len(report.scanned_files)
         print(
-            f"warning: pre-flight found no usable phrase in {n} private "
+            f"warning: pre-flight found no usable phrase or term in {n} private "
             f"file{'' if n == 1 else 's'} — this body was not checked for private content.",
             file=f,
         )
-        for p in report.scanned_files:
-            try:
-                shown = p.relative_to(project_root)
-            except ValueError:
-                shown = p
-            print(f"  {shown}", file=f)
-        print(
-            f"  A line counts only with {_MIN_PHRASE_CHARS}+ characters and "
-            f"{_MIN_PHRASE_WORDS}+ words, and it matches only when the body repeats "
-            "the whole line. A line that a tracked file also holds does not count.",
-            file=f,
-        )
+        _print_source_paths(report.scanned_files, project_root, f)
+        _print_source_rules(f)
         return
     print(
         "warning: pre-flight scanned 0 private files — this body was not checked "
@@ -2013,6 +2140,30 @@ def print_unscanned_notice(
             "as *.md, or name it CLAUDE.local.md or .claude/local/*.md.",
             file=f,
         )
+
+
+def print_unused_sources_notice(
+    report: RedactionReport, project_root: Path, *, file: Any = None
+) -> None:
+    """Warn on stderr about private files that gave nothing to compare (#528).
+
+    The report compared the other files, so the post goes ahead and the exit
+    code does not change. Without this line a list of short names in a second
+    file would pass as checked. No-op when every file was used, and on a
+    vacuous report, whose own notice already names every file.
+    """
+    if not report.unused_files or report.vacuous:
+        return
+    f = file if file is not None else sys.stderr
+    n = len(report.unused_files)
+    total = len(report.scanned_files)
+    print(
+        f"warning: {n} of {total} private files gave pre-flight nothing to compare — "
+        "this body was checked against the others only.",
+        file=f,
+    )
+    _print_source_paths(report.unused_files, project_root, f)
+    _print_source_rules(f)
 
 
 def compute_velocity(
