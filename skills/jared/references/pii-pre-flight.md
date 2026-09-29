@@ -49,7 +49,7 @@ A phrase cannot catch a name or a place: a draft names a person without repeatin
 **Accepted false negatives.** The match is exact, so these pass:
 
 - a different case — `jane doe` does not match `Jane Doe`;
-- a plural or an inflected form — `Jane Does`, `Orchard Lane's` matches but `Orchard Lanes` does not;
+- a plural or an inflected form — `Jane Does` and `Orchard Lanes` do not match. The possessive `Orchard Lane's` does match, because the apostrophe is not a letter or a digit;
 - a term split across two lines of the body.
 
 List each form you want to catch as its own term. **"Clean" means that no listed term and no copied line occurs in the body. It does not mean that the body holds no private content.**
