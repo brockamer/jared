@@ -10,6 +10,7 @@ a real issue body.
 from __future__ import annotations
 
 import importlib.util
+import re
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -100,7 +101,11 @@ def test_append_decision_is_idempotent_for_same_text() -> None:
     assert before == after, "same decision text twice must not duplicate"
 
 
-def test_reassemble_orders_known_sections_and_preserves_unknowns() -> None:
+def _headings(body: str) -> list[str]:
+    return re.findall(r"^## (.+)$", body, flags=re.MULTILINE)
+
+
+def test_reassemble_keeps_known_sections_where_the_body_put_them() -> None:
     body = (
         "Summary line.\n"
         "\n"
@@ -120,18 +125,131 @@ def test_reassemble_orders_known_sections_and_preserves_unknowns() -> None:
 
     result = cc.reassemble(preamble, sections, order)
 
-    # Current state must come before Depends on per SECTION_ORDER, despite
-    # appearing after it in the input.
-    current_idx = result.index("## Current state")
-    depends_idx = result.index("## Depends on")
-    assert current_idx < depends_idx
-
-    # Unknown section must still be present (placed after known ones).
-    assert "## Custom Section" in result
+    # #465: `Depends on` stays ahead of `Current state` even though
+    # SECTION_ORDER lists them the other way round. A context write must not
+    # rearrange the operator's body.
+    assert _headings(result) == ["Depends on", "Current state", "Custom Section"]
     assert "Project-specific content." in result
-
-    # Preamble preserved.
     assert result.startswith("Summary line.")
+
+
+def test_reassemble_keeps_a_section_not_in_section_order_in_its_original_position() -> None:
+    """#465: every body the 2026-09-26 audit filed carries `## Proposed fix`
+    between `## Current state` and `## Decisions`. The old reassemble placed
+    SECTION_ORDER sections first and appended the rest, so one
+    `--current-state` write moved `## Proposed fix` below `## Planning`."""
+    body = (
+        "Summary.\n"
+        "\n"
+        "## Current state\n"
+        "\n"
+        "Not started.\n"
+        "\n"
+        "## Proposed fix\n"
+        "\n"
+        "Do the thing.\n"
+        "\n"
+        "## Decisions\n"
+        "\n"
+        "(none yet)\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "- it works\n"
+        "\n"
+        "## Planning\n"
+        "\n"
+        "No plan yet.\n"
+    )
+    preamble, sections, order = cc.split_sections(body)
+    cc.update_current_state(sections, "Midway.")
+
+    result = cc.reassemble(preamble, sections, order)
+
+    assert _headings(result) == [
+        "Current state",
+        "Proposed fix",
+        "Decisions",
+        "Acceptance criteria",
+        "Planning",
+    ]
+    assert "Midway." in result
+    assert "Do the thing." in result
+
+
+def test_reassemble_is_a_no_op_on_an_unmodified_body() -> None:
+    body = (
+        "Summary.\n"
+        "\n"
+        "## Proposed fix\n"
+        "\n"
+        "Fix it.\n"
+        "\n"
+        "## Current state\n"
+        "\n"
+        "Started.\n"
+        "\n"
+        "## Planning\n"
+        "\n"
+        "None.\n"
+    )
+    preamble, sections, order = cc.split_sections(body)
+
+    assert cc.reassemble(preamble, sections, order) == body
+
+
+def test_reassemble_places_a_new_section_before_its_next_section_order_neighbour() -> None:
+    """A section the write creates has no original position. It goes directly
+    before the first present section that follows it in SECTION_ORDER, so
+    `## Decisions` lands after `## Proposed fix` and before the criteria."""
+    body = (
+        "Summary.\n"
+        "\n"
+        "## Current state\n"
+        "\n"
+        "Not started.\n"
+        "\n"
+        "## Proposed fix\n"
+        "\n"
+        "Do the thing.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "- it works\n"
+    )
+    preamble, sections, order = cc.split_sections(body)
+    cc.append_decision(sections, "Chose A.")
+
+    result = cc.reassemble(preamble, sections, order)
+
+    assert _headings(result) == [
+        "Current state",
+        "Proposed fix",
+        "Decisions",
+        "Acceptance criteria",
+    ]
+
+
+def test_reassemble_places_a_new_section_after_its_previous_neighbour_when_none_follows() -> None:
+    body = "Summary.\n\n## Current state\n\nStarted.\n\n## Notes\n\nFree text.\n"
+    preamble, sections, order = cc.split_sections(body)
+    cc.append_decision(sections, "Chose A.")
+
+    result = cc.reassemble(preamble, sections, order)
+
+    # `Decisions` has no SECTION_ORDER successor in this body, so it follows
+    # its predecessor `Current state` and the free-form `Notes` keeps its place.
+    assert _headings(result) == ["Current state", "Decisions", "Notes"]
+
+
+def test_reassemble_appends_a_new_section_when_the_body_has_no_known_neighbour() -> None:
+    body = "Summary.\n\n## Notes\n\nFree text.\n"
+    preamble, sections, order = cc.split_sections(body)
+    cc.update_current_state(sections, "Started.")
+
+    result = cc.reassemble(preamble, sections, order)
+
+    assert _headings(result) == ["Notes", "Current state"]
 
 
 def test_end_to_end_update_cycle_preserves_unrelated_sections() -> None:
