@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import FakeGhResult, import_cli, write_minimal_board
+from tests.conftest import (
+    FakeGhResult,
+    import_cli,
+    write_minimal_board,
+    write_short_line_private_file,
+)
 
 
 def _patch_gh_capturing_body_file(
@@ -319,4 +324,31 @@ def test_comment_warns_and_posts_when_pre_flight_scans_nothing(
     captured = capsys.readouterr()
     assert rc == 0, captured.err
     assert "warning: pre-flight scanned 0 private files" in captured.err
+    assert bodies == ["A routine note."]
+
+
+def test_comment_warns_and_posts_when_private_file_has_no_usable_phrase(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#526: a private file of short terms compares nothing. The comment
+    posts, and stderr names the file that checked nothing."""
+    board_md = write_minimal_board(tmp_path)
+    _subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    # The gh fake intercepts `git check-ignore` too, so use a name that
+    # discovery finds without asking git.
+    write_short_line_private_file(tmp_path, "CLAUDE.local.md")
+    monkeypatch.chdir(tmp_path)
+
+    from skills.jared.scripts.lib.board import _clear_pre_flight_cache
+
+    _clear_pre_flight_cache()
+    calls, bodies = _patch_gh_capturing_body_file(monkeypatch)
+
+    mod = import_cli()
+    rc = mod.main(["--board", str(board_md), "comment", "42", "--body", "A routine note."])
+
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "not checked" in captured.err
+    assert "CLAUDE.local.md" in captured.err
     assert bodies == ["A routine note."]

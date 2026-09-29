@@ -22,7 +22,7 @@ Global option:
 | 0 | Success. |
 | 1 | Config or lookup error (missing board file, unknown field/option, issue not on project). Fix the convention doc or argument and retry. |
 | 2 | `gh` itself failed (auth, network, GitHub API error) or post-create verification detected a drift. Stderr carries the underlying message. Also: the PII pre-flight found private content in the body (`file`, `comment`, `close --body*`, `pre-flight`) and nothing was posted. |
-| 3 | `jared pre-flight` only: no private source was found, so the draft was not checked. |
+| 3 | `jared pre-flight` only: nothing was compared (no private source was found, or none has a usable phrase), so the draft was not checked. |
 
 ---
 
@@ -208,9 +208,9 @@ OK: closed #12, Status=Done
 
 PII pre-flight (#102) runs on the comment body, same as `jared comment`
 and `jared file`. A redaction-dirty body short-circuits before any gh call —
-neither the comment nor the close runs. A scan that found no private file
-posts anyway and prints `warning: pre-flight scanned 0 private files` to
-stderr (#443).
+neither the comment nor the close runs. A scan that compared nothing — no
+private file, or none with a usable phrase — posts anyway and prints a
+`warning: pre-flight` line to stderr (#443, #526).
 
 ---
 
@@ -244,9 +244,9 @@ OK: pre-flight scanned 1 private file; no matches.
 
 | Exit | Meaning |
 |---|---|
-| 0 | Private sources scanned, no match. |
+| 0 | Private phrases compared, no match. |
 | 2 | A match; stderr carries the diff. Do not post. |
-| 3 | No private source found; stderr carries the warning. The draft was not checked — the operator decides. |
+| 3 | Nothing was compared: no private source was found, or none has a usable phrase. Stderr carries the warning. The draft was not checked — the operator decides. |
 
 Full reference: `references/pii-pre-flight.md`.
 

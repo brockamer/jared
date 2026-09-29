@@ -16,6 +16,7 @@ from skills.jared.scripts.lib.board import (
     _find_project_root,
     pre_flight_check,
 )
+from tests.conftest import SHORT_PRIVATE_TERMS, write_short_line_private_file
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +61,16 @@ def test_redaction_report_zero_files_is_vacuous_not_clean() -> None:
     assert report.clean is False
     assert report.vacuous is True
     assert RedactionReport(matches=[], scanned_files=[Path("z")]).vacuous is False
+
+
+def test_redaction_report_with_unscanned_reason_is_vacuous_despite_files() -> None:
+    """#526: a file was read but gave nothing to compare. The report is
+    vacuous, not clean, although scanned_files is not empty."""
+    report = RedactionReport(
+        matches=[], scanned_files=[Path("z")], unscanned_reason="no-usable-phrases"
+    )
+    assert report.vacuous is True
+    assert report.clean is False
 
 
 def test_extract_phrases_returns_lines_with_3_plus_words_and_20_plus_chars(
@@ -210,6 +221,33 @@ def test_pre_flight_check_git_repo_without_private_file_is_vacuous(tmp_path: Pat
     assert report.unscanned_reason == "no-private-files"
 
 
+def test_pre_flight_check_short_lines_only_is_vacuous(tmp_path: Path) -> None:
+    """#526: every line of the private file is under the phrase floor, so it
+    yields no phrase. The draft repeats both terms; the report must say that
+    nothing was compared, not pass as clean."""
+    _git_init_with_tracked(tmp_path, {"README.md": "Public-safe content only.\n"})
+    private = write_short_line_private_file(tmp_path)
+    body = " and ".join(SHORT_PRIVATE_TERMS) + " are both in this draft.\n"
+    report = pre_flight_check(body, project_root=tmp_path)
+    assert report.matches == []
+    assert report.scanned_files == [private]
+    assert not report.clean
+    assert report.vacuous
+    assert report.unscanned_reason == "no-usable-phrases"
+
+
+def test_pre_flight_check_private_lines_all_tracked_is_vacuous(tmp_path: Path) -> None:
+    """#526: a usable private line that a tracked file also holds is public
+    and is dropped. A private file of only such lines compares nothing."""
+    line = "Our deploy host is internal-foo-7.corp.example."
+    _git_init_with_tracked(tmp_path, {"README.md": line + "\n"})
+    (tmp_path / "CLAUDE.local.md").write_text(line + "\n")
+    report = pre_flight_check("Any body at all.\n", project_root=tmp_path)
+    assert not report.clean
+    assert report.vacuous
+    assert report.unscanned_reason == "no-usable-phrases"
+
+
 def test_pre_flight_check_scans_gitignored_root_markdown(tmp_path: Path) -> None:
     """#443 regression: a gitignored private file at the repo root whose name
     matches none of the CLAUDE-shaped patterns is still scanned and flags."""
@@ -288,12 +326,17 @@ def test_pre_flight_check_allowlists_phrase_present_in_tracked_README(
     tmp_path: Path,
 ) -> None:
     """A phrase that lives in CLAUDE.local.md AND in a tracked README is
-    already public; the redactor must not flag it."""
+    already public; the redactor must not flag it. The second, private-only
+    line keeps the report clean: without it nothing is left to compare, and
+    the report is vacuous (#526)."""
     _git_init_with_tracked(
         tmp_path,
         {"README.md": "Our deploy host is internal-foo-7.corp.example.\n"},
     )
-    (tmp_path / "CLAUDE.local.md").write_text("Our deploy host is internal-foo-7.corp.example.\n")
+    (tmp_path / "CLAUDE.local.md").write_text(
+        "Our deploy host is internal-foo-7.corp.example.\n"
+        "the staging box answers on port 8443 only\n"
+    )
     body = "Issue: Our deploy host is internal-foo-7.corp.example. is flaky.\n"
     report = pre_flight_check(body, project_root=tmp_path)
     assert report.clean, (
@@ -434,6 +477,33 @@ def test_print_unscanned_notice_names_the_reason(capsys: pytest.CaptureFixture[s
     assert ".git" in no_git
     assert "gitignore" in no_files
     assert no_git != no_files
+
+
+def test_print_unscanned_notice_no_usable_phrases_names_file_and_rule(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#526: a file was found, so "scanned 0 private files" would be false.
+    The notice names the file and states the phrase rule, so the operator
+    sees why a list of short terms checked nothing."""
+    from skills.jared.scripts.lib.board import print_unscanned_notice
+
+    print_unscanned_notice(
+        RedactionReport(
+            matches=[],
+            scanned_files=[Path("/proj/private-notes.md")],
+            unscanned_reason="no-usable-phrases",
+        ),
+        Path("/proj"),
+    )
+    err = capsys.readouterr().err
+    assert err.startswith("warning: pre-flight")
+    assert "not checked" in err
+    assert "scanned 0 private files" not in err
+    assert "private-notes.md" in err
+    assert "20+ characters" in err
+    assert "3+ words" in err
+    assert "whole line" in err
+    assert "tracked file" in err
 
 
 def test_print_unscanned_notice_no_op_when_files_were_scanned(
