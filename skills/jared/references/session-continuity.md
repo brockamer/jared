@@ -158,8 +158,9 @@ Read the sections above, decide which issue to pull, then:
 ````
 
 `next-session-prompt` emits exactly these sections — plus `## Session-N
-staged` under `--session N`, and `## Quick health check on session start`
-when the board configures one. There is no Blocked section and no Aging
+staged` under `--session N`, `## Pick` under `--pick` (see "The pick"
+below), and `## Quick health check on session start` when the board
+configures one. There is no Blocked section and no Aging
 section; those belong to `/jared-groom`. The `Last session:` line carries
 the next action only, with no date.
 
@@ -197,6 +198,19 @@ The CLI is the single canonical assembly point — both `/jared-start` (session 
 - **Context pointers** — in the issue body's `## Planning` section, which Sessions notes can reference.
 
 If a piece of "what's load-bearing right now" doesn't have a durable home on an issue or in memory, that's a signal to file it as an issue, post it as a Session note, or save it as a memory entry — *not* to wedge it into a handoff document that goes stale.
+
+### The pick
+
+`/jared-start` adds `--pick --repo-root <repo-root>`, so a bare `/jared-start` starts the right item without the operator naming it (#516). The `## Pick` section sits between Top of Up Next and Recently closed:
+
+```
+## Pick
+
+Pick: #31 — rule 2: the first Up Next item that holds no session lock, has no open blocker and is pullable
+Skipped: #14 [In Progress] — held by a session lock — another session is on it, or one ended without /jared-wrap; if no session is live, run: jared session-lock-clear --issue 14
+```
+
+The rule lives in `lib/pick.py`, and nowhere else: resume the first In Progress item that holds no session lock and has no open blocker; otherwise take the first Up Next item, in board order, that holds no session lock, has no open blocker and is pullable. Each item passed over before the pick gets a `Skipped:` line with its reason. When nothing qualifies, the line is `Pick: none — …` and points at `/jared-stage`. The pick walks the same items the posture prints, so the two cannot disagree on order. An issue number given to `/jared-start` overrides it.
 
 **The anti-pattern that remains.** Hand-rolling a `tmp/next-session-prompt.md` (or any session-handoff file) is still wrong: the file becomes a parallel source of truth, the durable records drift, and the discipline rots. If you want session-start orientation, run `jared next-session-prompt` or use `/jared-start` directly.
 
