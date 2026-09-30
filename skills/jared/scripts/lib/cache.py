@@ -9,7 +9,8 @@ Where it lives. `JARED_CACHE_DIR` if set, else `$XDG_CACHE_HOME/jared`, else
 bodies, and jared reads it back as trusted input, so the directory is private to
 the user: it is created with mode 0700 and its files with 0600. A directory that
 already exists is used only if the current user owns it and no other user can
-write to it. Otherwise jared says why on stderr, once, and runs without the
+write to it, and a symbolic link is used only if the current user owns the link.
+Otherwise jared says why on stderr, once, and runs without the
 on-disk cache for that directory, as if `JARED_NO_CACHE=1` were set.
 
 Concurrency: writes use atomic-rename (`os.replace` on a `.tmp` sibling), so a
@@ -57,15 +58,25 @@ def _current_uid() -> int | None:
     return os.getuid() if hasattr(os, "getuid") else None
 
 
+def _lstat(path: Path) -> os.stat_result:
+    """`stat` without following a final symlink. A seam, so tests can fake a link's owner."""
+    return path.lstat()
+
+
 def _refusal_reason(root: Path) -> str | None:
     """Why the existing directory `root` must not be used, or None if it is safe."""
+    uid = _current_uid()
     try:
+        link = _lstat(root)
         st = root.stat()
     except OSError as exc:
         return f"it cannot be inspected ({exc.strerror})"
+    # `stat` follows a link, so a link someone else planted in a shared parent
+    # would otherwise be judged by its target, which can be the user's own.
+    if stat.S_ISLNK(link.st_mode) and uid is not None and link.st_uid != uid:
+        return f"it is a symbolic link owned by another user (uid {link.st_uid})"
     if not stat.S_ISDIR(st.st_mode):
         return "it is not a directory"
-    uid = _current_uid()
     if uid is not None and st.st_uid != uid:
         return f"it is not owned by the current user (owner uid {st.st_uid})"
     if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):

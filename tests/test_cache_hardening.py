@@ -14,6 +14,7 @@ import os
 import stat
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -160,6 +161,41 @@ def test_dir_owned_by_someone_else_is_refused(
     assert "owned" in err
     monkeypatch.undo()
     assert cache.get_item_list(4, owner="alice", cache_dir=root) == [{"a": 1}]
+
+
+def test_a_symlink_owned_by_someone_else_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # In a shared parent such as /tmp, another user can pre-create the cache
+    # path as a link to a directory of the victim's own. The target passes the
+    # owner and mode checks, so the link itself has to be judged: only the
+    # link's owner is faked here, and the target stays the user's.
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    root = tmp_path / "link"
+    root.symlink_to(target)
+    real_lstat = cache._lstat
+
+    def foreign_link(path: Path) -> SimpleNamespace:
+        st = real_lstat(path)
+        return SimpleNamespace(st_mode=st.st_mode, st_uid=st.st_uid + 1)
+
+    monkeypatch.setattr(cache, "_lstat", foreign_link)
+    cache.set_item_list(4, owner="alice", items=[{"a": 1}], cache_dir=root)
+    assert list(target.iterdir()) == []
+    assert cache.get_item_list(4, owner="alice", cache_dir=root) is None
+    assert "symbolic link" in capsys.readouterr().err
+
+
+def test_a_symlink_owned_by_the_user_is_used(tmp_path: Path) -> None:
+    # Linking ~/.cache/jared to another disk is a normal thing to do.
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    root = tmp_path / "link"
+    root.symlink_to(target)
+    cache.set_item_list(4, owner="alice", items=[{"a": 1}], cache_dir=root)
+    assert cache.get_item_list(4, owner="alice", cache_dir=root) == [{"a": 1}]
+    assert len(list(target.glob("*.json"))) == 1
 
 
 def test_a_private_existing_dir_is_used(tmp_path: Path) -> None:
