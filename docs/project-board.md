@@ -101,20 +101,28 @@ Conventions:
   intended sequencing. A genuinely externally-paced phase is the exception — flag it
   rather than padding the date.
 
-**Open milestones on this board (as of the 2026-09-12 structural review): two.**
+**Open milestones on this board (as of the 2026-09-29 structural review): four.**
 
 | Milestone | Target | Deliverable |
 |---|---|---|
-| `Marketplace readiness` | 2026-09-30 | jared installs cold for a stranger and ships a tagged, marketplace-listed release — verified by a clean-room cold install. |
+| `Marketplace readiness` | 2026-10-23 | jared installs cold for a stranger and ships a tagged, marketplace-listed release — verified by a clean-room cold install. |
+| `Autonomous sessions` | 2026-11-06 (soft) | A bare `/jared-start` picks the right next item in any folder or worktree, `/jared-wrap` hands off the next one, and one order on the board drives every command. |
 | `KanbanFlow parity` | 2026-11-13 (soft) | Every capability in `_OMITTED_CAPABILITIES` is either implemented to an agreed parity bar or documented as an explicit, rationale-backed non-goal, and `kanbanflow_provider.py`'s capability declaration reflects that outcome. |
+| `Showcase polish` | 2026-12-18 (soft) | A first-time visitor finds no stale, duplicated or owner-specific content in the repo, prompts or docs, and every showcase-audit finding outside the release is fixed or declined. |
 
 This is the "genuinely distinct theme" exception above, exercised deliberately rather
-than by drift — the operator judged backend parity (#357) distinct from release
-readiness (#348) during the 2026-09-12 reshape. `KanbanFlow parity` carries a soft date
-sequenced after Marketplace readiness; its scope is the Phase 0 design spec
+than by drift. The operator judged backend parity (#357) distinct from release
+readiness (#348) during the 2026-09-12 reshape. `Showcase polish` (filed 2026-09-26, from the
+showcase audit) and `Autonomous sessions` (epic #515 and its children, plus #511 and #540;
+approved in the 2026-09-29 reshape) are two further recorded exceptions. The three later
+milestones carry soft dates sequenced after Marketplace readiness. The parity scope is the Phase 0 design spec
 (`docs/superpowers/specs/2026-06-11-kanbanflow-parity-design.md`, 2026-06-11). Do not read
-two open milestones here as a violation of the one-at-a-time default; read it as the
-default plus one recorded exception.
+four open milestones here as a violation of the one-at-a-time default; read it as the
+default plus three recorded exceptions.
+
+**Marketplace readiness checkpoint (2026-09-29).** The 2026-10-23 date and the full scope stay.
+If #351 has not started by 2026-10-09, move the date to 2026-11-06 rather than cut scope.
+The children of #515 start after #351, so the walkthrough runs on the v0.35.0 surface.
 
 **Which milestone a KanbanFlow defect joins (rule recorded 2026-09-16).** The milestone follows
 the *fix*, not the backend that shows the symptom. A defect whose fix is a correction inside an
