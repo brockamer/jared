@@ -17,44 +17,53 @@ JARED_CLI = REPO_ROOT / "skills" / "jared" / "scripts" / "jared"
 
 
 def test_get_item_list_returns_none_when_no_cache_file(tmp_path: Path) -> None:
-    result = cache.get_item_list(project_number=4, cache_dir=tmp_path)
+    result = cache.get_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer")
     assert result is None
 
 
 def test_set_then_get_round_trips_items(tmp_path: Path) -> None:
     items = [{"content": {"number": 52, "title": "snapshot cache"}}]
-    cache.set_item_list(project_number=4, items=items, cache_dir=tmp_path)
-    result = cache.get_item_list(project_number=4, cache_dir=tmp_path)
+    cache.set_item_list(project_number=4, items=items, cache_dir=tmp_path, owner="brockamer")
+    result = cache.get_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer")
     assert result == items
 
 
 def test_get_item_list_returns_none_when_past_ttl(tmp_path: Path) -> None:
-    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
-    result = cache.get_item_list(project_number=4, ttl_seconds=0, cache_dir=tmp_path)
+    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer")
+    result = cache.get_item_list(
+        project_number=4, ttl_seconds=0, cache_dir=tmp_path, owner="brockamer"
+    )
     assert result is None
 
 
 def test_invalidate_removes_cache_file(tmp_path: Path) -> None:
-    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
-    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path)
-    assert cache.get_item_list(project_number=4, cache_dir=tmp_path) is None
+    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer")
+    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer")
+    assert cache.get_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer") is None
 
 
 def test_invalidate_is_noop_when_file_absent(tmp_path: Path) -> None:
-    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path)
+    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer")
 
 
 def test_get_returns_none_on_corrupted_json(tmp_path: Path) -> None:
-    path = tmp_path / "4.json"
+    # Corrupt the file the cache really wrote, so this cannot pass by reading a
+    # name that nothing creates.
+    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer")
+    (path,) = tmp_path.glob("*.json")
     path.write_text("{not json")
-    assert cache.get_item_list(project_number=4, cache_dir=tmp_path) is None
+    assert cache.get_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer") is None
 
 
 def test_different_projects_use_separate_cache_files(tmp_path: Path) -> None:
-    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
-    cache.set_item_list(project_number=5, items=[{"b": 2}], cache_dir=tmp_path)
-    assert cache.get_item_list(project_number=4, cache_dir=tmp_path) == [{"a": 1}]
-    assert cache.get_item_list(project_number=5, cache_dir=tmp_path) == [{"b": 2}]
+    cache.set_item_list(project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer")
+    cache.set_item_list(project_number=5, items=[{"b": 2}], cache_dir=tmp_path, owner="brockamer")
+    assert cache.get_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer") == [
+        {"a": 1}
+    ]
+    assert cache.get_item_list(project_number=5, cache_dir=tmp_path, owner="brockamer") == [
+        {"b": 2}
+    ]
 
 
 # ---------- Closed-items cache (#186) ----------
@@ -68,7 +77,7 @@ def test_different_projects_use_separate_cache_files(tmp_path: Path) -> None:
 
 
 def test_get_closed_items_returns_none_when_no_cache_file(tmp_path: Path) -> None:
-    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path)
+    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer")
     assert result is None
 
 
@@ -77,14 +86,18 @@ def test_set_then_get_closed_items_round_trips(tmp_path: Path) -> None:
         {"content": {"number": 52, "state": "CLOSED"}, "status": "Done"},
         {"content": {"number": 53, "state": "CLOSED"}, "status": "In Progress"},
     ]
-    cache.set_closed_items(project_number=4, items=items, cache_dir=tmp_path)
-    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path)
+    cache.set_closed_items(project_number=4, items=items, cache_dir=tmp_path, owner="brockamer")
+    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer")
     assert result == items
 
 
 def test_get_closed_items_returns_none_when_past_ttl(tmp_path: Path) -> None:
-    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
-    result = cache.get_closed_items(project_number=4, ttl_seconds=0, cache_dir=tmp_path)
+    cache.set_closed_items(
+        project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer"
+    )
+    result = cache.get_closed_items(
+        project_number=4, ttl_seconds=0, cache_dir=tmp_path, owner="brockamer"
+    )
     assert result is None
 
 
@@ -95,44 +108,65 @@ def test_get_closed_items_default_ttl_is_24h(tmp_path: Path) -> None:
     closed-items see far fewer mutations and the staleness window for an
     external mutation is bounded by this value.
     """
-    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
+    cache.set_closed_items(
+        project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer"
+    )
     # Default ttl_seconds parameter — 24h = 86400s. If a closed item was cached
     # 60s ago, the default-TTL read must succeed.
-    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path)
+    result = cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer")
     assert result == [{"a": 1}]
 
 
 def test_invalidate_closed_items_removes_cache_file(tmp_path: Path) -> None:
-    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
-    cache.invalidate_closed_items(project_number=4, cache_dir=tmp_path)
-    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) is None
+    cache.set_closed_items(
+        project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer"
+    )
+    cache.invalidate_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer")
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer") is None
 
 
 def test_invalidate_closed_items_is_noop_when_file_absent(tmp_path: Path) -> None:
-    cache.invalidate_closed_items(project_number=4, cache_dir=tmp_path)
+    cache.invalidate_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer")
 
 
 def test_get_closed_items_returns_none_on_corrupted_json(tmp_path: Path) -> None:
-    path = tmp_path / "4-closed.json"
+    cache.set_closed_items(
+        project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer"
+    )
+    (path,) = tmp_path.glob("*.json")
     path.write_text("{not json")
-    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) is None
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer") is None
 
 
 def test_closed_items_cache_separate_from_open_items_cache(tmp_path: Path) -> None:
     """The two caches must live in distinct files so neither invalidates the other."""
-    cache.set_item_list(project_number=4, items=[{"open": True}], cache_dir=tmp_path)
-    cache.set_closed_items(project_number=4, items=[{"closed": True}], cache_dir=tmp_path)
-    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path)
+    cache.set_item_list(
+        project_number=4, items=[{"open": True}], cache_dir=tmp_path, owner="brockamer"
+    )
+    cache.set_closed_items(
+        project_number=4, items=[{"closed": True}], cache_dir=tmp_path, owner="brockamer"
+    )
+    cache.invalidate_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer")
     # Closed-items cache must survive open-items invalidation.
-    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) == [{"closed": True}]
-    assert cache.get_item_list(project_number=4, cache_dir=tmp_path) is None
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer") == [
+        {"closed": True}
+    ]
+    assert cache.get_item_list(project_number=4, cache_dir=tmp_path, owner="brockamer") is None
 
 
 def test_closed_items_different_projects_use_separate_files(tmp_path: Path) -> None:
-    cache.set_closed_items(project_number=4, items=[{"a": 1}], cache_dir=tmp_path)
-    cache.set_closed_items(project_number=5, items=[{"b": 2}], cache_dir=tmp_path)
-    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path) == [{"a": 1}]
-    assert cache.get_closed_items(project_number=5, cache_dir=tmp_path) == [{"b": 2}]
+    cache.set_closed_items(
+        project_number=4, items=[{"a": 1}], cache_dir=tmp_path, owner="brockamer"
+    )
+    cache.set_closed_items(
+        project_number=5, items=[{"b": 2}], cache_dir=tmp_path, owner="brockamer"
+    )
+    assert cache.get_closed_items(project_number=4, cache_dir=tmp_path, owner="brockamer") == [
+        {"a": 1}
+    ]
+    assert cache.get_closed_items(project_number=5, cache_dir=tmp_path, owner="brockamer") == [
+        {"b": 2}
+    ]
 
 
 def test_issue_etag_set_then_get_round_trips(tmp_path: Path) -> None:
@@ -232,6 +266,7 @@ def test_board_items_returns_disk_cache_hit_without_calling_gh(
         project_number=7,
         items=[{"id": "PVTI_cached", "content": {"number": 99}}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
 
     b = Board.from_path(_minimal_board(tmp_path))
@@ -273,7 +308,7 @@ def test_board_invalidate_items_also_nukes_disk_cache(
     import os as _os
 
     cache_dir = Path(_os.environ["JARED_CACHE_DIR"])
-    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is None
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir, owner="brockamer") is None
 
 
 def test_subprocess_jared_summary_does_not_call_project_item_list(
@@ -441,8 +476,9 @@ def test_subprocess_jared_move_invalidates_disk_cache(tmp_path: Path) -> None:
         project_number=7,
         items=[{"id": "STALE_BEFORE_MOVE"}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
-    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is not None
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir, owner="brockamer") is not None
 
     result = subprocess.run(
         [sys.executable, str(JARED_CLI), "move", "1", "In Progress"],
@@ -454,7 +490,7 @@ def test_subprocess_jared_move_invalidates_disk_cache(tmp_path: Path) -> None:
     assert result.returncode == 0, f"jared move failed: {result.stderr}"
 
     # After mutation, the cache must be gone — stage's next read refetches.
-    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is None, (
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir, owner="brockamer") is None, (
         "jared move must invalidate the cross-process board_items() cache; "
         "stage.py's next run would otherwise see the pre-mutation snapshot."
     )
@@ -474,6 +510,7 @@ def test_board_items_bypasses_cache_when_no_cache_env_set(
         project_number=7,
         items=[{"id": "STALE"}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
     monkeypatch.setenv("JARED_NO_CACHE", "1")
 

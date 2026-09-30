@@ -114,7 +114,7 @@ The escape-hatch examples below are written with these rules applied.
 
 `sweep.py` runs `check_off_board_issues`, a pure number-intersection between open repo issues and board items. It needs the closed board items in the snapshot too, so a closed-but-on-board issue isn't false-flagged as off-board — hence the cache holds the closed subset alongside the open pull.
 
-To avoid re-pulling the full mature-board history every sweep cycle, sweep maintains a persistent **closed-items cache** at `${JARED_CACHE_DIR}/<project>-closed.json` (24-hour default TTL). On warm-cache reads, sweep pulls open items via `Board.open_items()` (cost scales with open count, not total board size) and merges with the cached closed items. Dedup rule: open-items pull wins on number collision (handles external reopen).
+To avoid re-pulling the full mature-board history every sweep cycle, sweep maintains a persistent **closed-items cache** at `<cache dir>/<owner>-<project>-closed.json` (24-hour default TTL; the cache dir is described in the README § Under the hood). On warm-cache reads, sweep pulls open items via `Board.open_items()` (cost scales with open count, not total board size) and merges with the cached closed items. Dedup rule: open-items pull wins on number collision (handles external reopen).
 
 **Invalidation surface.** First-party `jared set <N> Status <value>` invalidates the cache — that catches `jared close` (which delegates to `jared set ... Status Done`), `jared move <N> Done`, and any direct `jared set` of the Status field. Non-Status writes (Priority, Work Stream) leave the cache intact to avoid forcing a needless full-board refetch.
 

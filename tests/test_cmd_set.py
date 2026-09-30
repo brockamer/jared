@@ -146,14 +146,19 @@ def test_set_status_invalidates_closed_cache(
         project_number=7,
         items=[{"content": {"number": 42, "state": "CLOSED"}, "status": "Done"}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
-    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) is not None
+    assert (
+        cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer") is not None
+    )
 
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "set", "42", "Status", "Done"])
     assert rc == 0
 
-    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) is None, (
+    assert (
+        cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer") is None
+    ), (
         "Status mutation must drop the closed-items cache so the next sweep "
         "refetches with the new state."
     )
@@ -177,12 +182,12 @@ def test_set_priority_does_not_invalidate_closed_cache(
 
     cache_dir = Path(os.environ["JARED_CACHE_DIR"])
     seeded = [{"content": {"number": 42, "state": "CLOSED"}, "status": "Done"}]
-    cache.set_closed_items(project_number=7, items=seeded, cache_dir=cache_dir)
+    cache.set_closed_items(project_number=7, items=seeded, cache_dir=cache_dir, owner="brockamer")
 
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "set", "42", "Priority", "High"])
     assert rc == 0
 
-    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) == seeded, (
-        "Priority mutation must not touch the closed-cache."
-    )
+    assert (
+        cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer") == seeded
+    ), "Priority mutation must not touch the closed-cache."

@@ -29,7 +29,6 @@ paragraph described a recovery the code did not offer; see
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from . import cache
@@ -46,7 +45,9 @@ class KfNumberIndex:
         return cls(base / f"kf-index-{board_id}.json")
 
     def _load(self) -> dict[int, str]:
-        if not self._path.exists():
+        # A directory another user could write to may hold a planted index, and
+        # a wrong entry routes a write to the wrong task. See `cache` docstring.
+        if not cache.usable_for_read(self._path.parent) or not self._path.exists():
             return {}
         try:
             payload = json.loads(self._path.read_text())
@@ -56,11 +57,10 @@ class KfNumberIndex:
             return {}
 
     def _save(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # In a refused directory nothing is written and the map lives in memory
+        # for this process, which costs a reseed scan next run, never correctness.
         payload = {"numbers": {str(k): v for k, v in self._map.items()}}
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload))
-        os.replace(tmp, self._path)
+        cache.write_under(self._path.parent, self._path, payload)
 
     def get(self, number: int) -> str | None:
         return self._map.get(number)
