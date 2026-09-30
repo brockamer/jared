@@ -729,6 +729,7 @@ def test_fetch_items_with_closed_cache_warm_hit_returns_merged(
             {"content": {"number": 51}, "status": "Done"},
         ],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
 
     board_md = tmp_path / "docs" / "project-board.md"
@@ -825,7 +826,7 @@ def test_fetch_items_with_closed_cache_cold_miss_warms_cache(
 
     cache_dir = Path(os.environ["JARED_CACHE_DIR"])
     # Ensure no closed-cache pre-seeded.
-    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) is None
+    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer") is None
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
@@ -854,7 +855,7 @@ def test_fetch_items_with_closed_cache_cold_miss_warms_cache(
     # Cache was warmed from the Done subset only — opens go to next live pull.
     # (#189: filter on top-level `status`, not `content.state` — the latter
     # is not populated by `gh project item-list`.)
-    warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir)
+    warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer")
     assert warmed is not None
     warmed_numbers: list[int] = sorted(
         n for i in warmed if isinstance(n := (i.get("content") or {}).get("number"), int)
@@ -887,6 +888,7 @@ def test_fetch_items_with_closed_cache_falls_back_when_open_items_paginates(
         # Closed-cache shape: cold-path-derived, no content.state key.
         items=[{"content": {"number": 50}, "status": "Done"}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
 
     board_md = tmp_path / "docs" / "project-board.md"
@@ -943,6 +945,7 @@ def test_fetch_items_with_closed_cache_respects_jared_no_cache(
         project_number=7,
         items=[{"content": {"number": 999}, "status": "Done"}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
 
     board_md = tmp_path / "docs" / "project-board.md"
@@ -991,7 +994,7 @@ def test_fetch_items_with_closed_cache_filters_by_status_on_realistic_shape(
     sweep = import_sweep()
 
     cache_dir = Path(os.environ["JARED_CACHE_DIR"])
-    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) is None
+    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer") is None
 
     board_md = tmp_path / "docs" / "project-board.md"
     board_md.parent.mkdir(parents=True)
@@ -1022,7 +1025,7 @@ def test_fetch_items_with_closed_cache_filters_by_status_on_realistic_shape(
     # cache because `content.state` is absent from every realistic item.
     # The fix filters on top-level `status` so only the two Done items are
     # cached.
-    warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir)
+    warmed = cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer")
     assert warmed is not None
     warmed_numbers: list[int] = sorted(
         n for i in warmed if isinstance(n := (i.get("content") or {}).get("number"), int)

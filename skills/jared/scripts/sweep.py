@@ -174,7 +174,7 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
     no_cache = os.environ.get("JARED_NO_CACHE") == "1"
     if not no_cache:
         ttl = int(os.environ.get("JARED_CACHE_TTL_SECONDS", "60"))
-        cached = board_cache.get_item_list(project_number, ttl_seconds=ttl)
+        cached = board_cache.get_item_list(project_number, owner=owner, ttl_seconds=ttl)
         if cached is not None:
             return cast(list[dict[str, Any]], cached)
     limit = 2000
@@ -200,7 +200,7 @@ def fetch_items(owner: str, project: str) -> list[dict[str, Any]]:
             f"this one. Raise the --limit or paginate."
         )
     if not no_cache:
-        board_cache.set_item_list(project_number, items=items)
+        board_cache.set_item_list(project_number, owner=owner, items=items)
     return items
 
 
@@ -250,7 +250,7 @@ def fetch_items_with_closed_cache(board: Board, owner: str, project: str) -> lis
     """
     no_cache = os.environ.get("JARED_NO_CACHE") == "1"
     if not no_cache:
-        cached_closed = board_cache.get_closed_items(board.project_number)
+        cached_closed = board_cache.get_closed_items(board.project_number, owner=board.owner)
         if cached_closed is not None:
             try:
                 open_items = board.open_items()
@@ -269,7 +269,9 @@ def fetch_items_with_closed_cache(board: Board, owner: str, project: str) -> lis
     items = fetch_items(owner, project)
     if not no_cache:
         closed_subset = [i for i in items if i.get("status") == "Done"]
-        board_cache.set_closed_items(project_number=board.project_number, items=closed_subset)
+        board_cache.set_closed_items(
+            project_number=board.project_number, owner=board.owner, items=closed_subset
+        )
     return items
 
 

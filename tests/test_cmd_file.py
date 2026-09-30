@@ -1460,10 +1460,11 @@ def test_file_invalidates_item_list_cache(monkeypatch: pytest.MonkeyPatch, tmp_p
         project_number=7,
         items=[{"content": {"number": 1}, "status": "Backlog"}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
-    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is not None, (
-        "pre-condition: cache must be populated before running file"
-    )
+    assert (
+        cache.get_item_list(project_number=7, cache_dir=cache_dir, owner="brockamer") is not None
+    ), "pre-condition: cache must be populated before running file"
 
     # Reuse the existing _routed_fake helper — item-add returns an id, file
     # succeeds rc 0.  Pass --no-milestone to skip the milestones API call.
@@ -1485,7 +1486,7 @@ def test_file_invalidates_item_list_cache(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     assert rc == 0
 
-    assert cache.get_item_list(project_number=7, cache_dir=cache_dir) is None, (
+    assert cache.get_item_list(project_number=7, cache_dir=cache_dir, owner="brockamer") is None, (
         "_cmd_file must invalidate the on-disk item-list cache after a successful "
         "file so that stage.py / sweep.py cold-path reads see the newly filed issue."
     )

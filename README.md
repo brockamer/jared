@@ -375,6 +375,18 @@ check warns that it checked nothing, rather than passing silently. `jared pre-fl
 on a draft without posting it. See
 [`references/pii-pre-flight.md`](skills/jared/references/pii-pre-flight.md).
 
+Board reads are cached on disk, so repeated commands do not re-pull
+the whole board: open items for 60 seconds (`JARED_CACHE_TTL_SECONDS`
+changes that) and closed items for 24 hours. The cache lives in
+`$XDG_CACHE_HOME/jared`, or in `~/.cache/jared` when that variable is
+unset; `JARED_CACHE_DIR` puts it somewhere else. Jared creates the
+directory with mode `0700` and its files with `0600`. It will not use
+an existing cache directory that another user owns or can write to: it
+says why on stderr and runs that command without the cache.
+`JARED_NO_CACHE=1` skips the cache for one command. Snapshots are keyed
+by project owner and number, so two boards that share a number never
+read each other's data.
+
 For development setup, testing, and the layout of the plugin's
 internals, see [`CLAUDE.md`](CLAUDE.md).
 

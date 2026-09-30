@@ -46,8 +46,8 @@ def _isolate_jared_cache(
 ) -> None:
     """Point the on-disk snapshot cache (#52) at a per-test tmp dir.
 
-    Without this, tests would share `${TMPDIR}/jared-cache/` across runs and
-    leak board snapshots between tests. Tests that want to disable caching
+    Without this, tests would share the real per-user cache (`~/.cache/jared`)
+    across runs and leak board snapshots between tests. Tests that want to disable caching
     entirely can additionally set `JARED_NO_CACHE=1` via monkeypatch.
     """
     cache_dir = tmp_path_factory.mktemp("jared-cache")

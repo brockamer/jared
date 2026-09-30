@@ -548,8 +548,10 @@ class Board:
 
         Three layers (#52):
           1. In-process: `self._items`, lifetime of this Board instance.
-          2. On-disk: JSON at `${JARED_CACHE_DIR:-${TMPDIR}/jared-cache}/<N>.json`,
-             shared across all jared processes within `JARED_CACHE_TTL_SECONDS`.
+          2. On-disk: JSON at `<cache dir>/<owner>-<N>.json`, shared across all
+             jared processes within `JARED_CACHE_TTL_SECONDS`. The cache dir is
+             `$JARED_CACHE_DIR`, else `$XDG_CACHE_HOME/jared`, else `~/.cache/jared`;
+             see `lib/cache.py`.
           3. Fresh fetch via `gh project item-list` — GraphQL-billed.
 
         Callers that mutate the board within the same process must call
@@ -566,7 +568,7 @@ class Board:
         no_cache = os.environ.get("JARED_NO_CACHE") == "1"
         if not no_cache:
             ttl = int(os.environ.get("JARED_CACHE_TTL_SECONDS", "60"))
-            cached = cache.get_item_list(self.project_number, ttl_seconds=ttl)
+            cached = cache.get_item_list(self.project_number, owner=self.owner, ttl_seconds=ttl)
             if cached is not None:
                 self._items = cached
                 return self._items
@@ -592,7 +594,7 @@ class Board:
                 f"trust this snapshot."
             )
         if not no_cache:
-            cache.set_item_list(self.project_number, items=self._items)
+            cache.set_item_list(self.project_number, owner=self.owner, items=self._items)
         return self._items
 
     def invalidate_items(self) -> None:
@@ -605,7 +607,7 @@ class Board:
         if self.project_number is None:
             return
         self._items = None
-        cache.invalidate_item_list(self.project_number)
+        cache.invalidate_item_list(self.project_number, owner=self.owner)
 
     def invalidate_closed_items(self) -> None:
         """Drop the on-disk closed-items snapshot (#186).
@@ -620,7 +622,7 @@ class Board:
         """
         if self.project_number is None:
             return
-        cache.invalidate_closed_items(self.project_number)
+        cache.invalidate_closed_items(self.project_number, owner=self.owner)
 
     _OPEN_ITEMS_QUERY = """
     query($owner: String!, $repo: String!) {

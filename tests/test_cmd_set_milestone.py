@@ -271,14 +271,15 @@ def test_set_milestone_invalidates_the_items_cache(
         7,
         items=[{"content": {"number": 42}, "status": "Backlog", "milestone": None}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
-    assert cache.get_item_list(7, cache_dir=cache_dir) is not None
+    assert cache.get_item_list(7, cache_dir=cache_dir, owner="brockamer") is not None
 
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "set-milestone", "42", "Marketplace readiness"])
     assert rc == 0
 
-    assert cache.get_item_list(7, cache_dir=cache_dir) is None, (
+    assert cache.get_item_list(7, cache_dir=cache_dir, owner="brockamer") is None, (
         "milestone assignment must drop the items snapshot so the next stage "
         "run sees the new milestone instead of the stale null"
     )
@@ -296,13 +297,14 @@ def test_clear_milestone_invalidates_the_items_cache(
         7,
         items=[{"content": {"number": 42}, "status": "Backlog", "milestone": {"title": "x"}}],
         cache_dir=cache_dir,
+        owner="brockamer",
     )
 
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "set-milestone", "42", "--none"])
     assert rc == 0
 
-    assert cache.get_item_list(7, cache_dir=cache_dir) is None
+    assert cache.get_item_list(7, cache_dir=cache_dir, owner="brockamer") is None
 
 
 def test_set_milestone_does_not_invalidate_the_closed_cache(
@@ -322,13 +324,15 @@ def test_set_milestone_does_not_invalidate_the_closed_cache(
 
     cache_dir = Path(os.environ["JARED_CACHE_DIR"])
     seeded = [{"content": {"number": 9, "state": "CLOSED"}, "status": "Done"}]
-    cache.set_closed_items(project_number=7, items=seeded, cache_dir=cache_dir)
+    cache.set_closed_items(project_number=7, items=seeded, cache_dir=cache_dir, owner="brockamer")
 
     mod = import_cli()
     rc = mod.main(["--board", str(board_md), "set-milestone", "42", "Marketplace readiness"])
     assert rc == 0
 
-    assert cache.get_closed_items(project_number=7, cache_dir=cache_dir) == seeded
+    assert (
+        cache.get_closed_items(project_number=7, cache_dir=cache_dir, owner="brockamer") == seeded
+    )
 
 
 def test_set_milestone_none_refuses_when_milestone_assignment_absent(
