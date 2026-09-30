@@ -7,6 +7,29 @@ Format: each entry starts with `## v<x.y.z> — YYYY-MM-DD`, followed by terse b
 
 Convention is documented in [CLAUDE.md](CLAUDE.md) § Versioning. Pre-`v0.2.0` history is omitted — `v0.2.0` is the level-up release that established the current Jared shape.
 
+## v0.35.0 — 2026-09-29
+
+Interim release. Ships a bare `/jared-start` that picks the next item, one data source for `/jared-status`, term matching in pre-flight, and the showcase-audit corrections to the skill, commands and references. The version bump is what delivers these: `/plugin update jared` compares the version string, so a merge alone reaches no existing install. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
+
+**Features**
+- **A bare `/jared-start` picks the next item and shows why.** It resumes the first In Progress item that has no session lock and no open blocker; otherwise it takes the first unlocked, unblocked, pullable Up Next item in board order. `jared next-session-prompt --pick --repo-root <root>` prints the `## Pick` section, with a reason for every item passed over. An issue number still overrides the pick. (#532, #516)
+- **Pre-flight matches listed terms.** Bullets under a `## Pre-flight terms` heading in a private file are matched case-sensitively as whole tokens, so a draft that names a listed person or place is refused, not only one that copies a whole private line. A term that a tracked file already holds is allowlisted. (#531, #528)
+
+**Bug fixes**
+- **`/jared-status` has one data source.** It asked for aging, totals and a WIP `<N> of <cap>` that no command prints. It now prints `jared next-session-prompt` verbatim, and that command gains a `## Blocked` section. (#533, #467)
+- **The wrap flow uses the repo's default branch and its own tooling.** `/jared-wrap` merges `origin/HEAD`, not a literal `origin/main`, runs the format and test commands the project's `CLAUDE.md` or `AGENTS.md` names, and takes the merge strategy from `admin-merge:`, else the first method the repository allows. `worktree-add` branches from `origin/HEAD`. `capture-context.py` keeps every body section in its original position. (#525, #465)
+- **`/jared-start` parses its flags before any command runs.** Each Bash call starts a fresh shell, so the never-assigned `${SESSION_FLAG:+…}` dropped `--session` without an error. The stubs now write literal values, and `tests/test_stub_shell_variables.py` pins the rule. The same pass corrected the wrap stub's `gh pr checks` call, which had no field list, and its `wrap-state` call, which printed nothing. (#527, #468)
+- **Pre-flight reports a private file with no usable phrase as vacuous** (exit 3), not clean. A list of short names, the obvious answer to the 0-file warning, had turned that warning into a pass. (#529, #526)
+
+**Doctrine**
+- `SKILL.md` teaches Blocked as a Status column, never a label. (#524, #457)
+- `/jared-file` stops writing `## Depends on` and `## Blocks` body sections; same-repo dependencies live only as native edges. (#535, #459)
+- Stale references removed from the skill, commands and references: unarchived spec paths, `jared init` and `jared groom` named as subcommands, an incomplete config discovery order, and the old `jared close` behaviour. (#536, #461)
+- Owner-only context removed from runtime prose and script comments: ledger finding IDs, examples drawn from other projects, and citations that meant something only to the owner. (#537, #466)
+
+**Patch**
+- `LICENSE` carries the MIT text that `plugin.json` already claimed. (#534, #451)
+
 ## v0.34.0 — 2026-09-28
 
 Interim release. Renames the status command to `/jared-status` and closes the pre-flight fail-open. The version bump is what delivers these: `/plugin update jared` compares the version string, so a merge alone reaches no existing install. This is **not** the stranger-ready marketplace release — that remains #354, gated on the Phase 2 live walkthrough (#351).
