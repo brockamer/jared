@@ -7,7 +7,7 @@ lives on disk (the same reason cache.py exists). It is rebuildable: a lost or
 corrupt file costs one full board scan to reseed, never correctness.
 
 That "never correctness" claim covers a *stale* entry only because
-`KanbanFlowProvider._resolve_task` enforces it (#385, F70): every #N -> _id
+`KanbanFlowProvider._resolve_task` enforces it: every #N -> _id
 resolution now fetches the task and compares `number_value` to the ref before
 any caller sees the id, and reseeds once when they disagree. Until then a
 stale hit was trusted, so an entry whose task had been renumbered in the

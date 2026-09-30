@@ -70,8 +70,8 @@ def non_git_notice(repo_root: Path) -> str:
     express this concept?", and this condition does not depend on the backend at
     all — a GitHub-backend project run from a bare directory hits it, and a
     KanbanFlow board inside a checkout does not. Tagging it as a capability would
-    file a git-axis condition under a backend-keyed heading, which is the
-    mis-tagging cost ledger findings F11/F27/F53/F57 record. See #425.
+    file a git-axis condition under a backend-keyed heading, and the note would
+    blame the backend for a fact about the checkout. See #425.
     """
     return NON_GIT_NOTICE.format(root=repo_root.resolve())
 

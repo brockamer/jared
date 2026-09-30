@@ -78,7 +78,7 @@ Flow:
 
 5b. **Run the back-end flow.** After Session notes are posted and reconciliation is applied, run the commit → push → PR create → mergeable check → confirm merge → cleanup sequence. The flow is idempotent — re-running `/jared-wrap` re-evaluates state and picks up at the current step.
 
-   **Precondition — repo and branch guard.** The back-end flow assumes two facts, and neither is safe to assume. First, that `origin` is the repo this board tracks: jared is often paired with a clone of a project the operator cannot push to, and the loop would push and open a PR against that upstream. Second, that the session worked on a feature branch rather than the repo's default branch: a repo whose default branch is `master` fell straight through the old `main`-only check and ran the PR loop on its default branch. Both are F72 (#393). Establish the facts before any network write. Anything the guard cannot establish is a skip — the flow errs toward doing nothing rather than toward writing somewhere:
+   **Precondition — repo and branch guard.** The back-end flow assumes two facts, and neither is safe to assume. First, that `origin` is the repo this board tracks: jared is often paired with a clone of a project the operator cannot push to, and the loop would push and open a PR against that upstream. Second, that the session worked on a feature branch rather than the repo's default branch: a repo whose default branch is `master` fell straight through the old `main`-only check and ran the PR loop on its default branch. Establish the facts before any network write. Anything the guard cannot establish is a skip — the flow errs toward doing nothing rather than toward writing somewhere:
 
    ```bash
    BOARD_REPO=$(sed -n 's/^- Repo: *\([^ ]*\).*/\1/p' docs/project-board.md 2>/dev/null | head -1)
@@ -130,7 +130,7 @@ Flow:
    **Check the exit code before dispatching on the printed step.** `wrap-state` exits non-zero
    with an empty stdout when it cannot determine PR state — `gh pr view` failed for a
    reason other than "no PR exists" (auth, network, rate limit), so reporting
-   `create_pr` would tell you to open a PR that may already exist (F7, #371). On a
+   `create_pr` would tell you to open a PR that may already exist. On a
    non-zero exit: print the CLI's stderr verbatim, do **not** dispatch a step, and exit
    the loop. The lock-clear block below still runs. Re-run `/jared-wrap` once the `gh`
    failure is addressed. A detached HEAD reaches this path too, since the branch name
@@ -140,7 +140,7 @@ Flow:
 
    **Step actions:**
 
-   - **`commit`** (working tree dirty): Stage in two parts, then ask for the message. Scope first, wording second — the operator has to know *what* is going in before they name it. F71 (#392) was the opposite order: one prompt about wording, which read as consent to every untracked path in the tree.
+   - **`commit`** (working tree dirty): Stage in two parts, then ask for the message. Scope first, wording second — the operator has to know *what* is going in before they name it. The opposite order — one prompt about wording — reads as consent to every untracked path in the tree.
 
      ```bash
      git add -u                                 # tracked modifications and deletions
@@ -252,7 +252,7 @@ Flow:
      ```
      After a squash or rebase merge, `git branch -d` refuses: the branch's own commits are not on the default branch. Make sure the PR shows as merged, then delete the branch with `git branch -D`.
 
-     The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around). The rule comes from operator feedback after the 2026-05-24 wrap of #227's session-1 left an orphan `~/Code/jared-227/` on disk.
+     The cleanup is **scoped to this session's issue**, not lockdir-wide — sibling worktrees from other parallel sessions are not touched. Skip the bullet entirely for solo sessions (worktree_path is null) and for sessions whose branch hasn't merged yet (the operator decides whether to keep the unmerged worktree around).
 
 6. **Confirm and close out.** Render the closing line in voice:
 

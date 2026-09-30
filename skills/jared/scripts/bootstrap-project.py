@@ -8,7 +8,7 @@ path). Offers to create any missing standard fields (Status / Priority /
 Work Stream) interactively.
 
 Usage:
-  bootstrap-project.py --url https://github.com/users/brockamer/projects/1 --repo brockamer/findajob
+  bootstrap-project.py --url https://github.com/users/<owner>/projects/<N> --repo <owner>/<repo>
   bootstrap-project.py --url <url> --repo <repo> --output docs/project-board.md
   bootstrap-project.py --url <url> --repo <repo> --no-create  # don't offer to create missing fields
   bootstrap-project.py --backend kanbanflow --repo <repo>  # KanbanFlow (token in env)
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# F13 (#371): enforce the >=3.11 floor before any lib import. This script runs
+# Enforce the >=3.11 floor before any lib import. This script runs
 # as its own entry point (own shebang, own __main__ block), so it needs its own
 # call — the guard in `jared` is not on this path. lib.pyversion is deliberately
 # 3.8-safe; other lib modules are not (kanbanflow_provider.py has a module-level
@@ -204,7 +204,7 @@ def prompt_work_streams() -> list[str]:
     print("The Work Stream field has no standard options — you define them per project.")
     print("Examples:")
     print("  - Software project: Backend, Frontend, Infrastructure")
-    print("  - findajob-style: Job Search, Generalization, Infrastructure")
+    print("  - Research project: Literature, Experiments, Writing")
     print("  - House renovation: Demo, Rough-in, Finish")
     print()
     raw = input("Enter work streams as a comma-separated list: ").strip()
@@ -499,7 +499,7 @@ Project-level knobs that change Jared's behavior on this board. Each bullet is
 
 # ---------- Legacy-doc detection and patching ----------
 #
-# Some projects (e.g. findajob) have a `docs/project-board.md` that predates
+# Some projects have a `docs/project-board.md` that predates
 # the machine-readable bullet block: the URL lives in a markdown link, the
 # Project ID is buried in a code fence, and the other three fields aren't
 # written down at all. `lib/board.py` tolerates that shape at parse-time via

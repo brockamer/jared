@@ -36,7 +36,7 @@ from typing import cast
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# F13 (#371): enforce the >=3.11 floor before any lib import. This script runs
+# Enforce the >=3.11 floor before any lib import. This script runs
 # as its own entry point (own shebang, own __main__ block), so it needs its own
 # call — the guard in `jared` is not on this path. lib.pyversion is deliberately
 # 3.8-safe; other lib modules are not (kanbanflow_provider.py has a module-level
@@ -159,7 +159,7 @@ def update_current_state(sections: dict[str, str], text: str) -> None:
 def decision_entries(section_text: str) -> list[tuple[str, str]]:
     """Parse a `## Decisions` section into (date, text) pairs, one per `###`.
 
-    Exists for `append_decision`'s idempotency check (F34, #371). That check
+    Exists for `append_decision`'s idempotency check. That check
     used `entry.strip() in current`, i.e. substring containment, so a new
     decision that happened to be a prefix of one already recorded under the
     same date was silently discarded — no error, no output, the decision just
@@ -188,7 +188,7 @@ def decision_entries(section_text: str) -> list[tuple[str, str]]:
 
 def append_decision(sections: dict[str, str], text: str) -> None:
     heading = "## Decisions\n"
-    # UTC, not the local clock (F6's defect class, inside F34's range): this
+    # UTC, not the local clock: this
     # date is the key the idempotency check below compares on, so a local date
     # would make two runs either side of local midnight disagree about what
     # "today" is and stop deduping.
@@ -202,7 +202,7 @@ def append_decision(sections: dict[str, str], text: str) -> None:
         if body_without_heading.strip() in ("(none yet)", "(none)", "None", ""):
             sections["Decisions"] = heading + entry
         else:
-            # Idempotency by equality, not containment (F34, #371): `in`
+            # Idempotency by equality, not containment: `in`
             # dropped any decision that was a substring of one already
             # recorded under today's heading.
             if (today, text.strip()) in decision_entries(current):

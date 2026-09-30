@@ -281,7 +281,7 @@ jared file --title "Quick fix" --body "One-line summary of the bug." \
 | `--title` | yes | Issue title; keep ≤ 70 chars, verb-first. |
 | `--body` / `--body-file` | yes (exactly one) | `--body "<text>"` for inline content; `--body-file <path>` for a markdown file; `--body-file -` reads stdin. Mutually exclusive. |
 | `--priority {High,Medium,Low}` | yes | Enforced to avoid filing with null Priority. |
-| `--milestone NAME` / `--no-milestone` | yes (exactly one) | Either assign a milestone by title (validated against the repo's open milestones) or opt out explicitly. Filing without either flag is refused with a listing of open milestones — closes the orphan-issue stream that eight consecutive findajob structural reviews had to bulk-absorb. Mutually exclusive. |
+| `--milestone NAME` / `--no-milestone` | yes (exactly one) | Either assign a milestone by title (validated against the repo's open milestones) or opt out explicitly. Filing without either flag is refused with a listing of open milestones, so every filed issue carries an explicit milestone decision. Mutually exclusive. |
 | `--status` | no | Any Status column. Default: `Backlog`. |
 | `--label` | no | Repeatable. |
 | `--field` | no | Repeatable `NAME=VALUE` for additional single-select fields (e.g. `Work Stream=Planning`). |

@@ -25,7 +25,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-# F13 (#371): the `from datetime import UTC` below is a 3.11-only import, so
+# The `from datetime import UTC` below is a 3.11-only import, so
 # the floor must be enforced above it — otherwise a 3.10 user gets a raw
 # ImportError and the guard never runs.
 from lib.pyversion import require_python  # type: ignore[import-not-found]  # noqa: E402
@@ -86,7 +86,7 @@ _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
 
 
 def utc_today(now: datetime | None = None) -> date:
-    """Today's calendar date in UTC (F6, #371).
+    """Today's calendar date in UTC.
 
     Every timestamp stage.py ranks against is UTC — GitHub's `createdAt` and
     `updatedAt`, and a milestone's `due_on`. `date.today()` reads the local
@@ -154,8 +154,8 @@ def has_real_world_annotation(item: dict[str, Any]) -> bool:
     """True if `## Blocked by` body has substantive text after stripping #N refs.
 
     Heuristic: ≥10 non-whitespace characters remain after removing `#\\d+` matches.
-    Surfaces patterns like #60's "waiting on next non-trivial findajob session"
-    where the blocker is a real-world event, not another issue.
+    Surfaces patterns like "waiting on the vendor's next release", where the
+    blocker is a real-world event, not another issue.
     """
     body = item.get("body", "") or ""
     section = _BLOCKED_BY_SECTION.search(body)
@@ -237,7 +237,7 @@ def render(
 ) -> str:
     """Format StageProposals as the stdout block documented in the spec."""
     if today is None:
-        # `now` is localised for display; the ranking date must stay UTC (F6).
+        # `now` is localised for display; the ranking date must stay UTC.
         today = utc_today()
     lines: list[str] = []
     lines.append(f"/jared-stage — proposals {now.strftime('%Y-%m-%d %H:%M')}")

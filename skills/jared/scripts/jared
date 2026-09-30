@@ -19,7 +19,7 @@ from typing import Any
 # types are still enforced inside lib.board.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# F13 (#371): enforce the >=3.11 floor before any lib import. lib.pyversion is
+# Enforce the >=3.11 floor before any lib import. lib.pyversion is
 # deliberately 3.8-safe so it can report to the interpreter it rejects; every
 # other lib module may use 3.11-only syntax (kanbanflow_provider.py already
 # has a module-level `from datetime import UTC`).
@@ -710,10 +710,10 @@ def _cmd_file(args: argparse.Namespace) -> int:
 
     # Milestone resolution (#238). Every filing must declare intent: either
     # --milestone NAME (validated against open milestones) or --no-milestone
-    # (explicit opt-out). Missing both → refuse with a listing. Eight
-    # consecutive findajob structural reviews bulk-absorbed orphan filings
-    # before this gate landed; making the omission impossible at the source
-    # is cheaper than catching it in every sweep.
+    # (explicit opt-out). Missing both → refuse with a listing. Without
+    # the gate, orphan filings pile up for every structural review to absorb;
+    # making the omission impossible at the source is cheaper than catching
+    # it in every sweep.
     if not args.no_milestone:
         # provider.list_milestones() uses the query-string form:
         # `gh api repos/{repo}/milestones?state=open&per_page=100`
@@ -1856,7 +1856,7 @@ def _cmd_worktree_add(args: argparse.Namespace) -> int:
 
 # gh's "branch has no PR" wording, across versions: "no pull requests found
 # for branch X" and the older "no open pull requests found ...". Any other
-# stderr on a non-zero exit is a real failure — see F7 (#371).
+# stderr on a non-zero exit is a real failure.
 _NO_PR_SIGNATURE = re.compile(r"no\s+(open\s+)?pull\s+requests?\s+found", re.IGNORECASE)
 
 
@@ -1914,7 +1914,7 @@ def _cmd_wrap_state(args: argparse.Namespace) -> int:
     )
 
     if pr_result.returncode != 0:
-        # F7 (#371): `gh pr view` exits non-zero both when no PR exists and
+        # `gh pr view` exits non-zero both when no PR exists and
         # when gh itself fails (auth, network, rate limit). Collapsing the two
         # makes wrap say `create_pr` for a branch whose PR is merely
         # unreachable — so only the recognised no-PR wording is treated as

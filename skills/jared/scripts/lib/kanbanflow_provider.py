@@ -234,7 +234,7 @@ class KanbanFlowProvider:
     def _reseed_index(self) -> None:
         """Rebuild the number -> task_id map from a full board scan.
 
-        Collisions are surfaced rather than swallowed (F3, #371). This was a
+        Collisions are surfaced rather than swallowed. This was a
         plain dict comprehension keyed by `number_value`, so when two live
         tasks shared a jared #N one `_id` was silently and permanently
         dropped — which made `kf_number_index.py`'s own recovery claim
@@ -270,7 +270,7 @@ class KanbanFlowProvider:
         self._index.replace({number: sorted(ids)[0] for number, ids in by_number.items()})
 
     def _resolve_task(self, ref: IssueRef) -> KfTask:
-        """Resolve #`ref` to a live task, or raise `ItemNotFound` (#385, F70).
+        """Resolve #`ref` to a live task, or raise `ItemNotFound`.
 
         This is the one seam where a jared #N becomes a KanbanFlow `_id`, so it
         is the one place the on-disk index can be checked against the board.
@@ -285,7 +285,7 @@ class KanbanFlowProvider:
         without fetching, so a renumbered task silently absorbed every write
         aimed at its old number — `move`, `set_field`, `close`, `comment`,
         `add_blocked_by`, `set_milestone` and the rest of the 13 call sites.
-        #371 (F3) fixed the same shape in `get_item` for free, because a read
+        An earlier fix covered the same shape in `get_item` for free, because a read
         already had the task in hand; the write path is the residual it left.
 
         **Cost.** One `GET /tasks/<id>` per resolution. That is the deliberate
@@ -329,7 +329,7 @@ class KanbanFlowProvider:
     def get_item(self, ref: IssueRef) -> BoardItem | None:
         """Read #`ref`, or `None` when it does not resolve.
 
-        The staleness handling lives in `_resolve_task` (F3 #371, F70 #385),
+        The staleness handling lives in `_resolve_task`,
         which every other ref-taking method shares. This method only converts
         that seam's `ItemNotFound` into the `None` the BoardProvider contract
         asks for on a read. The retry loop used to be duplicated here, which is
@@ -484,7 +484,7 @@ class KanbanFlowProvider:
             self._check_option(name, value)
 
     def _next_number(self) -> int:
-        """Allocate the next free #N from a live board scan (F3, #371).
+        """Allocate the next free #N from a live board scan.
 
         Reseeds unconditionally. The previous `_ensure_seeded()` rebuilt only
         when the index was *empty*, so a non-empty but stale index — a task

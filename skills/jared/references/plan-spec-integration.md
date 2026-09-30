@@ -134,13 +134,3 @@ Not every project wants this overhead. For small projects, solo hacks, or non-so
 - The user explicitly asks Jared to set up planning artifacts
 
 If none of these are true, Jared skips all plan/spec checks and behaves as a pure board-steward.
-
-## For findajob specifically
-
-The existing `plan-conventions.md` describes the sections a plan must contain. Jared's version (shipped at `assets/plan-conventions.md.template`) adds:
-
-- An `## Issue` requirement (was missing)
-- A "Documentation Impact" item asking explicitly for the issue reference
-- A new "After the plan ships" section covering the archival routine
-
-When `/jared-init` runs against findajob, it will detect the existing `plan-conventions.md` and offer to patch it with these additions rather than overwriting it.

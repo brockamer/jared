@@ -68,7 +68,7 @@ Four classes of text pass through unchanged. The character voice passes the same
 
 | Class | Examples | Why |
 |---|---|---|
-| Machine-fixed strings | `degraded: <feature> unavailable on <backend> — <instead>`; `OK: set Status=In Progress on issue #374`; `GhInvocationError`; every CLI stdout and stderr line | Consistency anchors and grep targets. Ledger findings F11, F27, F53 and F57 record what a hand-written variant costs. |
+| Machine-fixed strings | `degraded: <feature> unavailable on <backend> — <instead>`; `OK: set Status=In Progress on issue #374`; `GhInvocationError`; every CLI stdout and stderr line | Consistency anchors and grep targets. A reworded variant no longer matches the grep that finds the original. |
 | Technical names | `Backlog`, `Up Next`, `In Progress`, `Blocked`, `Done`, `Priority`, `High`, `Medium`, `Low`, `GitHub`, `KanbanFlow`, milestone titles, `#N`, file paths, function names, label names, field names, stub section headers such as "In flight" and "Shape:" | ASD-STE100 permits technical names. The controlled vocabulary applies to the connecting prose. |
 | Script output | `sweep.py`, `dependency-graph.py`, `stage.py`, `jared next-session-prompt`, `jared ties` blocks | Voice-OFF today. The knob governs dialogue only. |
 | Board-write drafts | Session-note drafts, issue-body drafts, close-comment drafts, body-edit diffs | Board writes are plain technical prose under every value of the knob. |
@@ -111,7 +111,7 @@ Note: the aside and the reference are gone. `#104`, `In Progress`, `Up Next` and
 
 > No issue tracks this work. The change touches four files. The board must show the work before the work starts. I can file the issue now. Do you approve?
 
-Note: the trigger is the general session-level event (see F58), not a `/jared-groom` step. The enforcement is unchanged; the softener is gone.
+Note: the trigger is the general session-level event, not a `/jared-groom` step. The enforcement is unchanged; the softener is gone.
 
 ### Situation 4 — error mode
 
@@ -165,4 +165,4 @@ If a rendered response may not be `ste`, examine it against this list:
 
 ## Provenance
 
-ASD-STE100 is the Simplified Technical English specification maintained by the AeroSpace and Defence Industries Association of Europe. Issue 8 is the current issue at the time of writing. The mode was requested on #374; the design is `docs/superpowers/specs/archived/2026-09/2026-09-13-voice-ste-design.md`.
+ASD-STE100 is the Simplified Technical English specification maintained by the AeroSpace and Defence Industries Association of Europe. Issue 8 is the current issue at the time of writing. The design is `docs/superpowers/specs/archived/2026-09/2026-09-13-voice-ste-design.md`.

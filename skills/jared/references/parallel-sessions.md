@@ -101,14 +101,12 @@ git worktree remove ~/Code/<repo>-<issue>
 git branch -d feature/<issue>-<slug>
 ```
 
-Each worktree needs its own `.venv`. The dev extras carry pytest, ruff and
-mypy, so a bare `uv pip install -e .` leaves the worktree unable to run the
-tests:
-
-```bash
-uv venv .venv && source .venv/bin/activate
-uv pip install -e ".[dev]"    # or: uv sync --extra dev
-```
+Each worktree is a separate checkout, so anything the project keeps out of
+git — a virtual environment, installed dependencies, build output — is not
+there yet. Set it up in the worktree with the project's own tooling before
+you run its tests. An environment borrowed from the main checkout can import
+the main checkout's code through an editable install, and the tests then run
+against the wrong tree.
 
 ## The wrap back-end
 
@@ -120,9 +118,9 @@ Concurrent merge safety: two sessions reaching the merge step around the same ti
 
 The back-end flow does not auto-commit. If the working tree is dirty at wrap time, wrap pauses and asks for a commit message — your commit discipline (phase-numbered prefixes, "why not what" bodies) is preserved.
 
-Staging scope: the commit step stages tracked modifications and deletions only (`git add -u`). Untracked paths are listed and offered separately, default No, and staged by explicit path if you opt in — never with a blanket add. A file you keep in the working tree and deliberately never `git add` survives a wrap (F71, #392).
+Staging scope: the commit step stages tracked modifications and deletions only (`git add -u`). Untracked paths are listed and offered separately, default No, and staged by explicit path if you opt in — never with a blanket add. A file you keep in the working tree and deliberately never `git add` survives a wrap.
 
-Precondition: before any push or PR, wrap confirms that `origin` matches the `- Repo:` bullet in `docs/project-board.md` and that the current branch is not the repo's default branch, which it derives from `refs/remotes/origin/HEAD` rather than assuming `main`. Any fact it cannot establish skips the back-end flow with a `SKIP:` line naming the missing one; Session notes still post and locks still clear (F72, #393). A clone of an upstream you cannot push to therefore wraps without a network write against it.
+Precondition: before any push or PR, wrap confirms that `origin` matches the `- Repo:` bullet in `docs/project-board.md` and that the current branch is not the repo's default branch, which it derives from `refs/remotes/origin/HEAD` rather than assuming `main`. Any fact it cannot establish skips the back-end flow with a `SKIP:` line naming the missing one; Session notes still post and locks still clear. A clone of an upstream you cannot push to therefore wraps without a network write against it.
 
 ## Integrate the default branch before the PR
 
@@ -177,9 +175,6 @@ co-locate them, because the path is in *neither* body yet — it doesn't exist, 
 both issues float (no surface signal) and scatter across sessions by load. The
 duplicate then surfaces only as an add/add merge conflict at `/jared-wrap`, or
 worse, as a conflicting PR after a sibling's precursor merges mid-session.
-(Motivating scar: findajob #984 / #985 both hand-built the same probe helper;
-the precursor that owned it, PR #1023, was created ~50h *after* the consumers,
-so no shared path and no `blocked-by` edge existed at staging time.)
 
 Two remedies, in preference order, for when you **recognize** the shared module:
 
