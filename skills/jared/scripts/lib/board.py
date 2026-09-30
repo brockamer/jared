@@ -1034,7 +1034,7 @@ def gh_env() -> dict[str, str]:
     override. Scrubbing here forces project mutations (and every other gh
     call) onto the OAuth session jared expects to be authoritative.
 
-    Public (renamed from `_child_env` by F7, #371). `run_gh`, `run_gh_raw`
+    Public (renamed from `_child_env`). `run_gh`, `run_gh_raw`
     and `run_graphql` all route through it, but a `gh` call made outside
     those wrappers must pass `env=gh_env()` explicitly — `wrap-state`'s
     `gh pr view` did not, and silently ran under a shadowing PAT.

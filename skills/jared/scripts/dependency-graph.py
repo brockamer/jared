@@ -33,7 +33,7 @@ from typing import Any, cast
 # Make sibling lib/ importable regardless of cwd — same pattern as the jared CLI.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# F13 (#371): enforce the >=3.11 floor before any lib import. This script runs
+# Enforce the >=3.11 floor before any lib import. This script runs
 # as its own entry point (own shebang, own __main__ block), so it needs its own
 # call — the guard in `jared` is not on this path. lib.pyversion is deliberately
 # 3.8-safe; other lib modules are not (kanbanflow_provider.py has a module-level

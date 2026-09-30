@@ -1,4 +1,4 @@
-"""Runtime enforcement of jared's Python floor (F13, #371).
+"""Runtime enforcement of jared's Python floor.
 
 `pyproject.toml` declares `requires-python = ">=3.11"`, but that declaration
 is inert for a marketplace install: jared's scripts run via their shebang,

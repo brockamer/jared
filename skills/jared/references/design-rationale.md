@@ -40,7 +40,7 @@ Jared installs as a user-scope Claude Code plugin (`/plugin install jared`), not
 - **Single source of truth for the discipline.** Procedure improvements benefit every project.
 - **Project-specific config via local file.** The skill reads `docs/project-board.md` from the active project for field IDs, option IDs, conventions. Discipline is global; parameters are local.
 
-Trade-off: the skill must treat all project-specific IDs as placeholders. Every hardcoded value is a portability bug. This was the main correctness issue in v1 — `operations.md` had findajob's IDs embedded — and a top fix in Jared.
+Trade-off: the skill must treat all project-specific IDs as placeholders. Every hardcoded value is a portability bug. This was the main correctness issue in v1 — `operations.md` had one project's IDs embedded — and a top fix in Jared.
 
 ## Key decisions
 
@@ -62,7 +62,7 @@ Every ambiguity resolves by asking "which choice keeps the mirror honest?" State
 
 ### 4. Delegate project-specific details to `docs/project-board.md`
 
-Field IDs, option IDs, label schemas, WIP limits, work stream definitions — all in the project's local convention doc. The skill references that doc; it never duplicates it. Fixing v1's worst portability bug (hardcoded findajob IDs in `operations.md`) was non-negotiable.
+Field IDs, option IDs, label schemas, WIP limits, work stream definitions — all in the project's local convention doc. The skill references that doc; it never duplicates it. Fixing v1's worst portability bug (one project's IDs hardcoded in `operations.md`) was non-negotiable.
 
 ### 5. MCP first, `gh` as fallback, scripts use `gh`
 
@@ -80,7 +80,7 @@ Solo-dev context doesn't need flow dashboards, classes of service, or formal ret
 
 ### 8. Plans and specs are working artifacts; issues are permanent
 
-The three rules (every plan/spec cites an issue; issues reverse-link; plans archive on ship) put the issue at the center. This is a directly-identified failure mode in findajob, where plans in `docs/superpowers/plans/` stood alone and drifted from reality. Jared enforces the link.
+The three rules (every plan/spec cites an issue; issues reverse-link; plans archive on ship) put the issue at the center. This is a failure mode seen in practice: plans in `docs/superpowers/plans/` stood alone and drifted from reality. Jared enforces the link.
 
 ### 9. Session notes replace tmp handoff prompts
 

@@ -19,7 +19,7 @@ The board's value is that a human glancing at it understands the state of the wo
 - ❌ `More scorer improvements`
 
 **Refactor:** `Refactor <thing> to <outcome>`
-- ✅ `Refactor path resolution to use findajob.paths module`
+- ✅ `Refactor path resolution to use a single paths module`
 - ❌ `Clean up paths`
 
 **Documentation:** `Doc: <what>` or `Document <thing>`

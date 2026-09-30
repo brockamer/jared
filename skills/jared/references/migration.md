@@ -21,7 +21,7 @@ Scan `tmp/`, `scratch/`, `working/`, and similar directories for files matching 
 - `next-session-prompt*.md`
 - `handoff*.md`
 - `session-kickoff*.md`
-- Anything in `docs/session-prompts/` (the findajob pattern)
+- Anything in `docs/session-prompts/`
 
 For each one:
 
@@ -96,7 +96,7 @@ After the migration pass, run a full `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts
 Rather than applying these changes serially, Jared bundles them into a single proposal:
 
 ```
-Migration proposal for findajob (2026-04-19):
+Migration proposal for <project> (<date>):
 
 1. Bootstrap/reconcile docs/project-board.md: no changes needed (fresh convention doc).
 
