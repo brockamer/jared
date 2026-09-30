@@ -153,7 +153,7 @@ Flow:
 
    Be strict — empty is the right and expected answer when nothing semantic stands out. The `llm` confidence value exists in `lib/ties.py`'s `Confidence` literal precisely so this prose-rendered tag stays consistent with the deterministic block's tagging convention; `shared_new_module` is a member of the `SignalName` literal for the same reason (#332).
 
-   This intentionally lives in the conversational layer rather than as a Python LLM call inside `jared ties`. The active Claude session already has the full context; spending API tokens on a fresh subprocess to redo work the conversation can do natively is duplicative. See `references/llm-assistance.md` (when filed per #123) for the broader doctrine on LLM-in-CLI vs LLM-in-conversation.
+   This intentionally lives in the conversational layer rather than as a Python LLM call inside `jared ties`. The active Claude session already has the full context; spending API tokens on a fresh subprocess to redo work the conversation can do natively is duplicative.
 
 7. **Announce the session plan.** Render the announce as in-voice prose around the structured blocks. The CLI outputs (posture, ties) are emitted verbatim and stay structured — voice wraps around them, doesn't transform them.
 

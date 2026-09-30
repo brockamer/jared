@@ -118,9 +118,4 @@ House renovation, event planning, a dissertation — the board discipline is the
 - **Changing project-specific values:** don't modify the skill — update `docs/project-board.md` in the affected project.
 - **Adding a new `references/*.md`:** add to SKILL.md's reference list. Keep each under ~300 lines.
 - **Tightening the trigger description:** run the skill-creator description optimizer against a trigger eval set.
-- **Updating slash commands:** each is a `.md` file under `~/.claude/commands/`. They're thin wrappers that invoke the skill with a directive.
-
-## Version history
-
-- **v1.0 (2026-04-18)** — `manage-project-board`, initial release. Core discipline, operations reference, sweep script, milestone and dependency guidance, human-readable board conventions, design rationale.
-- **v2.0 (2026-04-19)** — **Jared.** Rewrite addressing v1's portability bugs (hardcoded IDs, user/orgs URL parsing, dead code in bootstrap). Adds: explicit mirror-of-reality invariant; Tool selection (MCP-first); native issue dependencies as primary; lean VMS core (pullable check, blocked-as-state, aging); context capture routine (`## Current state`, `## Decisions`); session continuity (`/jared-wrap`, Session notes); plan-spec integration (issue-first, archive-on-ship); one-time migration pass; slash command set; portability to non-software projects; character/voice; updated issue body template.
+- **Updating slash commands:** each is a `.md` file under `commands/` in the plugin. They're thin wrappers that invoke the skill with a directive.

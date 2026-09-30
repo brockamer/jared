@@ -23,7 +23,7 @@ overlap and applies them only on operator approval. `/jared-start` and
 `/jared-file` never touch labels. The proposal-with-approval shape replaces
 the original manual-only model (option 1a from the v1.1 multi-session shape
 spec); the constraint that survives is operator approval — see
-`docs/superpowers/specs/2026-05-28-multi-session-back-end-design.md` for
+`docs/superpowers/specs/archived/2026-05/2026-05-28-multi-session-back-end-design.md` for
 the new flow.
 
 ## Pre-parallel-session ritual

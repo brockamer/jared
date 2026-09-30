@@ -253,7 +253,7 @@ jared migrate --to <github|kanbanflow> --target-doc PATH [--apply] [--include-cl
 
 **`--apply` performs writes** after an interactive confirmation prompt ("Type 'y' to proceed"). Pass `--yes` to skip the prompt for non-interactive use.
 
-**`--target-doc PATH`** is the path to the target project's `docs/project-board.md` — the convention doc produced by running `jared init` against the target backend. It identifies the target board and the Status column map. The target backend must differ from the source; `jared migrate` refuses with exit 2 if `--to` equals the current backend.
+**`--target-doc PATH`** is the path to the target project's `docs/project-board.md` — the convention doc produced by running `/jared-init` against the target backend. It identifies the target board and the Status column map. The target backend must differ from the source; `jared migrate` refuses with exit 2 if `--to` equals the current backend.
 
 **Target-structure validation** runs before any write for any target: every distinct Status + Priority pair across source items is probed via `validate_fields()`; every distinct source milestone name is checked against the target's swimlane list (KanbanFlow) or milestone list (GitHub). All missing elements are printed together; the command exits 1 if any are absent. KanbanFlow cannot create missing columns, dropdown options, or swimlanes via the API, so every miss must be resolved manually before `--apply`. GitHub targets must pre-create any missing Priority/Status single-select option on the target Project before `--apply`.
 

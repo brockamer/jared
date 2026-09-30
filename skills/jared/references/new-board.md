@@ -61,7 +61,7 @@ Three close paths, one of them safe either way:
 
 | Path | Requires the workflow? |
 |---|---|
-| `jared close <N>` | No — polls for auto-move, falls back to explicit `Status=Done` |
+| `jared close <N>` | No — always sets `Status=Done` explicitly after closing; it does not poll |
 | `gh issue close <N>` | **Yes** — no fallback |
 | PR merge with `Closes #N` | **Yes** — no fallback |
 

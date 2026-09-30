@@ -8,7 +8,7 @@ Run via `/jared-init` followed by `/jared-reshape`, or directly by asking Jared 
 
 ### 1. Bootstrap the convention doc
 
-If `docs/project-board.md` (or PROJECT_BOARD.md, .github/project-board.md) doesn't exist, run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py` to generate it. If it exists but is stale, re-run the same command with no extra flag: the script auto-detects staleness or a legacy shape, writes `<output>.new`, and prints a unified diff for you to review. Apply it with `mv`, or re-run with `--force` to overwrite in place. (There is no `--diff` flag.)
+If `docs/project-board.md` (or docs/maintainers/project-board.md, PROJECT_BOARD.md, .github/project-board.md) doesn't exist, run `${CLAUDE_PLUGIN_ROOT}/skills/jared/scripts/bootstrap-project.py` to generate it. If it exists but is stale, re-run the same command with no extra flag: the script auto-detects staleness or a legacy shape, writes `<output>.new`, and prints a unified diff for you to review. Apply it with `mv`, or re-run with `--force` to overwrite in place. (There is no `--diff` flag.)
 
 ### 2. Strip hardcoded values from older convention docs
 
